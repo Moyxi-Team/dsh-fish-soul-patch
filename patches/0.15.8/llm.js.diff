@@ -1,0 +1,33 @@
+diff --git a/lib/llm.js b/lib/llm.js
+--- a/lib/llm.js
++++ b/lib/llm.js
+@@ -144,7 +144,7 @@
+ 
+ 	// #58：默认 600 对推理模型太小——光思考就 1000+ token，第一次必然白卷还白烧思考费。
+ 	// 提到 1500 让大多数推理模型的第一轮能容下思考；maxTokens 是上限不是必花，普通模型不受影响。
+-	async call(prompt, { signal, maxTokens = 1500, feature = 'other', thinkFallback = false, images = [], _target, _tried } = {}) {
++	async call(prompt, { signal, maxTokens = 1500, feature = 'other', thinkFallback = false, images = [], _target, _tried, _noTemperature } = {}) {
+ 		const llm = this.llm();
+ 		if (llm === null) return null;
+ 		const f = FEATURE_IDS.has(feature) ? feature : 'other';
+@@ -170,7 +170,7 @@
+ 				// DSH 的 RequestMessage.content 是内容块数组（ContentBlock[]），不是字符串
+ 				messages: [{ role: 'user', content: await this.promptParts(prompt, images, f) }],
+ 				maxTokens: budget,
+-				temperature: 0.7,
++				...(_noTemperature === true ? {} : { temperature: 0.7 }),
+ 				...(signal ? { signal } : {})
+ 			})) {
+ 				if (signal?.aborted) return null;
+@@ -200,6 +200,11 @@
+ 		} catch (error) {
+ 			this.lastError = String(error instanceof Error ? error.message : error).slice(0, 200);
+ 			this.record(f, target.model, { failed: true, inputTokens: estimateTokens(prompt), outputTokens: 0, estimated: true });
++			// temperature 不兼容（gpt-5.x/6.x 拒绝 temperature 参数，报 "Unsupported parameter: 'temperature'"）：去掉 temperature 原样重试一次
++			if (_noTemperature !== true && /temperature/i.test(this.lastError)) {
++				this.log('warn', `[fish-soul] ${f}：${target.model} 不吃 temperature，去掉后重试`);
++				return this.call(prompt, { signal, maxTokens, feature, thinkFallback, images, _target: target, _tried: tried, _noTemperature: true });
++			}
+ 			// 带图调用失败（有的通道/模型不吃 image 块）：先退回纯文字重试一次
+ 			if (images.length > 0) {
+ 				this.log('warn', `[fish-soul] ${f}：带图调用失败（${this.lastError}），退回纯文字重试`);
