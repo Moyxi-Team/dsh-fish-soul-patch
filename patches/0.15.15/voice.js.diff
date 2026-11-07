@@ -1,0 +1,23 @@
+diff --git a/lib/voice.js b/lib/voice.js
+--- a/lib/voice.js
++++ b/lib/voice.js
+@@ -71,8 +71,8 @@
+ 	};
+ }
+ 
+-/** 这一轮里有人点名要她发语音（"发条语音""语音说""说给我听""想听你声音"）。 */
+-const ASK_VOICE_RE = /(?:发|来|整|录)(?:一?[条个段句]|点)?(?:语音|声音)|语音(?:说|讲|发|回|聊)|用语音|说给我听|唱给我听|听听你的?声音|想听你的?(?:声音|说话)|[能会]不?[能会]?发语音|发不了语音/;
++/** 这一轮里有人点名要她发语音（"发条语音""语音说""说给我听""想听你声音""唱首歌来听听""怎么老是发文字"）。 */
++const ASK_VOICE_RE = /(?:发|来|整|录)(?:一?[条个段句]|点)?(?:语音|声音)|语音(?:说|讲|发|回|聊)|用语音|说给我听|唱给我听|唱(?:一?[首段句个])?(?:歌|曲)?(?:来|给)?(?:我)?听|听听你的?声音|想听你的?(?:声音|说话)|[能会]不?[能会]?发语音|发不了语音|(?:怎么|老是|还在|又)(?:是|用|发|变成)文字|发文字(?:干嘛|干吗)|别打字|不要打字/;
+ export function askedForVoice(speakers = []) {
+ 	return speakers.some((s) => ASK_VOICE_RE.test(String(s?.query ?? s?.text ?? '')));
+ }
+@@ -86,7 +86,7 @@
+ export function voiceLines({ v, ttsReady = false, session = {}, speakers = [], where = 'QQ', relay = false }) {
+ 	const asked = askedForVoice(speakers);
+ 	const voiceIn = session.voiceIn === true;
+-	const how = `想用语音说的话单独一段、开头写 [语音]（≤${v.maxChars} 字，口语，别带表情和链接`;
++	const how = `想用语音说的内容单独占一整段、段落最前面写 [语音]，这一段里别再混别的字（≤${v.maxChars} 字，口语，别带表情和链接`;
+ 	if (where === 'QQ') {
+ 		if (ttsReady && v.speak !== 'never' && (v.speak === 'sometimes' || voiceIn || asked)) {
+ 			return [`[语音] ${voiceIn ? '对方发的是语音，' : asked ? '对方想听你的语音，' : ''}${how}；${asked ? '这次可以发' : '大多数时候还是打字'}）。`];
