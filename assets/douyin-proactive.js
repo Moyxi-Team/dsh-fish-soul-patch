@@ -137,8 +137,6 @@ export function dmCfg(d) {
 		coolHours,
 		coolMs: coolHours * HOUR_MS,
 		minGapMs: num(dm.minGapHours, 3, 1, 24) * HOUR_MS,
-		// 主动说话顺带分享一条她自己的视频（走抖音自带分享，不是贴链接）；默认开着
-		shareVideo: dm.shareVideo !== false,
 		// 视频类型：词表 + 每人想收哪几类（targets[].wantTypes）
 		shareTypes,
 		shareTypeNames: shareTypes.map((t) => t.name),
@@ -199,7 +197,6 @@ export function proactiveStatus(social) {
 	return {
 		enabled: cfg.enabled,
 		perDay: cfg.perDay,
-		shareVideo: cfg.shareVideo !== false,
 		coolHours: cfg.coolHours,
 		minGapHours: Math.round(cfg.minGapMs / HOUR_MS),
 		todayCount: day.count,
@@ -991,11 +988,12 @@ export async function runProactive(social, { manual = false } = {}) {
 	const dateStr = social.clock.getRoleDateParts().dateStr;
 	const day = readDay(social, dateStr);
 	const picked = c.targets;
-	const cooled = picked.filter((x) => {
+	// [FS-DM-NOW-FORCE] 设置页「现在试一次」是手动验证：无视这个人的冷却期，也无视「同一个人一天最多几次」。
+	const cooled = manual === true ? picked : picked.filter((x) => {
 		const last = Number(sent[x.name] ?? 0);
 		return !(last > 0 && Date.now() - last < c.coolMs);
 	});
-	const pool = cooled.filter((x) => sentToday(day, x.name) < c.perDay);
+	const pool = manual === true ? picked : cooled.filter((x) => sentToday(day, x.name) < c.perDay);
 	if (pool.length === 0) {
 		if (cooled.length === 0) {
 			return { ok: false, error: `选中的 ${c.targets.length} 个人都在冷却期（同一个人要隔 ${c.coolHours} 小时）` };
@@ -1014,26 +1012,29 @@ export async function runProactive(social, { manual = false } = {}) {
 		}, { maxMs: 90_000 }).catch(() => []) ?? [];
 	}
 
-	// ④ 写一句（这次要带视频分享的话，文字就写得像「你看这个」，不描述画面）
-	const wantShare = c.shareVideo === true;
+	// ④ 写一句（这次一定带视频分享，文字就写得像「你看这个」，不描述画面）
+	// [FS-DM-ALWAYS-SHARE] 抖音主动私信一律是「分享她的一条视频」：不再有「只发文字」这个开关。
+	const wantShare = true;
 	const text = await draft(social, friend, history, { withVideo: wantShare });
 	if (text === '') {
 		remember(social, { name: friend.name, text: '', ok: false, error: '这次没想说的' });
 		return { ok: false, error: '这次没想说的（模型选了不发）' };
 	}
 
-	// ⑤ 顺手分享一条她自己的视频：走抖音自带的「分享 → 私信」，对方收到的是视频卡片，不是链接。
+	// ⑤ 分享一条她自己的视频：走抖音自带的「分享 → 私信」，对方收到的是视频卡片，不是链接。
 	//    挑哪条按这个人在设置里选定的类型（friend.wantTypes，空 = 不限）；挑不到就退回不限，别卡住。
-	let shared = { ok: false, error: '没开分享' };
-	if (wantShare) {
-		shared = await host.exclusive('把她的一条视频分享给好友', () => shareVideoToFriend(social, friend, {
-			wantTypes: Array.isArray(friend.wantTypes) ? friend.wantTypes : [],
-			types: c.shareTypes,
-		}), { maxMs: 200_000 })
-			.catch((e) => ({ ok: false, error: errText(e) }));
-		if (shared?.ok !== true) {
-			social.log('info', `[fish-soul] 抖音主动私信：分享视频没成（${friend.name}）：${shared?.error ?? '未知'}，这次只发文字`);
-		}
+	// [FS-DM-ALWAYS-SHARE] 主动私信只有这一种形态：视频卡片。分享没成就不发文字，
+	// 免得又悄悄退回「只说一句话」——那样对方收到的东西跟设置页说的不一致。
+	const shared = await host.exclusive('把她的一条视频分享给好友', () => shareVideoToFriend(social, friend, {
+		wantTypes: Array.isArray(friend.wantTypes) ? friend.wantTypes : [],
+		types: c.shareTypes,
+	}), { maxMs: 200_000 })
+		.catch((e) => ({ ok: false, error: errText(e) }));
+	if (shared?.ok !== true) {
+		const why = shared?.error ?? '未知';
+		remember(social, { name: friend.name, text, ok: false, error: `分享视频没成：${why}` });
+		social.log('warn', `[fish-soul] 抖音主动私信：分享视频没成（${friend.name}）：${why}，这次不发`);
+		return { ok: false, error: `分享视频没成：${why}` };
 	}
 
 	// ⑥ 发那句文字
@@ -1054,7 +1055,7 @@ export async function runProactive(social, { manual = false } = {}) {
 		sent[friend.name] = Date.now();
 		setKv(social.db, KV_SENT, sent);
 	} catch { /* 记账失败不影响已经发出去的消息 */ }
-	social.note?.('dm', { title: '抖音主动私信', reason: `给选中的 ${friend.name} 发了一条${shared?.ok === true ? '（还分享了一条她的视频）' : ''}`, text });
+	social.note?.('dm', { title: '抖音主动私信', reason: `给选中的 ${friend.name} 分享了一条她的视频`, text });
 	return { ok: true, name: friend.name, text, via: r.via ?? '', shared: shared?.ok === true, videoId: shared?.videoId ?? '' };
 }
 
