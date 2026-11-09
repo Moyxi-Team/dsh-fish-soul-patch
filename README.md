@@ -1,128 +1,84 @@
-# dsh-fish-soul
+# dsh-fish-soul-patch
 
-> **补丁见 [`patches/`](patches/)，且补丁跟着上游走，不跟版本号走。**
-> [`patch-fish-soul.mjs`](patch-fish-soul.mjs) 不绑版本，直接对着你机器上**当前安装的那一版**按锚点打；上游哪天自己把某个功能做出来了，对应补丁**自动退役**，不再维护。
-> [`audit-upstream.mjs`](audit-upstream.mjs) 每周自动体检 npm 上的最新版，结果写进 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)，告诉你每处补丁是「可退役 / 仍需 / 漂移」。
-> 本仓库根目录的源码树是 fork 时留下的 **v0.15.8 快照**，仅作历史参考，**不要整包覆盖到新版插件**（结构差异很大，会回退十几个版本的功能）。
+> **这是 DSH 插件 [`dsh-fish-soul`](https://github.com/Britneycode/dsh-fish-soul) 的补丁仓库，不是插件本体。**
+> 本仓库**不包含上游任何源码**（没有 `lib/`、没有 `test/`、没有上游的构建与发布配置），只放补丁脚本、补丁数据和上游兼容性体检结果。
+> 用之前请先按[上游 README](https://github.com/Britneycode/dsh-fish-soul#readme) 安装插件本体，再回来跑这里的脚本。
 
+上游插件本身是完整的：人格、按人记忆、生活节奏、QQ / B站 / 抖音三端。这个仓库只负责「上游还没做、但我们需要」的几处改动，用脚本打到你机器上**已安装的那一份**插件里。
 
-让一个 QQ 小号背后有"同一个人"：固定人格、按人记记忆、有自己的生活节奏、会主动开口；同一个"她"同时出现在 QQ、B站、抖音。
+## 设计原则
 
-DSH 插件（单角色 `feiyu`）。版本 **0.15.8**。
+| 原则 | 说明 |
+| --- | --- |
+| 不跟版本号 | 按代码锚点打，打的是你当前安装的那一版；上游小改不会整体冲突，也不会把插件回退成旧版本 |
+| 幂等 | 每处补丁带 probe，重复跑只补没打过的，不会在同一锚点上叠第二遍 |
+| 会退役 | 每个补丁声明了「上游做完了长什么样」，上游原生实现后自动跳过且不再维护 |
+| 不硬来 | 锚点没了、上游也没做（改版挪了代码）时停手报错，交给 `audit-upstream.mjs` 更新锚点，不靠 `--force` 硬改 |
+| 改前备份 | 每次改文件先备份到 `~/.dsh/backup/fish-soul-patch-<时间戳>/`，与原目录结构一致 |
 
-QQ 交流群：**1125962189**
+补丁会丢：`node_modules` 下的第三方插件被 pnpm 整体重写，升级或重装后就没了——重装完再跑一遍脚本即可。
 
-## 能力
+## 补丁清单
 
-| 面 | 内容 |
-|---|---|
-| 人格 | 设置页「人格」：7 个内置模板一键换上（第一个「肥鱼 · 通用」只定性格和说话方式、生活细节聊着聊着才有，后面 6 个带现成的生活细节）、可视化编辑、导入 / 导出 SillyTavern 角色卡（PNG / JSON）、撤销上次更换，换完下一轮生效；角色卡（PNG / ccv3 / chara），`{{char}}` / `{{user}}` 宏，世界书（constant / 关键词，可单独导入多本 SillyTavern 世界书：正则 / 整词 / 次要关键词、扫描深度、条数和字数预算）；卡里的作息（`extensions.fish_soul.routine`）用来排每天的日程、「看事情的方式」（`perspective`）进人格段、「不同心情下怎么说话」（`moods`）跟着她当下的心情带上；模板按气质分、不绑职业；聊久了会「慢慢长」（性格 / 看法的变化要多次、跨天、跨聊天的证据才生效，人格页可看可删）；从群聊 / 好友私聊里学梗、说话风格和「什么场合怎么说」（只学别人的话、不带人名，按学到的次数挑几条参考） |
-| 记忆 | 按人隔离、本轮即时召回（BM25 + 向量 RRF）、艾宾浩斯衰减（重要度高不淡）、可纠正（留旧档）、出处 `evidence`、每人 ≤150 字印象、8 栏结构化印象、关系阶段演进、好感与情绪、旧聊天记录导入（断点续传，较早的聊天按时间段总结）、导入麦麦的表情包 / 表达方式 / 黑话、记忆页搜索与批量操作（删除 / 恢复 / 重要度 / 私密）、每周压缩存档与容量告警、可选周记（见文末两节）；**聊完自动记**（一次调用产出事实 / 事件 / 感受 + 一句话小结，去重合并）；**隐私**：私聊里的敏感记忆标 `private`，群里检索和召回都不带 |
-| 生活 | 虚拟时钟、每日作息与基调、Dream 整理（只补没写的、会标过时）、主动开口与配额 |
-| QQ | 直连 SnowLuma（OneBot 11 正向 WS）：私聊 / 群聊、群合批带署名、只听点名、戳一戳、撤回不回、可选插话、打字节奏、`/鱼 暂停`；**群默认拒绝**（`groupAllowList` 为空且没开 `allGroups` 时谁都不回）、**没发出去的回复排队重发**（退避重试，连上即补发，重启不丢） |
-| B站 | 扫码登录、私信（只读 / 自动回复）、跨平台认人、空闲自己刷视频（看字幕 / 热评 / 弹幕，喜欢可点赞、想再看可收藏，站内搜索当又一个来源，后三个默认关）、自己发动态 / 回评论（默认关；可选别人评论区里 @ 她也回，@ 时先读一下视频）、Cookie 自动续期、发图 |
-| 抖音 | 专用浏览器扫码登录、私信（只读 / 自动回复）、群聊按人区分（被叫到才回，默认关）、canary 防风控、空闲刷视频、刷到的分享发抖音私信、自己发图文 / 回作品评论（默认关，尽力而为）、表情包复用 |
-| 习惯 | 心情影响说话（快慢、长短、插话概率、表情包多少）、**去 AI 味**（删 markdown / AI 自称 / 套话，太长按句末截）、**每晚写日记**（私密记忆，第二天想跟谁聊）、合并转发展开、每个群的设定（气氛 / 忌讳）、**按聊天选模型**、群冷热、记忆调试器（输一句话看会想起哪几条）、戳回去 / 表情回应 |
-| 语音 | `get_record` → STT；回复 `[语音]` → TTS 发 record（失败 / 太长发文字）；听 / 说可以各配一套地址和 key（TTS 支持小米 MiMo） |
-| 模型 | 按功能选模型、按天 × 功能 × 模型统计用量与花费、可选上网查 |
-| 运维 | 单聊天暂停、动态页、每日自动备份（留 7 份，设置页可恢复到某一份，重启生效）、设置文件读不懂时拒绝覆盖（带 BOM 也能读）、记忆导出 / 原样导回；设置页顶部显示当前版本，**自动检查更新**（npm / GitHub，每 12 小时，只提示不安装，可关） |
+| 补丁 | 锚点名 | 改了上游哪里 | 上游状态 |
+| --- | --- | --- | --- |
+| 借 dsh-meme 的表情库 | `meme-bridge` | 接上 dsh-meme 的只读取图服务（`ctx.get('dshMeme')`），新增 `lib/meme-bridge.js` 与表情包设置里的开关 | 🟡 仍需（上游未接入 dsh-meme） |
+| 评论区状态按可见性判定 | `douyin-comment-visible` | 折叠态不再被误判成「评论已打开」 | 🟡 仍需 |
+| 详情页只走直链 + 点右侧「评论(n)」 | `douyin-note-tab` | 作品详情页只走 note / video 直链，再点右侧 Tab 进评论 | 🟡 仍需 |
+| 回复只在可见评论条目里找 | `douyin-reply-visible` | 用真实鼠标点击可见条目，不再对隐藏节点下手 | 🟡 仍需 |
+| BGM 抓取留痕 + 挑歌兜底 | `douyin-music-trace` | 抓不到 BGM 时留痕，挑歌时滤掉非歌曲条目 | 🟡 仍需 |
 
-## 安装
+状态取自 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)（对着 npm 最新版自动体检生成，每周更新一次）。抖音那四处按 [`assets/douyin-hunks.json`](assets/douyin-hunks.json) 的小块锚点逐处替换，不再整文件覆盖。
 
-需要 Node ≥ 22.5。抖音专用浏览器需要一台常开的 Windows 桌面。
+## 用法
 
-从 npm：
-
-```
-dsh plugin --profile desktop add dsh-fish-soul
-```
-
-本地源码：`dsh plugin --profile desktop add ./dsh-fish-soul`。
-
-手工等价：profile 的 `package.json` 把 `dsh-fish-soul` 加进 `dsh.profile.bundles`，并在 `dependencies` 里写 `dsh-fish-soul` 的版本（本地源码则用 `link:` 路径），然后 `pnpm install`。
-
-插件注入 `webServer / tools / systemPrompt / llm / agents / workspaceRegistry`。在支持主面板的 DSH 版本中，左侧栏「鱼」可打开独立工作台；设置页入口也保留。旧宿主若不提供侧栏面板插槽，仍可从设置页打开（六大类：「记忆 / 角色 / 日常 / 平台 / 模型 / 系统」，每类下按任务拆子页）。
-
-已在 DSH **0.2.1-rc.5** 上验证；更早的 rc 版本未逐一验证，遇到问题请先升级复测。
-
-设置页读不到时怎么分辨：
-
-- **HTTP 404**：插件后台根本没加载（或宿主没把 `/api/plugins/fish-soul/*` 转给插件）。看宿主日志里有没有 `[fish-soul] 启动闸门已挂`。
-- **503「插件还在启动 / 插件启动失败，挂在第 N 步…」**：插件加载了，但初始化还没走完或中途失败。宿主日志里有对应的 `[fish-soul] 启动失败：挂在第 N/M 步「…」` 和错误堆栈；走完会打 `[fish-soul] 路由已挂`。
-
-## 配置与数据
-
-`$DSH_HOME` 缺省 `~/.dsh`。
-
-| 路径 | 内容 |
-|---|---|
-| `fish-soul-config.json` | 全部设置（含 embedding `apiKey`） |
-| `fish-soul/soul.db` | 单一 SQLite：记忆、人物、日程、会话映射、向量、kv |
-| `fish-soul/persona.json` / `persona.png` | 人格卡（json 优先）；设置页改过的存成 persona.json，旧的进 `persona-backups/`（留 20 份），`persona.prev.json` 用来撤销 |
-| `fish-soul/bili-auth.json` | B站凭据（0600，类 Unix 上） |
-| `fish-soul/douyin-browser/<浏览器>/` | 抖音登录态（专用浏览器 profile） |
-| `fish-soul/workspace/` | 默认专用工作区「鱼」，表情包在 `_stickers/` |
-| `fish-soul/backups/` | 每日 `VACUUM INTO` 备份 |
-| `fish-soul/img-cache/` | webp → png 缓存 |
-
-## 目录
-
-```
-lib/
-  index.js            插件入口：配置 schema、工具、瞬态块、路由
-  db.js               soul.db、DDL、身份映射
-  retrieval.js        BM25 + 向量 RRF、单队列双优先级 worker
-  segment.js          中文分词（Intl.Segmenter）与停用词
-  life.js             虚拟时钟、作息、Dream、主动开口
-  clock.js            虚拟钟 / 物理钟隔离
-  soul-memory.js      聊完自动记、检索词组装、关系阶段、印象、情绪
-  behavior.js         心情影响行为、去 AI 味、日记、记忆调试
-  gateway.js          QQ 会话 / 群合批 / 工具护栏
-  gateway-behavior.js 网关里的习惯（v0.9 混入）
-  gateway-media.js    网关里的图片 / 私信（混入）
-  llm.js              按功能路由模型（LlmRouter）
-  voice.js            语音收发（听 / 说可分开配）
-  stickers.js         表情包收藏
-  slang.js            学说法：梗、说话风格、说话方式
-  persona.js          角色卡解析、规整、保存 / 撤销
-  persona-templates.js 内置人格模板
-  growth.js           她慢慢长出来的变化（证据、生效、退场）
-  social.js           B站 / 抖音共用的发动态与回评论（SocialBase）
-  douyin-social.js    抖音发图文、回作品评论
-  browse.js           B站自己刷视频
-  websearch.js        上网查
-  importer.js         记忆导入
-  history-import.js   聊天记录导入（txt / jsonl / json / MaiBot）
-  backup.js           备份与导出
-  channels/           snowluma / onebot / bilibili / douyin
-  client*.js          设置页（按需加载）
-  routes*.js          HTTP 路由（v07 / v09 / persona / douyin / soul）
-test/
-  smoke.mjs           模拟宿主的主流程（依次跑 smoke-v05 ~ v09、smoke-persona、smoke-social 子套件）
-  douyin-browser.mjs  真 Chromium + 假 www.douyin.com
-  eval/               真模型评测：persona-eval（人格 19 场景）、growth-eval（慢慢长）、inject-eval（防注入）
+```bash
+node patch-fish-soul.mjs                    # 自动找 ~/.dsh/profiles/*/node_modules/dsh-fish-soul
+node patch-fish-soul.mjs --root <插件目录>   # 指定插件目录（含 package.json 的那层）
+node patch-fish-soul.mjs --check            # 只报告状态，不改文件
+node patch-fish-soul.mjs --only meme        # 只跑一组（meme / douyin）
+node patch-fish-soul.mjs --json             # 结尾多打一段机器可读汇总（CI / 体检用）
+node patch-fish-soul.mjs --force            # 忽略「已打过」判断按内容重算（谨慎）
 ```
 
-## 测试
+每次运行对每处补丁给出四种判定之一：
+
+| 判定 | 含义 | 动作 |
+| --- | --- | --- |
+| `PATCHED` | 锚点在、上游没做 | 打上 |
+| `ALREADY` | 本补丁已打过 | 跳过 |
+| `UPSTREAM` | 上游已原生实现 | **自动退役**，一行不改 |
+| `DRIFT` | 锚点没了、上游也没做 | 停手报错，等人更新锚点 |
+
+需要 Node ≥ 22.5。
+
+## 上游体检
+
+```bash
+node audit-upstream.mjs
+```
+
+直接拉 npm 上最新版 `dsh-fish-soul`，逐处判断补丁是「可退役 / 仍需 / 漂移」，结果写进 `reports/upstream-compatibility.md`。GitHub Actions（[`upstream-audit.yml`](.github/workflows/upstream-audit.yml)）每周自动跑一次并提交结果，所以这个文件不用手动维护。
+
+## 仓库内容
 
 ```
-npm test        # 模拟宿主 + 真实 headless Chromium 跑两套；找不到 Chromium 系浏览器或 `openssl` 时，浏览器用例自动跳过
-npm run eval    # 用真模型做人格评测（规则 + 模型评审，需要配好可用的模型），结果写在 test/eval/reports/
+patch-fish-soul.mjs    补丁器：版本无关、幂等、三态判定、可自动退役
+audit-upstream.mjs     上游体检：对 npm 最新版判断每处补丁还有没有用
+assets/
+  douyin-hunks.json    抖音四处补丁的小块锚点与替换内容
+  meme-bridge.js       dsh-meme 只读取图桥接模块（打进插件 lib/ 用）
+reports/
+  upstream-compatibility.md   体检报告（自动生成）
+.github/workflows/
+  upstream-audit.yml   每周体检
 ```
+
+## 上游与归属
+
+- 插件本体、完整能力说明、配置项、数据目录（`~/.dsh/fish-soul-config.json`、`~/.dsh/fish-soul/soul.db` 等）、安装方式，全部**以上游为准**：[Britneycode/dsh-fish-soul](https://github.com/Britneycode/dsh-fish-soul)。本仓库不复制那套文档，避免两边版本对不上。
+- 上游插件 MIT，本仓库的补丁代码同样 MIT。上游作者不为这里的改动负责；补丁出问题时先跑 `--check` 和 `audit-upstream.mjs` 分清是「锚点过期」还是「上游已实现」。
 
 ## 许可
 
 MIT
-### 周记（可选）
-
-在「记忆检视」的「周记」中，可手动生成或开启自动生成。默认关闭；开启或手动运行前会提示：该功能使用「写日记」配置的模型，记忆内容（包括私密内容）可能发送至远程模型并产生调用费用。每次最多处理 20 条已结束自然周的记忆，按人物、会话和隐私范围分批；模型失败不会更改原记忆。
-
-周记是带来源的派生记忆，不会删除原文，也不等于释放磁盘空间。可在记忆检视中查看来源；原记忆内容、范围、隐私或状态变更后，关联周记自动失效且不能恢复，已处理原文不会自动重新生成。数据库备份保留周记及其来源关系；普通 JSON 记忆导入不恢复派生周记，请使用数据库备份恢复。
-
-### 存档与容量管理
-
-「记忆检视 → 记忆存档」可搜索当前库的全部记忆记录（包括已归档和失效记录）。每周空闲时默认创建完整数据库压缩快照；可暂停、手动生成、查看和删除。生成先通过 SQLite 一致性快照，再 gzip 并解压校验 SHA-256，成功后才完成；周记整理前也会先确保近期存在校验通过的存档。恢复先解压并运行数据库校验，确认后在下次启动时替换库，替换前会保留当前库的恢复前备份。快照保留历史，不会自动删除；在线记忆也不会因压缩被删除，所以压缩存档**不等于减少在线数据库占用**。
-
-容量界面显示数据库、存档、备份、聊天文本的占用和磁盘剩余空间，并允许设置告警阈值；上下文指标仅按字符估计记忆片段的预算占用，连续接近上限时在页面标题栏提示，不代表模型完整上下文 Token 用量。预算不够放下某条匹配记忆时，会尝试后续较短的匹配结果，而不是直接停止。磁盘不足时停止创建存档。存档和备份位于本地，未加密，可能包含私密记忆；删除在线记录不会删除先前的存档或备份，请单独管理。
-
-「聊天文本存档」默认关闭，必须明确输入要保存的会话 ID（如 `private:123`、`group:456`）并设置保留天数。仅保存启用后插件实际接入并写入聊天日志的文本，不包含附件、未被接入的消息或历史消息，不能保证平台聊天全量；历史请另行导入。文本单独存于未加密的本地数据库，可分会话查看或删除，过期文本在插件运行期间清理；离线期间不会清理。缩短期限可能立即删除过期文本；用户自行制作的备份和复制件需要另行删除。
