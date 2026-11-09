@@ -35,13 +35,15 @@
  *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm）
  *   node patch-fish-soul.mjs --json                # 结尾额外打印一段机器可读汇总（CI / audit 用）
  *   node patch-fish-soul.mjs --force               # 忽略「已打过」判断，按文件内容重算（谨慎）
+ *   node patch-fish-soul.mjs --smoke               # 额外冒烟：真 import 一次插件入口（改了就会自动跑）
  *
  * 上游是否还需要这些补丁，用配套的 audit-upstream.mjs 判断（直接对 npm 最新版体检）。
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MARK_MEME = 'FS-MEME-BRIDGE-PATCH';
@@ -595,6 +597,37 @@ function patchDm() {
 	patchHunks({ tag: 'P5 dm', label: '抖音 —— 主动给互关好友发私信', jsonName: 'dm-hunks.json' });
 }
 
+/**
+ * 打完补丁后冒烟：真把插件入口 import 一次。
+ * 文本上全是 PATCHED 不等于能加载 —— 比如 schemastery 根本没有 z.record（是 z.dict），
+ * 写入时毫无报错，要等宿主启用插件才炸成「1 entry did not activate」。
+ * 这里提前把它暴露在打补丁这一步。
+ */
+function smokeLoad() {
+	const entry = join(lib, 'index.js');
+	if (!existsSync(entry)) return;
+	const code =
+		`import(${JSON.stringify(pathToFileURL(entry).href)})` +
+		`.then(()=>console.log('SMOKE_OK'))` +
+		`.catch((e)=>{console.log('SMOKE_FAIL '+(e&&e.message?e.message:String(e)));process.exit(3)})`;
+	// node:sqlite 在 22.5+ 是实验特性，得带 flag 才能 import（插件本身要求 node>=22.5）
+	const run = spawnSync(process.execPath, ['--experimental-sqlite', '--no-warnings', '--input-type=module', '-e', code], {
+		encoding: 'utf8',
+		cwd: root,
+		timeout: 180000
+	});
+	const out = `${run.stdout || ''}${run.stderr || ''}`;
+	if (out.includes('SMOKE_OK')) {
+		log('✓ 冒烟：插件入口 import 通过');
+		note('P0 smoke', 'PATCHED', '插件入口 import 通过');
+		return;
+	}
+	failed += 1;
+	const tail = out.trim().split('\n').slice(-6).join('\n');
+	note('P0 smoke', 'DRIFT', `插件入口 import 失败：${tail.replace(/\s+/g, ' ').slice(0, 400)}`);
+	log(`\n× 冒烟失败：补丁写进去了但插件加载不了（宿主会报 "did not activate"）\n${tail}`);
+}
+
 // ───────────────────────────── 主流程 ─────────────────────────────
 
 log(`dsh-fish-soul ${pkg.version} → ${root}`);
@@ -611,6 +644,9 @@ try {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;
 }
+
+// 文本替换全 PATCHED 不代表宿主能加载，改过就跑一次冒烟；--smoke 可单独要求
+if ((!CHECK && changed > 0) || has('--smoke')) smokeLoad();
 
 if (!CHECK && changed > 0) log(`\n原文件备份在：${backupDir}`);
 log(`\n结果：改了 ${changed} 处，已打过 ${skipped} 处，上游已实现 / 自动退役 ${retired} 段，漂移 ${drifted} 处，失败 ${failed} 处`);
