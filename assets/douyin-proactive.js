@@ -29,8 +29,74 @@ const KV_SENT = 'douyin.dm.sent';
 const KV_MUTUAL = 'douyin.dm.mutual';
 const KV_RECENT = 'douyin.dm.recent';
 const KV_ERROR = 'douyin.dm.error';
-/** 她自己的作品 id 缓存（分享视频时随机挑一条，别每次都翻主页）。 */
+/** 她自己的作品池（id + 文案 + 话题，分享时按类型挑一条，别每次都翻主页）。 */
 const KV_VIDEOS = 'douyin.dm.videos';
+/** 已经分享给谁的哪几条（{人名: [aweme_id]}）—— 同一个人尽量别收到重复的视频。 */
+const KV_SHARED = 'douyin.dm.shared';
+
+/**
+ * 视频类型词表（[FS-DM-SHARE-TYPE]）：类型名 → 命中词。
+ *
+ * 判断只看接口/页面上的**文字**（文案 desc + 话题 cha_list），不看画面、不做识别 ——
+ * 跟 dsh-douyin-scroll 的 forward-pick 一个路子：字段驱动、可解释、跑得快。
+ * 设置页可以按类型名覆盖词表（dm.shareTypes），也能加自定义类型。
+ */
+const DEFAULT_SHARE_TYPES = {
+	搞笑: ['搞笑', '沙雕', '整活', '段子', '幽默', '笑死', '神回复', '搞笑视频', '喜剧', '抽象', '梗'],
+	游戏: ['游戏', '王者', '原神', '蛋仔', '我的世界', 'mc', '和平精英', '电竞', '开黑', '手游', '单机', '吃鸡', 'lol', 'steam', 'switch', 'ps5', '实况', '上分'],
+	美食: ['美食', '做饭', '菜', '探店', '甜品', '火锅', '小吃', '厨房', '烘焙', '食堂', '下饭', '夜宵', '奶茶'],
+	宠物: ['猫', '狗', '宠物', '萌宠', '喵', '汪', '仓鼠', '铲屎', '撸猫', '撸狗', '毛孩子'],
+	旅行: ['旅行', '旅游', '风景', '露营', '自驾', '出游', 'citywalk', 'city walk', '爬山', '海边', '打卡', '攻略', '出片'],
+	音乐舞蹈: ['翻唱', '音乐', '唱歌', '舞蹈', '跳舞', '吉他', '钢琴', 'live', '舞台', '歌曲', '翻跳', '配音', 'remix', 'bgm'],
+	颜值穿搭: ['穿搭', '化妆', '护肤', '颜值', '发型', '搭配', 'look', '口红', 'ootd', '妆容', '变美', '穿搭分享'],
+	剧情影视: ['剧情', '短剧', '影视', '电影', '解说', '追剧', '片段', '演技', '反转', '悬疑', '动漫'],
+	数码科技: ['数码', '科技', '手机', '电脑', 'ai', '评测', '开箱', '显卡', '软件', '硬件', 'deepseek', 'chatgpt', '大模型', '编程', '代码', '装机'],
+	情感: ['情感', '恋爱', 'emo', '治愈', '遗憾', '分手', '孤独', '人生', '文案', '暗恋', '想念', '温柔'],
+	日常: ['日常', 'vlog', '生活', '记录', '碎碎念', '随手拍', '打工', '上班', '上课', '摸鱼', '宿舍', '周末'],
+	学习: ['学习', '考研', '知识', '科普', '英语', '教程', '干货', '读书', '考公', '笔记', '自习', '期末'],
+	运动: ['运动', '健身', '跑步', '篮球', '足球', '瑜伽', '减肥', '球场', '打球', '徒步', '骑行'],
+};
+
+/**
+ * 把设置里的类型词表归一成 [{name, words}]：内置打底，用户写同名就覆盖，写新名字就新增。
+ * 也接受只给类型名（没给词表）—— 那就拿类型名自己当唯一命中词。
+ */
+function normalizeShareTypes(raw) {
+	const merge = new Map(Object.entries(DEFAULT_SHARE_TYPES).map(([k, v]) => [k, [...v]]));
+	const put = (name, words) => {
+		const key = String(name ?? '').trim();
+		if (key === '' || /[，,]/.test(key)) return;
+		const list = (Array.isArray(words) ? words : String(words ?? '').split(/[，,、\s]+/))
+			.map((w) => String(w ?? '').trim().toLowerCase())
+			.filter((w) => w !== '');
+		merge.set(key, [...new Set([...(merge.get(key) ?? []), ...(list.length > 0 ? list : [key.toLowerCase()])])]);
+	};
+	if (Array.isArray(raw)) {
+		for (const x of raw) {
+			if (typeof x === 'string') put(x, []);
+			else if (x !== null && typeof x === 'object') put(x.name ?? x.type ?? x.k ?? '', x.words ?? x.keys ?? x.词 ?? '');
+		}
+	} else if (raw !== null && typeof raw === 'object') {
+		for (const [k, v] of Object.entries(raw)) put(k, v);
+	}
+	return [...merge.entries()].map(([name, words]) => ({ name, words }));
+}
+
+/** 一条作品属于哪几类（文案 + 话题里出现类型词就算这类；可能同时好几类，也可能一类都不是）。 */
+function classifyVideo(item, types) {
+	const hay = `${String(item?.desc ?? '')} ${(Array.isArray(item?.tags) ? item.tags : []).join(' ')}`.toLowerCase();
+	if (hay.trim() === '') return [];
+	return types.filter((t) => t.words.some((w) => hay.includes(w))).map((t) => t.name);
+}
+
+/** 「搞笑,游戏」/['搞笑','游戏'] → ['搞笑','游戏']（留空 = 不限）。 */
+function parseTypeList(raw, types) {
+	const names = types.map((t) => t.name);
+	const picked = (Array.isArray(raw) ? raw : String(raw ?? '').split(/[，,、\s]+/))
+		.map((x) => String(x ?? '').trim())
+		.filter((x) => x !== '' && names.includes(x));
+	return [...new Set(picked)];
+}
 
 /** 希希自己的个人主页：从这里点「关注 N」进关注列表（用户要的就是这个页）。 */
 const PROFILE_URL = 'https://www.douyin.com/user/self';
@@ -44,9 +110,23 @@ export function dmCfg(d) {
 	const num = (v, def, lo, hi) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Math.floor(Number(v)))) : def);
 	const on = d?.enabled === true;
 	const dm = d?.dm ?? {};
-	// 要发给谁：设置页自己勾的名单（[{name, uid}]），空着就是谁也不发
+	// 视频类型词表：内置打底，设置页写了就覆盖/新增
+	const shareTypes = normalizeShareTypes(dm.shareTypes);
+	// [FS-DM-SHARE-DEFAULT] 默认分享哪几类（没单独指定的人按这个；空 = 不限）
+	const defaultShareTypes = String(dm.defaultShareTypes ?? '').trim().slice(0, 200);
+	const defaultWantTypes = parseTypeList(defaultShareTypes, shareTypes);
+	// 要发给谁：设置页自己勾的名单（[{name, uid, shareType}]），空着就是谁也不发
+	// shareType 是这个人的「只看哪几类视频」，留空 = 跟默认（再空 = 不限，随便挑一条）
 	const targets = (Array.isArray(dm.targets) ? dm.targets : [])
-		.map((x) => ({ name: String(x?.name ?? '').trim(), uid: String(x?.uid ?? '').trim() }))
+		.map((x) => {
+			const shareType = String(x?.shareType ?? x?.types ?? '').trim().slice(0, 200);
+			return {
+				name: String(x?.name ?? '').trim(),
+				uid: String(x?.uid ?? '').trim(),
+				shareType,
+				wantTypes: shareType === '' ? defaultWantTypes : parseTypeList(shareType, shareTypes),
+			};
+		})
 		.filter((x) => x.name !== '');
 	// 同一个人的冷却：新字段是小时；老配置里只写了 coolDays 的按天换算过来
 	const coolHours = Number.isFinite(Number(dm.coolHours)) ? num(dm.coolHours, 24, 1, 720) : num(dm.coolDays, 1, 1, 60) * 24;
@@ -59,6 +139,11 @@ export function dmCfg(d) {
 		minGapMs: num(dm.minGapHours, 3, 1, 24) * HOUR_MS,
 		// 主动说话顺带分享一条她自己的视频（走抖音自带分享，不是贴链接）；默认开着
 		shareVideo: dm.shareVideo !== false,
+		// 视频类型：词表 + 每人想收哪几类（targets[].wantTypes）
+		shareTypes,
+		shareTypeNames: shareTypes.map((t) => t.name),
+		defaultShareTypes,
+		defaultWantTypes,
 		master: String(d?.masterName ?? '').trim(),
 		targets
 	};
@@ -122,6 +207,11 @@ export function proactiveStatus(social) {
 		todayByName: day.byName ?? {},
 		lastAt: day.lastReal,
 		targets: cfg.targets,
+		// 视频类型：给设置页做候选提示（每人一行按名字选，可多人不同）
+		shareTypes: cfg.shareTypes.map((t) => ({ name: t.name, words: t.words })),
+		shareTypeNames: cfg.shareTypeNames,
+		defaultShareTypes: cfg.defaultShareTypes,
+		defaultWantTypes: cfg.defaultWantTypes,
 		pickedNames: picked,
 		mutualCount: cached.length,
 		mutualAt: Number(mutual?.at ?? 0),
@@ -436,14 +526,26 @@ export async function sendToFriend(host, friend, text) {
 
 /* ── 分享她的视频（走抖音自带的「分享 → 私信」，不是贴链接） ───── */
 
-/** 她主页上能看到的作品 id（缓存 12 小时，省得每次都翻页）。 */
+/** 她主页上能看到的作品（id + 尽量取到文案）。文案是「按类型挑」的依据，取不到就只按 id 记。 */
 const MY_VIDEOS_JS = String.raw`(() => {
-  const ids = [];
+  const out = [];
+  const seen = new Set();
+  const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
   for (const a of document.querySelectorAll('a[href*="/video/"]')) {
     const m = /\/video\/(\d{8,})/.exec(String(a.getAttribute('href') || ''));
-    if (m && !ids.includes(m[1])) ids.push(m[1]);
+    if (!m || seen.has(m[1])) continue;
+    seen.add(m[1]);
+    const card = a.closest('li') || a.parentElement || a;
+    const img = a.querySelector('img') || card.querySelector('img');
+    const desc = clean(
+      (img && (img.getAttribute('alt') || img.getAttribute('aria-label'))) ||
+      a.getAttribute('aria-label') || a.getAttribute('title') ||
+      (card.innerText || '')
+    );
+    out.push({ id: m[1], desc: desc.slice(0, 200) });
+    if (out.length >= 40) break;
   }
-  return ids.slice(0, 40);
+  return out;
 })()`;
 
 /** 点视频页上那个「分享」按钮（图标按钮，文案可能只有「分享」，也可能只有 data-e2e）。 */
@@ -556,34 +658,197 @@ const CLICK_SHARE_SEND_JS = String.raw`(() => {
   return true;
 })()`;
 
-async function myVideoIds(social) {
+/** 把一条接口里的作品归一成「挑类型」要用的形状；页面兜底时只有 id/desc，其余留空。 */
+function toVideoItem(a) {
+	const tags = [];
+	for (const c of (Array.isArray(a?.cha_list) ? a.cha_list : [])) {
+		const t = String(c?.cha_name ?? c?.chaName ?? c?.name ?? '').trim();
+		if (t !== '') tags.push(t);
+	}
+	for (const t of (Array.isArray(a?.text_extra) ? a.text_extra : [])) {
+		const h = String(t?.hashtag_name ?? '').trim();
+		if (h !== '') tags.push(h);
+	}
+	if (Array.isArray(a?.tag_list)) {
+		for (const t of a.tag_list) {
+			const s = String(t?.tag_name ?? t ?? '').trim();
+			if (s !== '') tags.push(s);
+		}
+	}
+	const durMs = Number(a?.duration ?? a?.video?.duration ?? 0) || 0;
+	return {
+		id: String(a?.aweme_id ?? a?.awemeId ?? '').trim(),
+		desc: String(a?.desc ?? '').trim().slice(0, 300),
+		tags: [...new Set(tags)].slice(0, 20),
+		durS: Math.round(durMs / 1000),
+		digg: Number(a?.statistics?.digg_count ?? 0) || 0,
+		at: Number(a?.create_time ?? 0) || 0,
+	};
+}
+
+/**
+ * 她的作品池：[{id, desc, tags, durS, digg, at}]，缓存 12 小时。
+ *
+ * 优先走纯 HTTP（aweme/post 一次给全文案 + 话题 + 时长 + 互动数 —— 按类型挑就靠这些字段）；
+ * HTTP 不可用（没 cookie / 接口变了 / 不是 http 模式）就退回浏览器主页，抓 id + 卡片上的文案。
+ */
+async function videoPool(social) {
 	let cached = null;
 	try { cached = getKv(social.db, KV_VIDEOS, null); } catch { cached = null; }
-	const kept = Array.isArray(cached?.ids) ? cached.ids.map((x) => String(x)).filter((x) => /^\d{8,}$/.test(x)) : [];
+	const norm = (x) => (typeof x === 'string'
+		? { id: x, desc: '', tags: [] }
+		: { id: String(x?.id ?? ''), desc: String(x?.desc ?? ''), tags: Array.isArray(x?.tags) ? x.tags : [], durS: Number(x?.durS) || 0, digg: Number(x?.digg) || 0, at: Number(x?.at) || 0 });
+	const kept = (Array.isArray(cached?.items) ? cached.items : Array.isArray(cached?.ids) ? cached.ids : [])
+		.map(norm)
+		.filter((x) => /^\d{8,}$/.test(x.id));
 	if (kept.length > 0 && Date.now() - Number(cached?.at ?? 0) < 12 * HOUR_MS) return kept;
-	const browser = social.host?.browser;
-	if (!browser) return kept;
-	await browser.goto(PROFILE_URL, { settleMs: 6500 }).catch(() => {});
-	await sleep(1600);
-	const found = await browser.eval(MY_VIDEOS_JS).catch(() => []);
-	const clean = [...new Set((Array.isArray(found) ? found : []).map((x) => String(x)).filter((x) => /^\d{8,}$/.test(x)))];
-	if (clean.length > 0) { try { setKv(social.db, KV_VIDEOS, { at: Date.now(), ids: clean }); } catch { /* 存不下不影响这次 */ } }
-	return clean.length > 0 ? clean : kept;
+	const http = social.http ?? null;
+	let items = [];
+	if (http && typeof http.selfProfile === 'function' && http.isLoggedIn?.() === true) {
+		try {
+			const me = await http.selfProfile();
+			const secUid = String(me?.user?.sec_uid ?? '');
+			if (secUid !== '') {
+				const posts = await http.userPosts(secUid, { count: 30 });
+				if (posts.ok) items = posts.list.map(toVideoItem).filter((x) => /^\d{8,}$/.test(x.id));
+			}
+		} catch { items = []; }
+	}
+	if (items.length === 0) {
+		const browser = social.host?.browser;
+		if (!browser) return kept;
+		await browser.goto(PROFILE_URL, { settleMs: 6500 }).catch(() => {});
+		await sleep(1600);
+		const found = await browser.eval(MY_VIDEOS_JS).catch(() => []);
+		items = (Array.isArray(found) ? found : [])
+			.map((x) => (typeof x === 'string' ? { id: x, desc: '', tags: [] } : { id: String(x?.id ?? ''), desc: String(x?.desc ?? ''), tags: [] }))
+			.filter((x) => /^\d{8,}$/.test(x.id));
+	}
+	// [FS-DM-SHARE-ENRICH] 页面兜底多半只抓到 id / 半句文案 → 用 detail 补全文案、话题、时长、点赞，
+	// 按类型才挑得准（userPosts 端点 403 拿不到列表，这个端点实测可用）
+	if (items.length > 0) items = await enrichWithDetail(http, items, { limit: 15, concurrency: 3 });
+	const merged = items.length > 0 ? items : kept;
+	if (merged.length > 0) { try { setKv(social.db, KV_VIDEOS, { at: Date.now(), items: merged }); } catch { /* 存不下不影响这次 */ } }
+	return merged;
+}
+
+/**
+ * [FS-DM-SHARE-ENRICH] 给缺字段的作品补 desc / 话题 / 时长 / 点赞（detail 端点）。
+ * 只补缺的，单条失败不影响其它条，最多补 limit 条。
+ */
+export async function enrichWithDetail(http, items, { limit = 15, concurrency = 3 } = {}) {
+	if (!http || typeof http.detail !== 'function' || !Array.isArray(items) || items.length === 0) return items;
+	const todo = items
+		.map((x, i) => ({ x, i }))
+		.filter(({ x }) => String(x?.desc ?? '') === '' || !(Number(x?.durS) > 0))
+		.slice(0, limit);
+	if (todo.length === 0) return items;
+	const out = items.slice();
+	let cursor = 0;
+	const worker = async () => {
+		while (cursor < todo.length) {
+			const cur = todo[cursor++];
+			try {
+				const r = await http.detail(cur.x.id);
+				const detail = r?.detail ?? r?.raw?.json?.aweme_detail ?? null;
+				if (detail) {
+					const got = toVideoItem(detail);
+					out[cur.i] = {
+						id: cur.x.id,
+						desc: got.desc || String(cur.x?.desc ?? ''),
+						tags: got.tags.length > 0 ? got.tags : (Array.isArray(cur.x?.tags) ? cur.x.tags : []),
+						durS: got.durS || Number(cur.x?.durS) || 0,
+						digg: got.digg || Number(cur.x?.digg) || 0,
+						at: got.at || Number(cur.x?.at) || 0
+					};
+				}
+			} catch { /* 单条失败就算了 */ }
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(concurrency, todo.length) }, () => worker()));
+	return out;
+}
+
+/** 已经给这个人分享过哪几条（同一个人尽量不重复收到同一条）。 */
+function sharedIds(social, name) {
+	try {
+		const all = getKv(social.db, KV_SHARED, {}) ?? {};
+		const list = Array.isArray(all[String(name)]) ? all[String(name)] : [];
+		return list.map(String).filter((x) => /^\d{8,}$/.test(x));
+	} catch { return []; }
+}
+
+function noteShared(social, name, id) {
+	try {
+		const all = getKv(social.db, KV_SHARED, {}) ?? {};
+		const list = [String(id), ...(Array.isArray(all[String(name)]) ? all[String(name)].map(String) : [])];
+		all[String(name)] = [...new Set(list)].slice(0, 40);
+		setKv(social.db, KV_SHARED, all);
+	} catch { /* 记不上就算了 */ }
+}
+
+/**
+ * 按「这个人想收哪几类」从作品池里挑一条（纯函数，方便单测）。
+ * - wantTypes 空 = 不限，全池随机；
+ * - 过滤后一条都没有 → 退回全池并标 fellBack（不让私信因为「这类没作品」整条失败）；
+ * - 同类里优先挑没发给过这个人的。
+ */
+export function pickShareVideo(items, { wantTypes = [], types = [], sentIds = [], random = Math.random } = {}) {
+	const raw = (Array.isArray(items) ? items : []).filter((x) => /^\d{8,}$/.test(String(x?.id ?? '')));
+	// [FS-DM-SHARE-QUALITY] 质量过滤（参考 dsh-douyin-scroll 的 forward-pick）：<12s 多是模板/广告，
+	// 有话可说才值得分享 —— 只在「有时长信息」时丢，页面兜底拿不到时长的不受影响。
+	const pool = raw.filter((x) => !(Number(x?.durS) > 0 && Number(x?.durS) < 12));
+	const base = pool.length > 0 ? pool : raw;
+	if (base.length === 0) return { item: null, types: [], fellBack: false, matched: 0 };
+	const want = (Array.isArray(wantTypes) ? wantTypes : []).filter((t) => String(t ?? '') !== '');
+	let cands = base;
+	let fellBack = false;
+	if (want.length > 0) {
+		cands = base.filter((x) => classifyVideo(x, types).some((t) => want.includes(t)));
+		if (cands.length === 0) { cands = base; fellBack = true; }
+	}
+	const fresh = cands.filter((x) => !sentIds.includes(String(x.id)));
+	const use = fresh.length > 0 ? fresh : cands;
+	// 同类里优先热门的（按点赞降序取前 60% 再随机），避免一直挑到最冷的那几条
+	const ranked = [...use].sort((a, b) => (Number(b?.digg ?? 0) || 0) - (Number(a?.digg ?? 0) || 0));
+	const head = ranked.slice(0, Math.max(1, Math.ceil(ranked.length * 0.6)));
+	const idx = Math.min(head.length - 1, Math.max(0, Math.floor(random() * head.length)));
+	const item = head[idx];
+	return { item, types: classifyVideo(item, types), fellBack, matched: cands.length };
 }
 
 /**
  * 把她的一条作品用抖音自带的「分享 → 私信」发给某个好友：对方收到的是视频卡片，不是链接。
  * 调用方必须已在 host.exclusive 里。
- * @returns {Promise<{ok: boolean, videoId?: string, picked?: string, error?: string}>}
+ *
+ * @param {object} opts
+ * @param {string[]} [opts.wantTypes] 这个只想收哪几类（空 = 不限）；没作品命中会退回「不限」
+ * @param {Array<{name: string, words: string[]}>} [opts.types] 类型词表（不传就从配置里取）
+ * @returns {Promise<{ok: boolean, videoId?: string, picked?: string, videoDesc?: string, videoTypes?: string[], fellBack?: boolean, error?: string}>}
  */
-export async function shareVideoToFriend(social, friend) {
+export async function shareVideoToFriend(social, friend, opts = {}) {
 	const browser = social.host?.browser;
 	if (!browser) return { ok: false, error: '浏览器没在运行' };
 	const name = String(friend?.name ?? '').trim();
 	if (name === '') return { ok: false, error: '没有好友名字，分享不了' };
-	const ids = await myVideoIds(social).catch(() => []);
-	if (ids.length === 0) return { ok: false, error: '她主页上没找到可以分享的作品' };
-	const id = ids[Math.floor(social.random() * ids.length) % ids.length];
+	const types = Array.isArray(opts.types) && opts.types.length > 0
+		? opts.types
+		: (() => { try { return dmCfg(social.getConfig() ?? {}).shareTypes; } catch { return normalizeShareTypes(null); } })();
+	const wantTypes = Array.isArray(opts.wantTypes) ? opts.wantTypes : [];
+	const items = await videoPool(social).catch(() => []);
+	if (items.length === 0) return { ok: false, error: '她主页上没找到可以分享的作品' };
+	const pickedVideo = pickShareVideo(items, {
+		wantTypes,
+		types,
+		sentIds: sharedIds(social, name),
+		random: () => (typeof social.random === 'function' ? social.random() : Math.random()),
+	});
+	const item = pickedVideo.item;
+	if (!item) return { ok: false, error: '她主页上没找到可以分享的作品' };
+	const id = String(item.id);
+	if (pickedVideo.fellBack) {
+		social.log?.('info', `[fish-soul] 抖音：${name} 只看「${wantTypes.join('/')}」，她作品里没有这类的，这次退回不限`);
+	}
 	await browser.goto(`https://www.douyin.com/video/${id}`, { settleMs: 6500 }).catch(() => {});
 	await sleep(1600);
 	let clicked = false;
@@ -602,7 +867,15 @@ export async function shareVideoToFriend(social, friend) {
 	const sent = (await browser.eval(CLICK_SHARE_SEND_JS).catch(() => false)) === true;
 	if (!sent) return { ok: false, error: '选了好友但没找到「发送」按钮' };
 	await sleep(2400);
-	return { ok: true, videoId: id, picked: String(picked?.picked ?? '') };
+	noteShared(social, name, id);
+	return {
+		ok: true,
+		videoId: id,
+		picked: String(picked?.picked ?? ''),
+		videoDesc: String(item.desc ?? '').slice(0, 60),
+		videoTypes: pickedVideo.types,
+		fellBack: pickedVideo.fellBack,
+	};
 }
 
 /* ── 说什么 ──────────────────────────────────────────────────────── */
@@ -747,10 +1020,13 @@ export async function runProactive(social, { manual = false } = {}) {
 	}
 
 	// ⑤ 顺手分享一条她自己的视频：走抖音自带的「分享 → 私信」，对方收到的是视频卡片，不是链接。
-	//    分享不成就只发那句文字，不因为视频卡住整条私信。
+	//    挑哪条按这个人在设置里选定的类型（friend.wantTypes，空 = 不限）；挑不到就退回不限，别卡住。
 	let shared = { ok: false, error: '没开分享' };
 	if (wantShare) {
-		shared = await host.exclusive('把她的一条视频分享给好友', () => shareVideoToFriend(social, friend), { maxMs: 200_000 })
+		shared = await host.exclusive('把她的一条视频分享给好友', () => shareVideoToFriend(social, friend, {
+			wantTypes: Array.isArray(friend.wantTypes) ? friend.wantTypes : [],
+			types: c.shareTypes,
+		}), { maxMs: 200_000 })
 			.catch((e) => ({ ok: false, error: errText(e) }));
 		if (shared?.ok !== true) {
 			social.log('info', `[fish-soul] 抖音主动私信：分享视频没成（${friend.name}）：${shared?.error ?? '未知'}，这次只发文字`);
