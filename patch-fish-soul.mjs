@@ -460,6 +460,15 @@ function patchHunks({ tag, label, jsonName }) {
 		const fixRel = String(h.upstreamFixedIn ?? h.file ?? '').replace(/^lib\//, '');
 		const fixText = fixRel === rel ? text : existsSync(join(lib, fixRel)) ? readFileSync(join(lib, fixRel), 'utf8') : '';
 		const result = (() => {
+			// 升级：这处上一版已经打过，现在模板改了内容。按「旧模板原文 → 新模板」整段换掉，
+			// 不用重新找锚点（锚点早就不在原处了）。h.upgradeOld 记的是上一版的 new。
+			if (typeof h.upgradeOld === 'string' && h.upgradeOld !== '' && h.upgradeOld !== h.new && text.includes(h.upgradeOld)) {
+				write(rel, text.replace(h.upgradeOld, h.new));
+				log(`  ↑ lib/${rel}：${h.title} 旧版已打 → 升到新版`);
+				changed += 1;
+				note(h.id, 'UPGRADED', h.title);
+				return 'upgraded';
+			}
 			if (text.includes(h.marker) || text.includes(h.new)) {
 				log(`  ＝ lib/${rel}：${h.title} 已经打过`);
 				return 'skipped';
@@ -502,6 +511,8 @@ function patchHunks({ tag, label, jsonName }) {
 // ───────────────────────────── P4：系统设置里的「已装插件」─────────────────────────────
 
 const PLUGINS_ROUTE_SRC = join(HERE, 'assets', 'plugins-route.js');
+// routes-plugins.js 自己的版本戳：内容一改就跟着改，老版本会被自动顶掉
+const PLUGINS_ROUTE_VER = 'FS-PLUGINS-ROUTE v2';
 
 /**
  * 设置页加一个只读的「已装插件」清单：新增 lib/routes-plugins.js（读当前 profile 的 dependencies
@@ -510,10 +521,12 @@ const PLUGINS_ROUTE_SRC = join(HERE, 'assets', 'plugins-route.js');
 function patchPlugins() {
 	log('\n[P4 plugins] 设置里列出已装插件（只读清单）');
 	const routePath = join(lib, 'routes-plugins.js');
-	if (existsSync(routePath) && readFileSync(routePath, 'utf8').includes('installedPlugins')) {
-		log('  ＝ lib/routes-plugins.js 已经存在');
+	const haveRoute = existsSync(routePath) ? readFileSync(routePath, 'utf8') : '';
+	if (haveRoute.includes(PLUGINS_ROUTE_VER)) {
+		log('  ＝ lib/routes-plugins.js 已经是最新的');
 		skipped += 1;
 	} else {
+		const upgrading = haveRoute !== '';
 		if (!existsSync(PLUGINS_ROUTE_SRC)) {
 			log('  × 缺 assets/plugins-route.js（补丁包根目录 assets 下应带着它）');
 			failed += 1;
@@ -521,9 +534,14 @@ function patchPlugins() {
 		}
 		if (!CHECK) {
 			mkdirSync(dirname(routePath), { recursive: true });
+			if (upgrading) {
+				const bak = join(backupDir, 'routes-plugins.js');
+				mkdirSync(dirname(bak), { recursive: true });
+				if (!existsSync(bak)) copyFileSync(routePath, bak);
+			}
 			writeFileSync(routePath, readFileSync(PLUGINS_ROUTE_SRC, 'utf8'), 'utf8');
 		}
-		log('  ✓ lib/routes-plugins.js（新文件）');
+		log(upgrading ? '  ↑ lib/routes-plugins.js（旧版 → 新版：个人插件清单里带上补丁核对）' : '  ✓ lib/routes-plugins.js（新文件）');
 		changed += 1;
 	}
 	patchHunks({ tag: 'P4 plugins', label: '设置 → 系统 → 已装插件', jsonName: 'plugins-hunks.json' });

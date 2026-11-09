@@ -4,7 +4,9 @@
 > 本仓库**不包含上游任何源码**（没有 `lib/`、没有 `test/`、没有上游的构建与发布配置），只放补丁脚本、补丁数据和上游兼容性体检结果。
 > 用之前请先按[上游 README](https://github.com/Britneycode/dsh-fish-soul#readme) 安装插件本体，再回来跑这里的脚本。
 
-上游插件本身是完整的：人格、按人记忆、生活节奏、QQ / B站 / 抖音三端。这个仓库只负责「上游还没做、但我们需要」的几处改动（含系统设置里那份已装插件清单），用脚本打到你机器上**已安装的那一份**插件里。
+上游插件本身是完整的：人格、按人记忆、生活节奏、QQ / B站 / 抖音三端。这个仓库只负责「上游还没做、但我们需要」的几处改动（含系统设置里那份**个人插件**清单），用脚本打到你机器上**已安装的那一份**插件里。
+
+> **注意区分**：设置页里说的「个人插件」指的是**这个仓库打给 dsh-fish-soul 的补丁**（P1–P5 逐处），不是 DSH 宿主里安装的那些插件。DSH 侧插件在同一页下面单列为「对照」，两者别混为一谈。
 
 ## 设计原则
 
@@ -18,6 +20,11 @@
 
 补丁会丢：`node_modules` 下的第三方插件被 pnpm 整体重写，升级或重装后就没了——重装完再跑一遍脚本即可。
 
+维护须知（改模板的时候）：
+
+- 改了某个 hunk 的 `new`，要把它**上一版的 `new` 原文**写进该条的 `upgradeOld`。脚本遇到「旧版已打」时会按 `upgradeOld → new` 整段换掉（报 `↑ 旧版已打 → 升到新版`），否则老机器会被「已经打过」挡住、永远停在旧文案上。
+- 改了 `assets/plugins-route.js` 的内容，要同步改脚本里的 `PLUGINS_ROUTE_VER`（现在是 `FS-PLUGINS-ROUTE v2`，文件头也带同一个戳）。老版本的 `lib/routes-plugins.js` 会被自动顶掉（先备份），不然新逻辑永远落不了地。
+
 ## 补丁清单
 
 | 补丁 | 锚点名 | 改了上游哪里 | 上游状态 |
@@ -29,10 +36,10 @@
 | BGM 抓取留痕 + 挑歌兜底 | `douyin-music-trace` | 抓不到 BGM 时留痕，挑歌时滤掉非歌曲条目 | 🟡 仍需 |
 | 热更新后人格卡 + 记忆块掉线 | `index-remount-our-session` | `noteInteraction` 里每条消息补挂一次人格段（会话还活着、`ensureSession` 见 live 直接 return 时不再永久掉线） | 🟡 仍需 |
 | `sectionsMounted` 从 Set 改 Map | `index-remount-map` | 记的是 ctx 本身而不是 id，宿主换了 ctx 才重挂、同一 ctx 不重复注册 | 🟡 仍需 |
-| 设置里列出已装插件 | `client-system-plugins-tab` 等 5 处 | 系统设置加「已装插件」只读清单（名字 / 版本 / 来源 / 是否启用），新增 `lib/routes-plugins.js` + `GET /plugins/installed`，不装不卸、不联网 | 🟡 仍需（上游无此页） |
+| 设置里列出个人插件 | `client-system-plugins-tab` 等 5 处 | 系统设置加「个人插件」页：**先逐处核对本仓库的补丁**（P1–P5 每组几处打了几处、每处是已打 / 上游已接管 / 没打 / 文件不在），下面再以「DSH 侧插件（对照）」列出宿主里装的插件（名字 / 版本 / 来源 / 是否启用）。新增 `lib/routes-plugins.js` + `GET /plugins/installed`，纯只读，不装不卸、不联网 | 🟡 仍需（上游无此页） |
 | 主动给抖音互关的人发私信 | `dm-*` 11 处 | 新增 `lib/douyin-proactive.js`（抓互关名单 / 挑人 / 按人格写一句 / 发送 / 记账），自走层 15 分钟 tick 里按配额决定要不要发一次；开关在 设置 → 平台 → 抖音 → 主动私信（默认关），另有「现在试一次」按钮 | 🟡 仍需（上游无私信主动发起） |
 
-状态取自 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)（对着 npm 最新版自动体检生成，每周更新一次）。带 `douyin-` / `index-` / `client-` / `routes-` 前缀的都是小块锚点：抖音四处看 [`assets/douyin-hunks.json`](assets/douyin-hunks.json)，人格段两处看 [`assets/index-hunks.json`](assets/index-hunks.json)，已装插件五处看 [`assets/plugins-hunks.json`](assets/plugins-hunks.json)（外加新文件 [`assets/plugins-route.js`](assets/plugins-route.js)），逐处替换、不再整文件覆盖。
+状态取自 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)（对着 npm 最新版自动体检生成，每周更新一次）。带 `douyin-` / `index-` / `client-` / `routes-` 前缀的都是小块锚点：抖音四处看 [`assets/douyin-hunks.json`](assets/douyin-hunks.json)，人格段两处看 [`assets/index-hunks.json`](assets/index-hunks.json)，个人插件页五处看 [`assets/plugins-hunks.json`](assets/plugins-hunks.json)（外加新文件 [`assets/plugins-route.js`](assets/plugins-route.js)），逐处替换、不再整文件覆盖。
 
 ## 用法
 
@@ -72,8 +79,8 @@ audit-upstream.mjs     上游体检：对 npm 最新版判断每处补丁还有�
 assets/
   douyin-hunks.json    抖音四处补丁的小块锚点与替换内容
   index-hunks.json     人格段补挂两处的小块锚点与替换内容
-  plugins-hunks.json   已装插件五处（client.js 3 + routes.js 2）的锚点与替换内容
-  plugins-route.js     「已装插件」只读路由模块（新文件，落到插件 lib/routes-plugins.js）
+  plugins-hunks.json   个人插件页五处（client.js 3 + routes.js 2）的锚点与替换内容
+  plugins-route.js     「个人插件」只读路由模块（新文件，落到插件 lib/routes-plugins.js）
   meme-bridge.js       dsh-meme 只读取图桥接模块（打进插件 lib/ 用）
 reports/
   upstream-compatibility.md   体检报告（自动生成）
