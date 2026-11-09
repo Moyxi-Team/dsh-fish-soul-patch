@@ -27,8 +27,10 @@
 | 详情页只走直链 + 点右侧「评论(n)」 | `douyin-note-tab` | 作品详情页只走 note / video 直链，再点右侧 Tab 进评论 | 🟡 仍需 |
 | 回复只在可见评论条目里找 | `douyin-reply-visible` | 用真实鼠标点击可见条目，不再对隐藏节点下手 | 🟡 仍需 |
 | BGM 抓取留痕 + 挑歌兜底 | `douyin-music-trace` | 抓不到 BGM 时留痕，挑歌时滤掉非歌曲条目 | 🟡 仍需 |
+| 热更新后人格卡 + 记忆块掉线 | `index-remount-our-session` | `noteInteraction` 里每条消息补挂一次人格段（会话还活着、`ensureSession` 见 live 直接 return 时不再永久掉线） | 🟡 仍需 |
+| `sectionsMounted` 从 Set 改 Map | `index-remount-map` | 记的是 ctx 本身而不是 id，宿主换了 ctx 才重挂、同一 ctx 不重复注册 | 🟡 仍需 |
 
-状态取自 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)（对着 npm 最新版自动体检生成，每周更新一次）。抖音那四处按 [`assets/douyin-hunks.json`](assets/douyin-hunks.json) 的小块锚点逐处替换，不再整文件覆盖。
+状态取自 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)（对着 npm 最新版自动体检生成，每周更新一次）。带 `douyin-` / `index-` 前缀的都是小块锚点：抖音四处看 [`assets/douyin-hunks.json`](assets/douyin-hunks.json)，人格段两处看 [`assets/index-hunks.json`](assets/index-hunks.json)，逐处替换、不再整文件覆盖。
 
 ## 用法
 
@@ -36,7 +38,7 @@
 node patch-fish-soul.mjs                    # 自动找 ~/.dsh/profiles/*/node_modules/dsh-fish-soul
 node patch-fish-soul.mjs --root <插件目录>   # 指定插件目录（含 package.json 的那层）
 node patch-fish-soul.mjs --check            # 只报告状态，不改文件
-node patch-fish-soul.mjs --only meme        # 只跑一组（meme / douyin）
+node patch-fish-soul.mjs --only meme        # 只跑一组（meme / douyin / remount）
 node patch-fish-soul.mjs --json             # 结尾多打一段机器可读汇总（CI / 体检用）
 node patch-fish-soul.mjs --force            # 忽略「已打过」判断按内容重算（谨慎）
 ```
@@ -67,6 +69,7 @@ patch-fish-soul.mjs    补丁器：版本无关、幂等、三态判定、可自
 audit-upstream.mjs     上游体检：对 npm 最新版判断每处补丁还有没有用
 assets/
   douyin-hunks.json    抖音四处补丁的小块锚点与替换内容
+  index-hunks.json     人格段补挂两处的小块锚点与替换内容
   meme-bridge.js       dsh-meme 只读取图桥接模块（打进插件 lib/ 用）
 reports/
   upstream-compatibility.md   体检报告（自动生成）

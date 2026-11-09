@@ -14,6 +14,9 @@
  *                     新增 lib/meme-bridge.js、表情包设置里一个带说明的开关。
  *   P2 douyin-social：抖音「回评论发不出 / 图文无 BGM」，按 assets/douyin-hunks.json 的
  *                     小块锚点逐处替换（不再整文件覆盖，上游小改不会整体冲突）。
+ *   P3 index        ：插件热更新后人格卡 + 「此刻状态 / Top5 记忆」掉线（会话还活着，
+ *                     ensureSession 见 live 直接 return 不再 setup），按 assets/index-hunks.json
+ *                     补挂人格段；同样是小块锚点，不整文件覆盖。
  *
  * 为什么会丢：node_modules 下的第三方插件被 pnpm 整体重写，升级 / 重装就没了。
  * 改之前把原文件备份到 ~/.dsh/backup/。
@@ -22,7 +25,7 @@
  *   node patch-fish-soul.mjs                       # 自动找 ~/.dsh/profiles/<profile>/node_modules/dsh-fish-soul
  *   node patch-fish-soul.mjs --root <插件目录>      # 指定插件目录（含 package.json 的那层）
  *   node patch-fish-soul.mjs --check               # 只报告状态，不改文件
- *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin）
+ *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount）
  *   node patch-fish-soul.mjs --json                # 结尾额外打印一段机器可读汇总（CI / audit 用）
  *   node patch-fish-soul.mjs --force               # 忽略「已打过」判断，按文件内容重算（谨慎）
  *
@@ -418,52 +421,62 @@ function patchMeme() {
 		'设置页加开关', '借 dsh-meme 的表情库');
 }
 
-// ───────────────────────────── P2：抖音回评论 / 图文 BGM ─────────────────────────────
-
-const DOUYIN_HUNKS = join(HERE, 'assets', 'douyin-hunks.json');
+// ───────────────────────────── P2 / P3：锚点小块补丁 ─────────────────────────────
 
 /**
  * 每处改动都是一小段锚点替换（old → new），各自带 upstreamFixed：
  * 上游哪天自己把某一处改好了，那一处就自动退役，其余几处继续打，互不牵连。
- * 全部退役时整段 P2 就自然什么都不做了。
+ * 全部退役时这一组就自然什么都不做了。
+ *
+ * upstreamFixedIn（可选）：判断「上游修好了没」要读哪个文件，默认就是 h.file。
+ * 有些补丁改的是 A 文件，但上游真正的修复出现在 B 文件里，就把这里指过去。
  */
-function patchDouyin() {
-	log('\n[P2] douyin-social —— 回评论发不出 / 图文无 BGM（锚点补丁）');
-	const target = join(lib, 'douyin-social.js');
-	if (!existsSync(target)) {
-		log('  × 没有 lib/douyin-social.js，插件版本可能太老 / 太新');
+function patchHunks({ tag, label, jsonName }) {
+	log(`\n[${tag}] ${label}（锚点补丁）`);
+	const hunksPath = join(HERE, 'assets', jsonName);
+	if (!existsSync(hunksPath)) {
+		log(`  × 缺 assets/${jsonName}（补丁包根目录 assets 下应带着它）`);
 		failed += 1;
 		return;
 	}
-	if (!existsSync(DOUYIN_HUNKS)) {
-		log('  × 缺 assets/douyin-hunks.json（补丁包根目录 assets 下应带着它）');
-		failed += 1;
-		return;
-	}
-	const hunks = JSON.parse(readFileSync(DOUYIN_HUNKS, 'utf8'));
+	const hunks = JSON.parse(readFileSync(hunksPath, 'utf8'));
 	let up = 0;
 	for (const h of hunks) {
 		const rel = String(h.file ?? '').replace(/^lib\//, '');
+		if (!existsSync(join(lib, rel))) {
+			log(`  × 没有 lib/${rel}，插件版本可能太老 / 太新`);
+			failed += 1;
+			note(h.id, 'MISSING', h.title);
+			continue;
+		}
 		const text = read(rel);
+		const fixRel = String(h.upstreamFixedIn ?? h.file ?? '').replace(/^lib\//, '');
+		const fixText = fixRel === rel ? text : existsSync(join(lib, fixRel)) ? readFileSync(join(lib, fixRel), 'utf8') : '';
 		const result = (() => {
 			if (text.includes(h.marker) || text.includes(h.new)) {
-				log(`  ＝ ${rel}：${h.title} 已经打过`);
+				log(`  ＝ lib/${rel}：${h.title} 已经打过`);
 				return 'skipped';
 			}
-			if (upstreamDone(h.upstreamFixed, text)) {
+			if (upstreamDone(h.upstreamFixed, fixText)) {
 				up += 1;
-				log(`  ↷ ${rel}：${h.title} —— 上游已自己修好（${JSON.stringify(h.upstreamFixed)}）→ 本处退役`);
+				log(`  ↷ lib/${rel}：${h.title} —— 上游已自己修好（${JSON.stringify(h.upstreamFixed)}）→ 本处退役`);
 				note(h.id, 'UPSTREAM', h.title);
 				return 'upstream';
 			}
 			if (!text.includes(h.old)) {
-				log(`  × ${rel}：${h.title} 找不到锚点（上游改版挪了这段代码），本补丁没退役、是锚点过期了`);
+				log(`  × lib/${rel}：${h.title} 找不到锚点（上游改版挪了这段代码），本补丁没退役、是锚点过期了`);
 				drifted += 1;
 				note(h.id, 'DRIFT', h.title);
 				return 'drift';
 			}
+			if (text.split(h.old).length > 2) {
+				log(`  × lib/${rel}：${h.title} 的锚点在文件里出现多次，不敢猜改哪一处`);
+				failed += 1;
+				note(h.id, 'AMBIGUOUS', h.title);
+				return 'ambiguous';
+			}
 			write(rel, text.replace(h.old, h.new));
-			log(`  ✓ ${rel}：${h.title}`);
+			log(`  ✓ lib/${rel}：${h.title}`);
 			changed += 1;
 			note(h.id, 'PATCHED', h.title);
 			return 'patched';
@@ -474,7 +487,7 @@ function patchDouyin() {
 		}
 	}
 	if (up === hunks.length) {
-		log('  ↷ 四处在最新上游里都已自行修好 → P2 整体退役，不需要再维护');
+		log(`  ↷ ${hunks.length} 处在最新上游里都已自行修好 → ${tag} 这组整体退役，不需要再维护`);
 		retired += 1;
 	}
 }
@@ -485,7 +498,10 @@ log(`dsh-fish-soul ${pkg.version} → ${root}`);
 if (CHECK) log('（--check：只看状态，不改文件）');
 try {
 	if (ONLY === '' || ONLY === 'meme') patchMeme();
-	if (ONLY === '' || ONLY === 'douyin') patchDouyin();
+	if (ONLY === '' || ONLY === 'douyin')
+		patchHunks({ tag: 'P2 douyin', label: 'douyin-social —— 回评论发不出 / 图文无 BGM', jsonName: 'douyin-hunks.json' });
+	if (ONLY === '' || ONLY === 'remount')
+		patchHunks({ tag: 'P3 remount', label: 'index —— 热更新后人格卡 + 记忆块掉线', jsonName: 'index-hunks.json' });
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;

@@ -103,24 +103,28 @@ function auditMeme(dir) {
 		: { id: 'meme-bridge', title: '借 dsh-meme 的只读取图服务', status: 'NEEDED', detail: '上游仍未接入 dsh-meme' };
 }
 
-/** P2：抖音那四处，逐处看上游是否已经自己修好 / 锚点是否还在。 */
-function auditDouyin(dir) {
-	const hunksPath = join(HERE, 'assets', 'douyin-hunks.json');
-	if (!existsSync(hunksPath)) return [{ id: 'douyin', title: '抖音补丁', status: 'DRIFT', detail: '缺 assets/douyin-hunks.json' }];
+/** P2 / P3：锚点小块补丁，逐处看上游是否已经自己修好 / 锚点是否还在。 */
+function auditHunks(dir, jsonName) {
+	const hunksPath = join(HERE, 'assets', jsonName);
+	if (!existsSync(hunksPath)) return [{ id: jsonName, title: jsonName, status: 'DRIFT', detail: `缺 assets/${jsonName}` }];
 	const hunks = JSON.parse(readFileSync(hunksPath, 'utf8'));
 	return hunks.map((h) => {
 		const rel = String(h.file ?? '');
 		const p = join(dir, rel);
 		if (!existsSync(p)) return { id: h.id, title: h.title, status: 'DRIFT', detail: `上游没有 ${rel}` };
 		const text = readFileSync(p, 'utf8');
-		if (upstreamDone(h.upstreamFixed, text)) return { id: h.id, title: h.title, status: 'RETIRED', detail: `上游已自己修好（${JSON.stringify(h.upstreamFixed)}）` };
+		const fixRel = String(h.upstreamFixedIn ?? rel);
+		const fixPath = join(dir, fixRel);
+		const fixText = existsSync(fixPath) ? readFileSync(fixPath, 'utf8') : '';
+		if (upstreamDone(h.upstreamFixed, fixText))
+			return { id: h.id, title: h.title, status: 'RETIRED', detail: `上游已自己修好（${JSON.stringify(h.upstreamFixed)}${fixRel !== rel ? ` @ ${fixRel}` : ''}）` };
 		if (text.includes(h.old)) return { id: h.id, title: h.title, status: 'NEEDED', detail: '锚点在，补丁仍有效' };
 		return { id: h.id, title: h.title, status: 'DRIFT', detail: '锚点找不到、上游也没修 → 需要按新版更新锚点' };
 	});
 }
 
 const { dir, version } = fetchUpstream();
-const rows = [auditMeme(dir), ...auditDouyin(dir)];
+const rows = [auditMeme(dir), ...auditHunks(dir, 'douyin-hunks.json'), ...auditHunks(dir, 'index-hunks.json')];
 
 const retired = rows.filter((r) => r.status === 'RETIRED').length;
 const needed = rows.filter((r) => r.status === 'NEEDED').length;
@@ -131,7 +135,7 @@ if (drift > 0) verdict = `需要更新锚点：${drift} 处的上游代码改版
 else if (needed === 0) verdict = '全部补丁都已被上游原生实现 → 这些补丁可以整体退役，仓库不必再跟着上游版本维护。';
 else verdict = `仍有 ${needed} 处补丁有效、${retired} 处已可退役。补丁继续适配上游最新版（${version}）即可。`;
 
-const today = new Date().toISOString().slice(0, 10);
+const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const icon = { RETIRED: '🟢 可退役', NEEDED: '🟡 仍需', DRIFT: '🔴 漂移' };
 
 const md = [
