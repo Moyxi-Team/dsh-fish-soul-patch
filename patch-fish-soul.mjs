@@ -20,6 +20,10 @@
  *   P4 plugins      ：系统设置里加「已装插件」只读清单（装了什么、从哪装的、启用没启用），
  *                     新增 lib/routes-plugins.js + 4 处锚点（client.js 3 处、routes.js 2 处），
  *                     见 assets/plugins-hunks.json。只读，不装不卸、不联网。
+ *   P5 dm           ：让她主动给抖音上「互相关注」的人发私信（默认关，开关在 设置 → 平台 → 抖音 →
+ *                     主动私信）：新增 lib/douyin-proactive.js（抓互关名单 / 挑人 / 写话 / 发送 / 记账），
+ *                     再打 11 处锚点（douyin-social 2、index 1、config-platforms 1、routes-douyin 3、
+ *                     client.douyin 4），见 assets/dm-hunks.json。
  *
  * 为什么会丢：node_modules 下的第三方插件被 pnpm 整体重写，升级 / 重装就没了。
  * 改之前把原文件备份到 ~/.dsh/backup/。
@@ -28,7 +32,7 @@
  *   node patch-fish-soul.mjs                       # 自动找 ~/.dsh/profiles/<profile>/node_modules/dsh-fish-soul
  *   node patch-fish-soul.mjs --root <插件目录>      # 指定插件目录（含 package.json 的那层）
  *   node patch-fish-soul.mjs --check               # 只报告状态，不改文件
- *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins）
+ *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm）
  *   node patch-fish-soul.mjs --json                # 结尾额外打印一段机器可读汇总（CI / audit 用）
  *   node patch-fish-soul.mjs --force               # 忽略「已打过」判断，按文件内容重算（谨慎）
  *
@@ -525,6 +529,39 @@ function patchPlugins() {
 	patchHunks({ tag: 'P4 plugins', label: '设置 → 系统 → 已装插件', jsonName: 'plugins-hunks.json' });
 }
 
+// ───────────────────────────── P5：主动给抖音互关好友发私信 ─────────────────────────────
+
+const DM_SRC = join(HERE, 'assets', 'douyin-proactive.js');
+
+/**
+ * 抖音那边原本只有「别人发来 → 她回」，没有「她主动找互关的人」。
+ * 这里新增 lib/douyin-proactive.js（抓互关名单 / 挑人 / 写话 / 发送 + 记账），
+ * 再按 assets/dm-hunks.json 打 11 处锚点：douyin-social（方法 + status）、index（tick）、
+ * config-platforms（schema）、routes-douyin（回显 / 保存 / 新路由）、client.douyin（设置页开关）。
+ */
+function patchDm() {
+	log('\n[P5 dm] 主动给抖音互关好友发私信（设置 → 平台 → 抖音 → 主动私信）');
+	const target = join(lib, 'douyin-proactive.js');
+	const hasMarker = existsSync(target) && readFileSync(target, 'utf8').includes('FS-DOUYIN-DM-PATCH');
+	if (hasMarker) {
+		log('  ＝ lib/douyin-proactive.js 已经存在');
+		skipped += 1;
+	} else {
+		if (!existsSync(DM_SRC)) {
+			log('  × 缺 assets/douyin-proactive.js（补丁包根目录 assets 下应带着它）');
+			failed += 1;
+			return;
+		}
+		if (!CHECK) {
+			mkdirSync(dirname(target), { recursive: true });
+			writeFileSync(target, readFileSync(DM_SRC, 'utf8'), 'utf8');
+		}
+		log('  ✓ lib/douyin-proactive.js（新文件）');
+		changed += 1;
+	}
+	patchHunks({ tag: 'P5 dm', label: '抖音 —— 主动给互关好友发私信', jsonName: 'dm-hunks.json' });
+}
+
 // ───────────────────────────── 主流程 ─────────────────────────────
 
 log(`dsh-fish-soul ${pkg.version} → ${root}`);
@@ -536,6 +573,7 @@ try {
 	if (ONLY === '' || ONLY === 'remount')
 		patchHunks({ tag: 'P3 remount', label: 'index —— 热更新后人格卡 + 记忆块掉线', jsonName: 'index-hunks.json' });
 	if (ONLY === '' || ONLY === 'plugins') patchPlugins();
+	if (ONLY === '' || ONLY === 'dm') patchDm();
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;

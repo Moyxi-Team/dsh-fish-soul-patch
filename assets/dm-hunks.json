@@ -1,0 +1,90 @@
+[
+ {
+  "id": "dm-social-import",
+  "file": "douyin-social.js",
+  "title": "import 主动私信模块",
+  "marker": "FS-DM-import",
+  "old": "import { callBridge, commentBridgeReady, installCommentBridge, uploadImage as uploadCommentImage } from './channels/vendor/douyin-bridge/douyin-comment.js';",
+  "new": "import { callBridge, commentBridgeReady, installCommentBridge, uploadImage as uploadCommentImage } from './channels/vendor/douyin-bridge/douyin-comment.js';\n// FS-DM-import：主动给互关好友发私信（见 douyin-proactive.js）\nimport { dmCfg, maybeSendProactive, proactiveStatus, sendProactiveNow } from './douyin-proactive.js';"
+ },
+ {
+  "id": "dm-social-methods",
+  "file": "douyin-social.js",
+  "title": "加 maybeDm / dmNow，status 带 dm",
+  "marker": "FS-DM-methods",
+  "old": "\tstatus() {\n\t\treturn { ...super.status(), blockedUntil: this.blockedUntil > Date.now() ? this.blockedUntil : 0 };\n\t}\n}",
+  "new": "\t/** 主动给互关好友发私信（挑人 / 写话 / 发送都在 douyin-proactive.js）。[FS-DM-methods] */\n\tmaybeDm(ctx) {\n\t\treturn maybeSendProactive(this, ctx);\n\t}\n\n\t/** 设置页「现在试一次」：不等配额，立刻挑一个互关的人说一句。 */\n\tasync dmNow() {\n\t\treturn sendProactiveNow(this);\n\t}\n\n\tstatus() {\n\t\treturn { ...super.status(), blockedUntil: this.blockedUntil > Date.now() ? this.blockedUntil : 0, dm: proactiveStatus(this) };\n\t}\n}"
+ },
+ {
+  "id": "dm-index-tick",
+  "file": "index.js",
+  "title": "自走层 tick 里问一次要不要主动发",
+  "marker": "FS-DM-tick",
+  "old": "\t\tsocial: (x) => { biliSocial.maybePost(x); douyinSocial.maybePost(x); },",
+  "new": "\t\tsocial: (x) => { biliSocial.maybePost(x); douyinSocial.maybePost(x); if (typeof douyinSocial.maybeDm === 'function') douyinSocial.maybeDm(x); }, // FS-DM-tick 顺手问她要不要主动给互关的人发一句"
+ },
+ {
+  "id": "dm-schema",
+  "file": "config-platforms.js",
+  "title": "配置 schema 加 dm",
+  "marker": "FS-DM-schema",
+  "old": "\t\tcomments: z.object({ // 回自己作品下的评论（页面操作，尽力而为，可能要短信验证）\n\t\t\tenabled: z.boolean().default(false),\n\t\t\tperHour: z.number().default(4)\n\t\t}).default({})\n\t}).default({});",
+  "new": "\t\tcomments: z.object({ // 回自己作品下的评论（页面操作，尽力而为，可能要短信验证）\n\t\t\tenabled: z.boolean().default(false),\n\t\t\tperHour: z.number().default(4)\n\t\t}).default({}),\n\t\t// FS-DM-schema：主动给「互相关注」的人发私信（默认关；一天最多几个 + 同一个人隔几天 + 最快几小时一条）\n\t\tdm: z.object({\n\t\t\tenabled: z.boolean().default(false),\n\t\t\tperDay: z.number().default(1),\n\t\t\tcoolDays: z.number().default(7),\n\t\t\tminGapHours: z.number().default(3)\n\t\t}).default({})\n\t}).default({});"
+ },
+ {
+  "id": "dm-state",
+  "file": "routes-douyin.js",
+  "title": "设置页状态回显 dm",
+  "marker": "FS-DM-state",
+  "old": "\t\tcomments: { enabled: d.comments?.enabled === true, perHour: d.comments?.perHour ?? 4, emoji: d.comments?.emoji === true },",
+  "new": "\t\tcomments: { enabled: d.comments?.enabled === true, perHour: d.comments?.perHour ?? 4, emoji: d.comments?.emoji === true },\n\t\t// FS-DM-state：主动私信的回显（今天几个 / 互关名单多大 / 最近发过什么）\n\t\tdm: { enabled: d.dm?.enabled === true, perDay: d.dm?.perDay ?? 1, coolDays: d.dm?.coolDays ?? 7, minGapHours: d.dm?.minGapHours ?? 3, ...(douyinSocial?.status()?.dm ?? {}) },"
+ },
+ {
+  "id": "dm-save",
+  "file": "routes-douyin.js",
+  "title": "保存设置带 dm",
+  "marker": "FS-DM-save",
+  "old": "\t\t\tcomments: {\n\t\t\t\tenabled: body.comments?.enabled === undefined ? cur.comments?.enabled === true : body.comments.enabled === true,\n\t\t\t\tperHour: clamp(body.comments?.perHour, cur.comments?.perHour ?? 4, 0, 30),\n\t\t\t\temoji: body.comments?.emoji === undefined ? cur.comments?.emoji === true : body.comments.emoji === true\n\t\t\t}\n\t\t};",
+  "new": "\t\t\tcomments: {\n\t\t\t\tenabled: body.comments?.enabled === undefined ? cur.comments?.enabled === true : body.comments.enabled === true,\n\t\t\t\tperHour: clamp(body.comments?.perHour, cur.comments?.perHour ?? 4, 0, 30),\n\t\t\t\temoji: body.comments?.emoji === undefined ? cur.comments?.emoji === true : body.comments.emoji === true\n\t\t\t},\n\t\t\t// FS-DM-save：主动私信（开关 + 一天最多几个 + 同一个人隔几天 + 最快几小时一条）\n\t\t\tdm: {\n\t\t\t\tenabled: body.dm?.enabled === undefined ? cur.dm?.enabled === true : body.dm.enabled === true,\n\t\t\t\tperDay: clamp(body.dm?.perDay, cur.dm?.perDay ?? 1, 0, 5),\n\t\t\t\tcoolDays: clamp(body.dm?.coolDays, cur.dm?.coolDays ?? 7, 1, 60),\n\t\t\t\tminGapHours: clamp(body.dm?.minGapHours, cur.dm?.minGapHours ?? 3, 1, 24)\n\t\t\t}\n\t\t};"
+ },
+ {
+  "id": "dm-now-route",
+  "file": "routes-douyin.js",
+  "title": "新路由 /douyin/dm-now",
+  "marker": "FS-DM-now",
+  "old": "\t\tconst r = await douyinSocial.pollComments();\n\t\tsend(200, r.ok ? { ok: true, replied: r.replied, skipped: r.skipped } : { ok: false, error: r.error ?? '没看成' });\n\t\treturn true;\n\t}",
+  "new": "\t\tconst r = await douyinSocial.pollComments();\n\t\tsend(200, r.ok ? { ok: true, replied: r.replied, skipped: r.skipped } : { ok: false, error: r.error ?? '没看成' });\n\t\treturn true;\n\t}\n\t// FS-DM-now：现在给一个互关的人发一句（不等配额；要等浏览器跑完，可能一两分钟）\n\tif (path === '/douyin/dm-now') {\n\t\tif ((getConfig().douyin ?? {}).enabled !== true) { send(200, { ok: false, error: '先打开抖音总开关' }); return true; }\n\t\tif (!douyinSocial) { send(200, { ok: false, error: '抖音模块没加载' }); return true; }\n\t\tif (typeof douyinSocial.dmNow !== 'function') { send(200, { ok: false, error: '抖音模块里没有主动私信（补丁没打全）' }); return true; }\n\t\tconst r = await douyinSocial.dmNow();\n\t\tsend(200, r.ok ? { ok: true, name: r.name, text: r.text } : { ok: false, error: r.error ?? '没发成' });\n\t\treturn true;\n\t}"
+ },
+ {
+  "id": "dm-form",
+  "file": "client.douyin.js",
+  "title": "表单初值加 dmPerDay/dmCoolDays",
+  "marker": "FS-DM-form",
+  "old": "\t\t\t\tpostPerDay: d.post?.perDay ?? 1, commentsPerHour: d.comments?.perHour ?? 4",
+  "new": "\t\t\t\tpostPerDay: d.post?.perDay ?? 1, commentsPerHour: d.comments?.perHour ?? 4,\n\t\t\t\tdmPerDay: d.dm?.perDay ?? 1, dmCoolDays: d.dm?.coolDays ?? 7 // FS-DM-form"
+ },
+ {
+  "id": "dm-vars",
+  "file": "client.douyin.js",
+  "title": "取出 dm 状态",
+  "marker": "FS-DM-var",
+  "old": "\t\t\tconst cm = d.comments ?? {};",
+  "new": "\t\t\tconst cm = d.comments ?? {};\n\t\t\tconst dmc = d.dm ?? {}; // FS-DM-var\n\t\t\tconst dmSo = d.dm ?? {};"
+ },
+ {
+  "id": "dm-saveui",
+  "file": "client.douyin.js",
+  "title": "保存时带上 dm",
+  "marker": "FS-DM-saveui",
+  "old": "\t\t\t\tcomments: { perHour: Number(form.commentsPerHour), ...(p.comments ?? {}) }\n\t\t\t}, null, \"保存失败\");",
+  "new": "\t\t\t\tcomments: { perHour: Number(form.commentsPerHour), ...(p.comments ?? {}) },\n\t\t\t\tdm: { perDay: Number(form.dmPerDay), coolDays: Number(form.dmCoolDays), ...(p.dm ?? {}) } // FS-DM-saveui\n\t\t\t}, null, \"保存失败\");"
+ },
+ {
+  "id": "dm-ui",
+  "file": "client.douyin.js",
+  "title": "设置页加「主动私信」分组",
+  "marker": "FS-DM-ui",
+  "old": "\t\t\t\t\tRow({ title: \"同一个人\", stack: true }, Area({ ...bind(\"links\"), placeholder: \"抖音名字=QQ 号，每行一个\" }))),",
+  "new": "\t\t\t\t\tRow({ title: \"同一个人\", stack: true }, Area({ ...bind(\"links\"), placeholder: \"抖音名字=QQ 号，每行一个\" }))),\n\t\t\t\t// FS-DM-ui：主动给「互相关注」的人发私信（设置 → 平台 → 抖音）\n\t\t\t\tGroup({ title: \"主动私信\", aside: dmc.enabled ? Tag(`今天 ${dmSo.todayCount ?? 0} / ${dmc.perDay ?? 1}`, \"outline\") : null },\n\t\t\t\t\tRow({ title: \"她主动找互关的人聊\", desc: \"只看「互相关注」的人；已经有会话的直接发，没有的去对方主页点「私信」现开一个。关掉就完全不动\" },\n\t\t\t\t\t\tdmc.enabled ? Button({ variant: \"ghost\", disabled: busy || d.enabled !== true || !running, onClick: () => act(\"/douyin/dm-now\", {}, \"发出去了\", \"没发成\") }, \"现在试一次\") : null,\n\t\t\t\t\t\tsw(\"她主动找互关的人聊\", dmc.enabled === true, (v) => save({ dm: { enabled: v } }))),\n\t\t\t\t\tdmc.enabled ? Row({ title: \"一天最多\" }, Num({ min: 0, max: 5, \"aria-label\": \"一天最多给几个人发\", ...bind(\"dmPerDay\") }), Muted(\"个人\")) : null,\n\t\t\t\t\tdmc.enabled ? Row({ title: \"同一个人隔\" }, Num({ min: 1, max: 60, \"aria-label\": \"同一个人隔几天\", ...bind(\"dmCoolDays\") }), Muted(\"天才能再发\")) : null,\n\t\t\t\t\tdmc.enabled ? Row({ title: \"互关的人\", desc: dmSo.mutualCount ? `${dmSo.mutualCount} 个，名单是 ${relTime(dmSo.mutualAt || Date.now(), Date.now())}抓的` : \"还没抓过名单，发第一条时会自己去关注页读（读完缓存 6 小时）\" }) : null,\n\t\t\t\t\tdmc.enabled && dmSo.lastError ? Row({ title: \"上次出错\" }, State(\"error\", dmSo.lastError)) : null,\n\t\t\t\t\tdmc.enabled && (dmSo.recent ?? []).length > 0 ? Row({ title: \"最近发过\", stack: true },\n\t\t\t\t\t\th(\"div\", { className: \"fs-list\" }, (dmSo.recent ?? []).map((x, i) => Item({\n\t\t\t\t\t\t\tkey: `d${i}${x.at}`, lead: Tag(x.ok ? \"发了\" : \"没发\", x.ok ? undefined : \"danger\"),\n\t\t\t\t\t\t\ttext: x.text || x.error || \"\", title: x.text || x.error || \"\",\n\t\t\t\t\t\t\tmeta: [h(\"span\", { key: \"n\" }, x.name), h(\"span\", { key: \"t\" }, relTime(x.at, Date.now()))]\n\t\t\t\t\t\t})))) : null),"
+ }
+]

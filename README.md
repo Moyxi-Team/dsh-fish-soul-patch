@@ -30,6 +30,7 @@
 | 热更新后人格卡 + 记忆块掉线 | `index-remount-our-session` | `noteInteraction` 里每条消息补挂一次人格段（会话还活着、`ensureSession` 见 live 直接 return 时不再永久掉线） | 🟡 仍需 |
 | `sectionsMounted` 从 Set 改 Map | `index-remount-map` | 记的是 ctx 本身而不是 id，宿主换了 ctx 才重挂、同一 ctx 不重复注册 | 🟡 仍需 |
 | 设置里列出已装插件 | `client-system-plugins-tab` 等 5 处 | 系统设置加「已装插件」只读清单（名字 / 版本 / 来源 / 是否启用），新增 `lib/routes-plugins.js` + `GET /plugins/installed`，不装不卸、不联网 | 🟡 仍需（上游无此页） |
+| 主动给抖音互关的人发私信 | `dm-*` 11 处 | 新增 `lib/douyin-proactive.js`（抓互关名单 / 挑人 / 按人格写一句 / 发送 / 记账），自走层 15 分钟 tick 里按配额决定要不要发一次；开关在 设置 → 平台 → 抖音 → 主动私信（默认关），另有「现在试一次」按钮 | 🟡 仍需（上游无私信主动发起） |
 
 状态取自 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)（对着 npm 最新版自动体检生成，每周更新一次）。带 `douyin-` / `index-` / `client-` / `routes-` 前缀的都是小块锚点：抖音四处看 [`assets/douyin-hunks.json`](assets/douyin-hunks.json)，人格段两处看 [`assets/index-hunks.json`](assets/index-hunks.json)，已装插件五处看 [`assets/plugins-hunks.json`](assets/plugins-hunks.json)（外加新文件 [`assets/plugins-route.js`](assets/plugins-route.js)），逐处替换、不再整文件覆盖。
 
@@ -39,7 +40,7 @@
 node patch-fish-soul.mjs                    # 自动找 ~/.dsh/profiles/*/node_modules/dsh-fish-soul
 node patch-fish-soul.mjs --root <插件目录>   # 指定插件目录（含 package.json 的那层）
 node patch-fish-soul.mjs --check            # 只报告状态，不改文件
-node patch-fish-soul.mjs --only meme        # 只跑一组（meme / douyin / remount / plugins）
+node patch-fish-soul.mjs --only meme        # 只跑一组（meme / douyin / remount / plugins / dm）
 node patch-fish-soul.mjs --json             # 结尾多打一段机器可读汇总（CI / 体检用）
 node patch-fish-soul.mjs --force            # 忽略「已打过」判断按内容重算（谨慎）
 ```
