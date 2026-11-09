@@ -29,6 +29,8 @@ const KV_SENT = 'douyin.dm.sent';
 const KV_MUTUAL = 'douyin.dm.mutual';
 const KV_RECENT = 'douyin.dm.recent';
 const KV_ERROR = 'douyin.dm.error';
+/** 她自己的作品 id 缓存（分享视频时随机挑一条，别每次都翻主页）。 */
+const KV_VIDEOS = 'douyin.dm.videos';
 
 /** 希希自己的个人主页：从这里点「关注 N」进关注列表（用户要的就是这个页）。 */
 const PROFILE_URL = 'https://www.douyin.com/user/self';
@@ -55,6 +57,8 @@ export function dmCfg(d) {
 		coolHours,
 		coolMs: coolHours * HOUR_MS,
 		minGapMs: num(dm.minGapHours, 3, 1, 24) * HOUR_MS,
+		// 主动说话顺带分享一条她自己的视频（走抖音自带分享，不是贴链接）；默认开着
+		shareVideo: dm.shareVideo !== false,
 		master: String(d?.masterName ?? '').trim(),
 		targets
 	};
@@ -110,6 +114,7 @@ export function proactiveStatus(social) {
 	return {
 		enabled: cfg.enabled,
 		perDay: cfg.perDay,
+		shareVideo: cfg.shareVideo !== false,
 		coolHours: cfg.coolHours,
 		minGapHours: Math.round(cfg.minGapMs / HOUR_MS),
 		todayCount: day.count,
@@ -127,61 +132,50 @@ export function proactiveStatus(social) {
 }
 
 /**
- * 关注列表里挑「互相关注」的人：用户说的现象就是——名单里所有人都会列出来，
- * 只有跟她互相关注的那几个，名字后面会多一个「互相关注」标记。所以以这个标记为准。
+ * 关注列表里挑「互相关注」的人。页面上的真实形态（用户截图确认过）：
+ * 每个条目右边一个灰色圆角小按钮，按钮上写「相互关注」（老文案是「互相关注」），
+ * 名字本身不带任何标记 —— 所以不能按「名字后面跟着互相关注」去找，
+ * 要按「这一条里有没有那个互关小按钮」判定，名字从这一条的主页链接里取。
  */
 const MUTUAL_JS = String.raw`(() => {
   const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
-  const BAD = /^(互相关注|已关注|关注|取消关注|回关|私信|发消息|粉丝|获赞|作品|喜欢|收藏)$/;
+  // 互关按钮的文案：现在页面写的是「相互关注」，兼容老文案「互相关注」/「互关」
+  const MARK = /^(相互关注|互相关注|互关)$/;
+  const PLAIN = /^(已关注|关注|取消关注|回关|私信|发消息|粉丝|获赞|作品|喜欢|收藏|关注你)$/;
   const numLike = /^\d+(\.\d+)?\s*[万wW]?$/;
   const okName = (s) => {
     const t = clean(s);
-    if (t === '' || t.length > 24) return '';
-    if (BAD.test(t) || numLike.test(t)) return '';
+    if (t === '' || t.length > 30) return '';
+    if (MARK.test(t) || PLAIN.test(t) || numLike.test(t)) return '';
     return t;
   };
-  // 名字后面跟着「互相关注」：先看同一行「张三 互相关注」，再看标记独占一行时的上一行
-  const nameOf = (el, a) => {
-    const lines = String(el.innerText || '').split('\n').map(clean).filter((x) => x !== '');
-    for (const ln of lines) {
-      const m = /^(.*?)\s*互相关注\s*$/.exec(ln);
-      if (m) { const n = okName(m[1]); if (n) return n; }
-    }
-    const i = lines.findIndex((x) => x === '互相关注' || x.endsWith('互相关注'));
-    if (i > 0) { const n = okName(lines[i - 1]); if (n) return n; }
-    for (const x of String(a?.innerText || '').split('\n').map(clean)) {
-      const n = okName(x);
-      if (n) return n;
-    }
-    // 兜底：卡片里第一个像名字的行（跳过「互相关注」「已关注」这类按钮字）
-    for (const x of lines) {
-      const n = okName(x);
-      if (n) return n;
-    }
-    return okName(a?.getAttribute('title') || a?.getAttribute('aria-label') || '');
-  };
+  const visBox = (el) => { const r = el.getBoundingClientRect(); const a = r.width * r.height; return a > 600 && a < 400000; };
+  // ① 先找所有「互关小按钮」：文案正好是 MARK 的最内层元素
+  const marks = [...document.querySelectorAll('button,span,div,p')].filter((el) => {
+    if (!MARK.test(clean(el.textContent))) return false;
+    return ![...el.children].some((c) => MARK.test(clean(c.textContent)));
+  });
   const out = new Map();
-  const cards = [...document.querySelectorAll('div,li')]
-    .map((el) => {
-      const t = el.innerText || '';
-      if (!t.includes('互相关注')) return null;
-      const a = el.querySelector('a[href*="/user/"]');
-      if (!a) return null;
-      const r = el.getBoundingClientRect();
-      const area = r.width * r.height;
-      if (area < 1500 || area > 500000) return null;
-      return { el, a, area };
-    })
-    .filter(Boolean)
-    .sort((x, y) => x.area - y.area);
-  for (const c of cards) {
-    const m = /\/user\/([A-Za-z0-9_-]{4,})/.exec(String(c.a.getAttribute('href') || ''));
+  for (const mk of marks) {
+    // ② 从这个按钮往上找「这一条」：最近一个包含主页链接、尺寸像一行的祖先
+    let el = mk.parentElement;
+    let card = null;
+    for (let i = 0; i < 8 && el; i++) {
+      if (el.querySelector('a[href*="/user/"]') && visBox(el)) { card = el; break; }
+      el = el.parentElement;
+    }
+    if (!card) continue;
+    const a = card.querySelector('a[href*="/user/"]');
+    const m = /\/user\/([A-Za-z0-9_-]{4,})/.exec(String(a.getAttribute('href') || ''));
     if (!m || out.has(m[1])) continue;
-    const name = nameOf(c.el, c.a);
+    // ③ 名字就从主页链接取（链接里的文字就是昵称），取不到再退到这一条的第一行文字
+    const lines = String(card.innerText || '').split('\n').map(clean);
+    const firstText = lines.find((x) => okName(x) !== '') || '';
+    const name = okName(a.innerText) || okName(a.getAttribute('title')) || okName(a.getAttribute('aria-label')) || okName(firstText);
     if (!name) continue;
     out.set(m[1], { name, uid: m[1] });
   }
-  return { list: [...out.values()], users: document.querySelectorAll('a[href*="/user/"]').length };
+  return { list: [...out.values()], users: document.querySelectorAll('a[href*="/user/"]').length, marks: marks.length };
 })()`;
 
 /** 个人主页顶部那个「关注 123」/「123 关注」——点它才是进关注列表的正路。 */
@@ -296,7 +290,7 @@ const READ_INPUT_JS = String.raw`(() => {
 /* ── 抓名单 ──────────────────────────────────────────────────────── */
 
 /**
- * 拉互关名单：进希希自己的个人主页 → 点「关注」按钮 → 关注列表里挑名字后面带「互相关注」的人。
+ * 拉互关名单：进希希自己的个人主页 → 点「关注」按钮 → 关注列表里挑右侧带「相互关注」小按钮的人。
  * 调用方必须已经在 host.exclusive 里。
  * @returns {Promise<{ok: boolean, list: Array<{name: string, uid: string}>, error?: string, via?: string}>}
  */
@@ -343,7 +337,7 @@ export async function listMutualFriends(host) {
 			ok: false,
 			list: [],
 			via,
-			error: '关注列表里没读到名字后面标着「互相关注」的人（可能列表没加载出来，或者现在还没有人跟她互关）'
+			error: '关注列表里没读到标着「相互关注」的人（可能列表没加载出来，或者现在还没有人跟她互关）'
 		};
 	}
 	return { ok: true, list: [...seen.values()], via };
@@ -440,10 +434,181 @@ export async function sendToFriend(host, friend, text) {
 	return sent.ok ? { ok: true, via: '主页私信' } : { ok: false, error: sent.error };
 }
 
+/* ── 分享她的视频（走抖音自带的「分享 → 私信」，不是贴链接） ───── */
+
+/** 她主页上能看到的作品 id（缓存 12 小时，省得每次都翻页）。 */
+const MY_VIDEOS_JS = String.raw`(() => {
+  const ids = [];
+  for (const a of document.querySelectorAll('a[href*="/video/"]')) {
+    const m = /\/video\/(\d{8,})/.exec(String(a.getAttribute('href') || ''));
+    if (m && !ids.includes(m[1])) ids.push(m[1]);
+  }
+  return ids.slice(0, 40);
+})()`;
+
+/** 点视频页上那个「分享」按钮（图标按钮，文案可能只有「分享」，也可能只有 data-e2e）。 */
+const CLICK_SHARE_BTN_JS = String.raw`(() => {
+  const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 8 && r.height > 8 && r.top > -60 && r.top < window.innerHeight + 60; };
+  const hit = (el) => {
+    if (!vis(el)) return false;
+    const t = clean(el.innerText);
+    const aria = clean(el.getAttribute('aria-label') || el.getAttribute('title') || '');
+    const e2e = String(el.getAttribute('data-e2e') || '');
+    if (/share/i.test(e2e)) return true;
+    if (aria === '分享' || /^分享[（(]?\d*[)）]?$/.test(aria)) return true;
+    return t === '分享' || /^分享[（(]?\d*[)）]?$/.test(t);
+  };
+  const cands = [...document.querySelectorAll('button,div,span,a')].filter(hit)
+    .sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return ra.width * ra.height - rb.width * rb.height; });
+  const el = cands[0];
+  if (!el) return false;
+  el.scrollIntoView({ block: 'center' });
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    try { el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window })); } catch (e) { /* 忽略 */ }
+  }
+  try { el.click(); } catch (e) { /* 忽略 */ }
+  return true;
+})()`;
+
+/** 分享面板里选「私信 / 发送给朋友」。 */
+const CLICK_SHARE_DM_JS = String.raw`(() => {
+  const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const WANT = /^(私信|发送给朋友|发给朋友|分享给朋友|发给好友|好友|发消息)$/;
+  const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 8 && r.height > 8; };
+  const cands = [...document.querySelectorAll('button,div,span,li,a')].filter((el) => {
+    if (!vis(el)) return false;
+    const t = clean(el.innerText);
+    if (!WANT.test(t)) return false;
+    return ![...el.children].some((c) => clean(c.innerText) === t); // 只要最内层
+  }).sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return ra.width * ra.height - rb.width * rb.height; });
+  const el = cands[0];
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    try { el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window })); } catch (e) { /* 忽略 */ }
+  }
+  try { el.click(); } catch (e) { /* 忽略 */ }
+  return true;
+})()`;
+
+/** 分享面板的好友列表里点中她（有搜索框就先搜一下）。 */
+const shareFriendJs = (name) => `(() => {
+  const clean = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();
+  const NAME = ${JSON.stringify(String(name ?? ''))};
+  const KEY = NAME.replace(/[^\\u4e00-\\u9fa5A-Za-z0-9_.-]/g, '');
+  const short = KEY.slice(0, 4);
+  const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 6 && r.height > 6; };
+  const box = [...document.querySelectorAll('input')].filter(vis)
+    .find((i) => /搜索|好友|昵称|用户/.test(String(i.placeholder || '') + String(i.getAttribute('aria-label') || '')));
+  if (box) {
+    box.focus();
+    box.value = NAME;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  const score = (t) => {
+    if (t === '' || t.length > 40) return 0;
+    if (NAME !== '' && (t === NAME || t.startsWith(NAME))) return 3;
+    if (NAME !== '' && t.includes(NAME)) return 2;
+    if (short.length >= 2 && t.includes(short)) return 1;
+    return 0;
+  };
+  const items = [...document.querySelectorAll('div,li,span,p')].map((el) => ({ el, s: score(clean(el.innerText)) }))
+    .filter((x) => x.s > 0 && vis(x.el))
+    .sort((a, b) => (b.s - a.s) || (a.el.getBoundingClientRect().width * a.el.getBoundingClientRect().height - b.el.getBoundingClientRect().width * b.el.getBoundingClientRect().height));
+  const el = items[0]?.el;
+  if (!el) return { ok: false };
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    try { el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window })); } catch (e) { /* 忽略 */ }
+  }
+  try { el.click(); } catch (e) { /* 忽略 */ }
+  return { ok: true, picked: clean(el.innerText).slice(0, 24) };
+})()`;
+
+/** 点了好友之后点「发送」。 */
+const CLICK_SHARE_SEND_JS = String.raw`(() => {
+  const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const WANT = /^(发送|发送给ta|发送给TA|确认发送|发送消息)$/;
+  const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 8 && r.height > 8; };
+  const cands = [...document.querySelectorAll('button,div,span,a')].filter((el) => {
+    if (!vis(el)) return false;
+    const t = clean(el.innerText);
+    if (!WANT.test(t)) return false;
+    return ![...el.children].some((c) => clean(c.innerText) === t);
+  }).sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return ra.width * ra.height - rb.width * rb.height; });
+  const el = cands[0];
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    try { el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window })); } catch (e) { /* 忽略 */ }
+  }
+  try { el.click(); } catch (e) { /* 忽略 */ }
+  return true;
+})()`;
+
+async function myVideoIds(social) {
+	let cached = null;
+	try { cached = getKv(social.db, KV_VIDEOS, null); } catch { cached = null; }
+	const kept = Array.isArray(cached?.ids) ? cached.ids.map((x) => String(x)).filter((x) => /^\d{8,}$/.test(x)) : [];
+	if (kept.length > 0 && Date.now() - Number(cached?.at ?? 0) < 12 * HOUR_MS) return kept;
+	const browser = social.host?.browser;
+	if (!browser) return kept;
+	await browser.goto(PROFILE_URL, { settleMs: 6500 }).catch(() => {});
+	await sleep(1600);
+	const found = await browser.eval(MY_VIDEOS_JS).catch(() => []);
+	const clean = [...new Set((Array.isArray(found) ? found : []).map((x) => String(x)).filter((x) => /^\d{8,}$/.test(x)))];
+	if (clean.length > 0) { try { setKv(social.db, KV_VIDEOS, { at: Date.now(), ids: clean }); } catch { /* 存不下不影响这次 */ } }
+	return clean.length > 0 ? clean : kept;
+}
+
+/**
+ * 把她的一条作品用抖音自带的「分享 → 私信」发给某个好友：对方收到的是视频卡片，不是链接。
+ * 调用方必须已在 host.exclusive 里。
+ * @returns {Promise<{ok: boolean, videoId?: string, picked?: string, error?: string}>}
+ */
+export async function shareVideoToFriend(social, friend) {
+	const browser = social.host?.browser;
+	if (!browser) return { ok: false, error: '浏览器没在运行' };
+	const name = String(friend?.name ?? '').trim();
+	if (name === '') return { ok: false, error: '没有好友名字，分享不了' };
+	const ids = await myVideoIds(social).catch(() => []);
+	if (ids.length === 0) return { ok: false, error: '她主页上没找到可以分享的作品' };
+	const id = ids[Math.floor(social.random() * ids.length) % ids.length];
+	await browser.goto(`https://www.douyin.com/video/${id}`, { settleMs: 6500 }).catch(() => {});
+	await sleep(1600);
+	let clicked = false;
+	for (let i = 0; i < 3 && !clicked; i++) {
+		clicked = (await browser.eval(CLICK_SHARE_BTN_JS).catch(() => false)) === true;
+		if (!clicked) await sleep(1300);
+	}
+	if (!clicked) return { ok: false, error: '视频页上没找到「分享」按钮' };
+	await sleep(1600);
+	const toDm = (await browser.eval(CLICK_SHARE_DM_JS).catch(() => false)) === true;
+	if (!toDm) return { ok: false, error: '分享面板里没找到「私信 / 发送给朋友」' };
+	await sleep(2000);
+	const picked = await browser.eval(shareFriendJs(name)).catch(() => null);
+	if (picked?.ok !== true) return { ok: false, error: `分享面板里没找到「${name}」` };
+	await sleep(1200);
+	const sent = (await browser.eval(CLICK_SHARE_SEND_JS).catch(() => false)) === true;
+	if (!sent) return { ok: false, error: '选了好友但没找到「发送」按钮' };
+	await sleep(2400);
+	return { ok: true, videoId: id, picked: String(picked?.picked ?? '') };
+}
+
 /* ── 说什么 ──────────────────────────────────────────────────────── */
 
 /** 让模型按人格写一句（可以 [不发]）。 */
-async function draft(social, friend, history) {
+async function draft(social, friend, history, { withVideo = false } = {}) {
 	const p = social.persona?.() ?? { name: '鱼', brief: '' };
 	const person = (() => { try { return findPersonByDouyin(social.db, friend.name); } catch { return null; } })();
 	const parts = (() => { try { return social.clock.getRoleDateParts(); } catch { return {}; } })();
@@ -464,9 +629,12 @@ async function draft(social, friend, history) {
 		'- 可以问一句、说个此刻的小事、接上次聊的话头；别硬套模板。',
 		'- 不要提「互关」「关注」「看到你」这类平台关系，不要自我介绍，不要说自己是谁。',
 		'- 不要推销、不要索要联系方式、不要带链接、话题标签、@ 任何人和表情码。',
+		withVideo
+			? '- 这次会顺手把你自己的一条视频分享给 ta（视频单独发过去），文字就一句「你看这个」那种，别描述画面、别解释自己在分享。'
+			: '',
 		'- 实在没什么想说的，就只输出：[不发]',
 		'- 只输出要发的那句话本身，不要加引号、不要解释。'
-	].join('\n');
+	].filter((x) => x !== '').join('\n');
 	let raw = null;
 	try { raw = await social.callLlm(prompt); } catch { raw = null; }
 	let text = String(raw ?? '').trim();
@@ -491,8 +659,8 @@ function pushRecent(social, item) {
 	try { setKv(social.db, KV_RECENT, next); } catch { /* 记不上就算了 */ }
 }
 
-function remember(social, { name, text, ok, error = '' }) {
-	pushRecent(social, { name, text: String(text ?? ''), ok: ok === true, error: String(error ?? '').slice(0, 120), at: Date.now() });
+function remember(social, { name, text, ok, error = '', shared = false }) {
+	pushRecent(social, { name, text: String(text ?? ''), ok: ok === true, error: String(error ?? '').slice(0, 120), shared: shared === true, at: Date.now() });
 	if (ok) {
 		try { setKv(social.db, KV_ERROR, ''); } catch { /* 同上 */ }
 	} else if (error) {
@@ -570,24 +738,36 @@ export async function runProactive(social, { manual = false } = {}) {
 		}, { maxMs: 90_000 }).catch(() => []) ?? [];
 	}
 
-	// ④ 写一句
-	const text = await draft(social, friend, history);
+	// ④ 写一句（这次要带视频分享的话，文字就写得像「你看这个」，不描述画面）
+	const wantShare = c.shareVideo === true;
+	const text = await draft(social, friend, history, { withVideo: wantShare });
 	if (text === '') {
 		remember(social, { name: friend.name, text: '', ok: false, error: '这次没想说的' });
 		return { ok: false, error: '这次没想说的（模型选了不发）' };
 	}
 
-	// ⑤ 发出去
+	// ⑤ 顺手分享一条她自己的视频：走抖音自带的「分享 → 私信」，对方收到的是视频卡片，不是链接。
+	//    分享不成就只发那句文字，不因为视频卡住整条私信。
+	let shared = { ok: false, error: '没开分享' };
+	if (wantShare) {
+		shared = await host.exclusive('把她的一条视频分享给好友', () => shareVideoToFriend(social, friend), { maxMs: 200_000 })
+			.catch((e) => ({ ok: false, error: errText(e) }));
+		if (shared?.ok !== true) {
+			social.log('info', `[fish-soul] 抖音主动私信：分享视频没成（${friend.name}）：${shared?.error ?? '未知'}，这次只发文字`);
+		}
+	}
+
+	// ⑥ 发那句文字
 	const r = await host.exclusive('主动给互关好友发私信', () => sendToFriend(host, friend, text), { maxMs: 240_000 })
 		.catch((e) => ({ ok: false, error: errText(e) }));
-	remember(social, { name: friend.name, text, ok: r?.ok === true, error: r?.ok === true ? '' : (r?.error ?? '没发出去') });
+	remember(social, { name: friend.name, text, ok: r?.ok === true, error: r?.ok === true ? '' : (r?.error ?? '没发出去'), shared: shared?.ok === true });
 
 	if (r?.ok !== true) {
 		social.log('warn', `[fish-soul] 抖音主动私信失败（${friend.name}）：${r?.error ?? '未知'}`);
 		return { ok: false, error: r?.error ?? '没发出去' };
 	}
 
-	// ⑥ 记账：今天总共几条 + 这个人今天第几条、下次什么时候才能再发
+	// ⑦ 记账：今天总共几条 + 这个人今天第几条、下次什么时候才能再发
 	try {
 		const byName = { ...(day.byName ?? {}) };
 		byName[friend.name] = sentToday(day, friend.name) + 1;
@@ -595,8 +775,8 @@ export async function runProactive(social, { manual = false } = {}) {
 		sent[friend.name] = Date.now();
 		setKv(social.db, KV_SENT, sent);
 	} catch { /* 记账失败不影响已经发出去的消息 */ }
-	social.note?.('dm', { title: '抖音主动私信', reason: `给选中的 ${friend.name} 发了一条`, text });
-	return { ok: true, name: friend.name, text, via: r.via ?? '' };
+	social.note?.('dm', { title: '抖音主动私信', reason: `给选中的 ${friend.name} 发了一条${shared?.ok === true ? '（还分享了一条她的视频）' : ''}`, text });
+	return { ok: true, name: friend.name, text, via: r.via ?? '', shared: shared?.ok === true, videoId: shared?.videoId ?? '' };
 }
 
 export function maybeSendProactive(social, ctx = {}) {
