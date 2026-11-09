@@ -6,7 +6,7 @@
 
 上游插件本身是完整的：人格、按人记忆、生活节奏、QQ / B站 / 抖音三端。这个仓库只负责「上游还没做、但我们需要」的几处改动（含系统设置里那份**个人插件**清单），用脚本打到你机器上**已安装的那一份**插件里。
 
-> **注意区分**：设置页里说的「个人插件」指的是**这个仓库打给 dsh-fish-soul 的补丁**（P1–P5 逐处），不是 DSH 宿主里安装的那些插件。DSH 侧插件在同一页下面单列为「对照」，两者别混为一谈。
+> **注意区分**：设置页里说的「个人插件」指的是**这个仓库打给 dsh-fish-soul 的补丁**（P1–P5 逐处），不是 DSH 宿主里安装的那些插件；这一页只列补丁，不列宿主插件。
 
 ## 设计原则
 
@@ -36,8 +36,8 @@
 | BGM 抓取留痕 + 挑歌兜底 | `douyin-music-trace` | 抓不到 BGM 时留痕，挑歌时滤掉非歌曲条目 | 🟡 仍需 |
 | 热更新后人格卡 + 记忆块掉线 | `index-remount-our-session` | `noteInteraction` 里每条消息补挂一次人格段（会话还活着、`ensureSession` 见 live 直接 return 时不再永久掉线） | 🟡 仍需 |
 | `sectionsMounted` 从 Set 改 Map | `index-remount-map` | 记的是 ctx 本身而不是 id，宿主换了 ctx 才重挂、同一 ctx 不重复注册 | 🟡 仍需 |
-| 设置里列出个人插件 | `client-system-plugins-tab` 等 5 处 | 系统设置加「个人插件」页：**先逐处核对本仓库的补丁**（P1–P5 每组几处打了几处、每处是已打 / 上游已接管 / 没打 / 文件不在），下面再以「DSH 侧插件（对照）」列出宿主里装的插件（名字 / 版本 / 来源 / 是否启用）。新增 `lib/routes-plugins.js` + `GET /plugins/installed`，纯只读，不装不卸、不联网 | 🟡 仍需（上游无此页） |
-| 主动给抖音互关的人发私信 | `dm-*` 11 处 | 新增 `lib/douyin-proactive.js`（抓互关名单 / 挑人 / 按人格写一句 / 发送 / 记账），自走层 15 分钟 tick 里按配额决定要不要发一次；开关在 设置 → 平台 → 抖音 → 主动私信（默认关），另有「现在试一次」按钮 | 🟡 仍需（上游无私信主动发起） |
+| 设置里列出个人插件 | `client-system-plugins-tab` 等 5 处 | 系统设置加「个人插件」页：逐处核对本仓库的补丁（P1–P5 每组几处打了几处、每处是已打 / 上游已接管 / 没打 / 文件不在）。新增 `lib/routes-plugins.js` + `GET /plugins/installed`，纯只读，不装不卸、不联网 | 🟡 仍需（上游无此页） |
+| 主动给抖音互关的人发私信 | `dm-*` 11 处 | 新增 `lib/douyin-proactive.js`（拉希希关注列表里**互相关注**的名单 / 按人格写一句 / 发送 / 记账）。发不发、发给谁由自己定：设置页先点「拉互相关注名单」，再勾选要发的那几个人；配额按**一天最多几次** + **同一个人隔几小时**才再发。自走层 15 分钟 tick 里按剩余次数随机发一条；开关在 设置 → 平台 → 抖音 → 主动私信（默认关），另有「现在试一次」按钮 | 🟡 仍需（上游无私信主动发起） |
 
 状态取自 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)（对着 npm 最新版自动体检生成，每周更新一次）。带 `douyin-` / `index-` / `client-` / `routes-` 前缀的都是小块锚点：抖音四处看 [`assets/douyin-hunks.json`](assets/douyin-hunks.json)，人格段两处看 [`assets/index-hunks.json`](assets/index-hunks.json)，个人插件页五处看 [`assets/plugins-hunks.json`](assets/plugins-hunks.json)（外加新文件 [`assets/plugins-route.js`](assets/plugins-route.js)），逐处替换、不再整文件覆盖。
 

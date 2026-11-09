@@ -39,12 +39,20 @@ export function dmCfg(d) {
 	const num = (v, def, lo, hi) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Math.floor(Number(v)))) : def);
 	const on = d?.enabled === true;
 	const dm = d?.dm ?? {};
+	// 要发给谁：设置页自己勾的名单（[{name, uid}]），空着就是谁也不发
+	const targets = (Array.isArray(dm.targets) ? dm.targets : [])
+		.map((x) => ({ name: String(x?.name ?? '').trim(), uid: String(x?.uid ?? '').trim() }))
+		.filter((x) => x.name !== '');
+	// 同一个人的冷却：新字段是小时；老配置里只写了 coolDays 的按天换算过来
+	const coolHours = Number.isFinite(Number(dm.coolHours)) ? num(dm.coolHours, 24, 1, 720) : num(dm.coolDays, 1, 1, 60) * 24;
 	return {
 		enabled: on && dm.enabled === true,
-		perDay: num(dm.perDay, 1, 0, 5),
-		coolDays: num(dm.coolDays, 7, 1, 60),
+		perDay: num(dm.perDay, 1, 0, 10),
+		coolHours,
+		coolMs: coolHours * HOUR_MS,
 		minGapMs: num(dm.minGapHours, 3, 1, 24) * HOUR_MS,
-		master: String(d?.masterName ?? '').trim()
+		master: String(d?.masterName ?? '').trim(),
+		targets
 	};
 }
 
@@ -58,7 +66,7 @@ function readDay(social, dateStr) {
 
 /** 设置页要看的：开关、今天发了几个、互关名单多大、最近发过什么、上次出错。 */
 export function proactiveStatus(social) {
-	let cfg = { enabled: false, perDay: 1, coolDays: 7, minGapMs: 3 * HOUR_MS, master: '' };
+	let cfg = { enabled: false, perDay: 1, coolHours: 24, coolMs: DAY_MS, minGapMs: 3 * HOUR_MS, master: '', targets: [] };
 	let day = { count: 0, lastReal: 0 };
 	let mutual = null;
 	let recent = [];
@@ -68,22 +76,26 @@ export function proactiveStatus(social) {
 	try { mutual = getKv(social.db, KV_MUTUAL, null); } catch { mutual = null; }
 	try { recent = getKv(social.db, KV_RECENT, []) ?? []; } catch { recent = []; }
 	try { error = String(getKv(social.db, KV_ERROR, '') ?? ''); } catch { error = ''; }
+	// 还没选人的时候，把上次拉到（或上次自动抓的）互关名单当候选回显给设置页
+	const cached = Array.isArray(mutual?.list) ? mutual.list : [];
+	const picked = cfg.targets.map((x) => x.name);
 	return {
 		enabled: cfg.enabled,
 		perDay: cfg.perDay,
-		coolDays: cfg.coolDays,
+		coolHours: cfg.coolHours,
+		minGapHours: Math.round(cfg.minGapMs / HOUR_MS),
 		todayCount: day.count,
 		lastAt: day.lastReal,
-		mutualCount: Array.isArray(mutual?.list) ? mutual.list.length : 0,
+		targets: cfg.targets,
+		pickedNames: picked,
+		mutualCount: cached.length,
 		mutualAt: Number(mutual?.at ?? 0),
+		mutualList: cached.slice(0, 200),
 		recent: Array.isArray(recent) ? recent.slice(0, 6) : [],
 		lastError: error
 	};
 }
 
-/* ── 页面小脚本 ──────────────────────────────────────────────────── */
-
-/** 关注页上「互相关注」那一撮卡片 → [{name, uid}]（取最内层卡片，按 sec_uid 去重）。 */
 const MUTUAL_JS = String.raw`(() => {
   const STOP = /^(互相关注|已关注|关注|私信|作品|喜欢|收藏|粉丝|获赞|回关)$/;
   const out = new Map();
@@ -349,42 +361,53 @@ function remember(social, { name, text, ok, error = '' }) {
  * 走一次：抓名单 → 挑一个没聊过的 → 让模型写一句 → 发出去 → 记账。
  * 调用方：自走层 tick（maybeSendProactive）/ 设置页「现在试一次」（manual=true，不吃配额）。
  */
+/**
+ * 拉一份「互相关注」候选名单（设置页「重新拉名单」用）。抓到就顺手写缓存。
+ * 只在 host.exclusive 里跑，最多两分半。
+ */
+export async function listCandidates(social, { refresh = true } = {}) {
+	const host = social.host;
+	if (!host || host.running !== true) return { ok: false, list: [], error: '抖音浏览器没在运行' };
+	if (host.loggedIn !== true) return { ok: false, list: [], error: '抖音还没登录' };
+	if (!refresh) {
+		let cached = null;
+		try { cached = getKv(social.db, KV_MUTUAL, null); } catch { cached = null; }
+		if (Array.isArray(cached?.list) && cached.list.length > 0) return { ok: true, list: cached.list, at: Number(cached.at ?? 0) };
+	}
+	const grabbed = await host.exclusive('读抖音互关名单', () => listMutualFriends(host), { maxMs: 150_000 })
+		.catch((e) => ({ ok: false, list: [], error: errText(e) }));
+	if (grabbed.ok !== true) {
+		const why = grabbed.error ?? '没读到互关名单';
+		try { setKv(social.db, KV_ERROR, why); } catch { /* 同上 */ }
+		social.log('warn', `[fish-soul] 抖音主动私信：${why}`);
+		return { ok: false, list: [], error: why };
+	}
+	const at = Date.now();
+	try { setKv(social.db, KV_MUTUAL, { at, list: grabbed.list }); } catch { /* 存不下不影响这次 */ }
+	return { ok: true, list: grabbed.list, at };
+}
+
 export async function runProactive(social, { manual = false } = {}) {
 	const c = dmCfg(social.getConfig() ?? {});
 	const host = social.host;
 	if (!host || host.running !== true) return { ok: false, error: '抖音浏览器没在运行' };
 	if (host.loggedIn !== true) return { ok: false, error: '抖音还没登录' };
 
-	// ① 互关名单（缓存 6 小时；手动试一次就重抓）
-	let mutual = null;
-	try { mutual = getKv(social.db, KV_MUTUAL, null); } catch { mutual = null; }
-	const stale = !mutual || !Array.isArray(mutual.list) || mutual.list.length === 0 || Date.now() - Number(mutual.at ?? 0) > MUTUAL_TTL_MS;
-	if (manual || stale) {
-		const grabbed = await host.exclusive('读抖音互关名单', () => listMutualFriends(host), { maxMs: 150_000 })
-			.catch((e) => ({ ok: false, list: [], error: errText(e) }));
-		if (grabbed.ok !== true) {
-			const why = grabbed.error ?? '没读到互关名单';
-			try { setKv(social.db, KV_ERROR, why); } catch { /* 同上 */ }
-			social.log('warn', `[fish-soul] 抖音主动私信：${why}`);
-			return { ok: false, error: why };
-		}
-		mutual = { at: Date.now(), list: grabbed.list };
-		try { setKv(social.db, KV_MUTUAL, mutual); } catch { /* 同上 */ }
+	// ① 只发给她在设置页勾过的那几个人（不再自己抓名单、不再自己挑）
+	if (c.targets.length === 0) {
+		return { ok: false, error: '还没选要发给谁（设置 → 平台 → 抖音 → 主动私信，先拉互相关注名单再点选）' };
 	}
 
-	// ② 挑人：排除主人、排除冷却期内已经聊过的
+	// ② 挑人：排除主人、排除还在冷却期里的
 	let sent = {};
 	try { sent = getKv(social.db, KV_SENT, {}) ?? {}; } catch { sent = {}; }
-	const coolMs = c.coolDays * DAY_MS;
-	const pool = (mutual.list ?? []).filter((x) => {
-		const name = String(x?.name ?? '').trim();
-		if (name === '') return false;
-		if (c.master !== '' && name === c.master) return false;
-		const last = Number(sent[name] ?? 0);
-		return !(last > 0 && Date.now() - last < coolMs);
+	const pool = c.targets.filter((x) => {
+		if (c.master !== '' && x.name === c.master) return false;
+		const last = Number(sent[x.name] ?? 0);
+		return !(last > 0 && Date.now() - last < c.coolMs);
 	});
 	if (pool.length === 0) {
-		return { ok: false, error: `互关的人里没有还能聊的（每人都要隔 ${c.coolDays} 天）` };
+		return { ok: false, error: `选中的 ${c.targets.length} 个人都在冷却期（同一个人要隔 ${c.coolHours} 小时）` };
 	}
 	const friend = pool[Math.floor(social.random() * pool.length) % pool.length];
 
@@ -415,7 +438,7 @@ export async function runProactive(social, { manual = false } = {}) {
 		return { ok: false, error: r?.error ?? '没发出去' };
 	}
 
-	// ⑥ 记账：今天几个、这个人下次什么时候才能再发
+	// ⑥ 记账：今天发了几次、这个人下次什么时候才能再发
 	const dateStr = social.clock.getRoleDateParts().dateStr;
 	const day = readDay(social, dateStr);
 	try {
@@ -423,11 +446,10 @@ export async function runProactive(social, { manual = false } = {}) {
 		sent[friend.name] = Date.now();
 		setKv(social.db, KV_SENT, sent);
 	} catch { /* 记账失败不影响已经发出去的消息 */ }
-	social.note?.('dm', { title: '抖音主动私信', reason: `给互关的 ${friend.name} 发了一条`, text });
+	social.note?.('dm', { title: '抖音主动私信', reason: `给选中的 ${friend.name} 发了一条`, text });
 	return { ok: true, name: friend.name, text, via: r.via ?? '' };
 }
 
-/** 自走层每 tick 问一次：现在该不该主动发一条（概率摊到剩下的时段里）。 */
 export function maybeSendProactive(social, ctx = {}) {
 	const c = dmCfg(social.getConfig() ?? {});
 	if (!c.enabled || c.perDay === 0) return false;

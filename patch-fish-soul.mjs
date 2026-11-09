@@ -515,11 +515,12 @@ const PLUGINS_ROUTE_SRC = join(HERE, 'assets', 'plugins-route.js');
 const PLUGINS_ROUTE_VER = 'FS-PLUGINS-ROUTE v2';
 
 /**
- * 设置页加一个只读的「已装插件」清单：新增 lib/routes-plugins.js（读当前 profile 的 dependencies
+ * 设置页加一个只读的「个人插件」清单：新增 lib/routes-plugins.js（读当前 profile 的 dependencies
  * 与各插件自己的 package.json，本地算出来，不联网），再按 assets/plugins-hunks.json 打锚点。
+ * 这一页只列本仓库打在 dsh-fish-soul 上的补丁，不列 DSH 宿主里装的插件。
  */
 function patchPlugins() {
-	log('\n[P4 plugins] 设置里列出已装插件（只读清单）');
+	log('\n[P4 plugins] 设置里列出个人插件（只读清单）');
 	const routePath = join(lib, 'routes-plugins.js');
 	const haveRoute = existsSync(routePath) ? readFileSync(routePath, 'utf8') : '';
 	if (haveRoute.includes(PLUGINS_ROUTE_VER)) {
@@ -552,16 +553,23 @@ function patchPlugins() {
 const DM_SRC = join(HERE, 'assets', 'douyin-proactive.js');
 
 /**
- * 抖音那边原本只有「别人发来 → 她回」，没有「她主动找互关的人」。
- * 这里新增 lib/douyin-proactive.js（抓互关名单 / 挑人 / 写话 / 发送 + 记账），
+ * 抖音那边原本只有「别人发来 → 她回」，没有「她主动找人」。
+ * 这里新增 lib/douyin-proactive.js（拉希希关注列表里互相关注的人 / 按人格写话 / 发送 + 记账），
  * 再按 assets/dm-hunks.json 打 11 处锚点：douyin-social（方法 + status）、index（tick）、
- * config-platforms（schema）、routes-douyin（回显 / 保存 / 新路由）、client.douyin（设置页开关）。
+ * config-platforms（schema）、routes-douyin（回显 / 保存 / 候选名单 + 新路由）、
+ * client.douyin（设置页：拉名单 → 自己勾人 + 一天最多几次 + 同一个人隔几小时）。
  */
 function patchDm() {
 	log('\n[P5 dm] 主动给抖音互关好友发私信（设置 → 平台 → 抖音 → 主动私信）');
 	const target = join(lib, 'douyin-proactive.js');
 	const hasMarker = existsSync(target) && readFileSync(target, 'utf8').includes('FS-DOUYIN-DM-PATCH');
-	if (hasMarker) {
+	// 老版本装过（内容跟本包里的不一样）→ 整份换成包里的新版；本插件自己的文件，不做逐行 diff。
+	const staleFile = hasMarker && existsSync(DM_SRC) && readFileSync(target, 'utf8') !== readFileSync(DM_SRC, 'utf8');
+	if (staleFile) {
+		if (!CHECK) writeFileSync(target, readFileSync(DM_SRC, 'utf8'), 'utf8');
+		log('  ↑ lib/douyin-proactive.js 老版本 → 换成新版');
+		changed += 1;
+	} else if (hasMarker) {
 		log('  ＝ lib/douyin-proactive.js 已经存在');
 		skipped += 1;
 	} else {
