@@ -977,7 +977,9 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 		ok: true,
 		videoId: id,
 		picked: name,
-		videoDesc: String(item.desc ?? '').slice(0, 60),
+		videoDesc: String(item.desc ?? '').slice(0, 120),
+		videoTags: (Array.isArray(item.tags) ? item.tags : []).map((t) => String(t ?? '').trim()).filter((t) => t !== '').slice(0, 6),
+		videoDurS: Number(item.durS) > 0 ? Number(item.durS) : 0,
 		videoTypes: pickedVideo.types,
 		fellBack: pickedVideo.fellBack,
 	};
@@ -990,7 +992,7 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
  * 关键：人格卡全文递进去（persona.brief 只有 300 字，谁写出来都一个味），
  * 再把她最近发过的话一起给她看，明确要求换角度、换开头、别复用说法。
  */
-async function draft(social, friend, history, { withVideo = false } = {}) {
+export async function draft(social, friend, history, { withVideo = false, video = null } = {}) {
 	const p = social.persona?.() ?? { name: '鱼', brief: '' };
 	// 性格优先：full 是人格卡全文；老版本插件没提供 full 就退回 brief，不至于写不出话。
 	const soulRaw = String(p.full ?? '').trim() !== '' ? String(p.full) : String(p.brief ?? '');
@@ -1016,6 +1018,25 @@ async function draft(social, friend, history, { withVideo = false } = {}) {
 		? `你最近给别的人发过这些（别重复同样的说法、开头、句式）：\n${recentTexts.map((x) => `- ${x.slice(0, 40)}`).join('\n')}`
 		: '';
 	const anchorLine = String(p.anchor ?? '').trim() !== '' ? `最要紧的是这一点：${String(p.anchor).slice(0, 120)}` : '';
+	// [FS-DM-SHARE-MATCH] 这次要发的那条视频，真实信息必须递给模型 ——
+	// 不然它会照着以前聊过的由头瞎编（曾经把广场舞说成「刚翻到个泳装的」）。
+	const videoLine = (() => {
+		if (withVideo !== true) return '';
+		const desc = String(video?.desc ?? '').replace(/\s+/g, ' ').trim();
+		const tags = (Array.isArray(video?.tags) ? video.tags : []).map((t) => String(t ?? '').trim()).filter((t) => t !== '');
+		const dur = Number(video?.durS) > 0 ? `${Number(video.durS)} 秒` : '';
+		const facts = [
+			desc !== '' ? `作品文案：「${desc.slice(0, 90)}」` : '这条作品没有文案',
+			tags.length > 0 ? `话题：#${tags.slice(0, 6).join(' #')}` : '',
+			dur !== '' ? `时长：${dur}` : '',
+		].filter((x) => x !== '').join('；');
+		return [
+			`这次会顺手把你自己的一个视频单独发过去（先卡片、后这句话）。这条视频的真实信息只有这些：${facts}。`,
+			'- 这句话就配在视频旁边，可以顺着它说一句，也可以只是随口一句闲话、只问她一句。',
+			'- 硬规矩：凡是提到视频内容的，必须和上面这几项对得上。视频里没有的东西一个字都不许编 —— 别为了接以前聊过的由头，硬说「刚翻到个××的」；拿不准就不提视频。',
+			'- 别报菜名式复述文案，别解释这是分享，别带话题标签。',
+		].join('\n');
+	})();
 	const prompt = [
 		`你是「${p.name}」。下面是你自己的设定，写出来的每个字都得是这个人：\n${soul}`,
 		anchorLine,
@@ -1031,7 +1052,7 @@ async function draft(social, friend, history, { withVideo = false } = {}) {
 		'- 每条都得和上一条不一样：换角度、换开头、换句式，最近发过的说法别再用。',
 		'- 不要提「互关」「关注」「看到你」这类平台关系，不要自我介绍，不要说自己是谁，也不要说「我发你个视频」。',
 		'- 不要推销、不要索要联系方式、不要带链接、话题标签、@ 任何人和表情码。',
-		withVideo ? '- 这次会顺手把你自己的一个视频单独发过去；文字就是配在视频旁边的一句闲话，别描述画面、别解释这是分享。' : '',
+		withVideo ? videoLine : '',
 		'- 实在没什么想说的，就只输出：[不发]',
 		'- 只输出要发的那句话本身，不要加引号、不要解释。'
 	].filter((x) => x !== '').join('\n');
@@ -1159,7 +1180,10 @@ export async function runProactive(social, { manual = false } = {}) {
 	}
 
 	// ⑤ 再补一句话（卡片后面跟一句「你看这个」，不描述画面）；这次不想说话就只留卡片
-	const text = await draft(social, friend, history, { withVideo: true });
+	const text = await draft(social, friend, history, {
+		withVideo: true,
+		video: { desc: shared?.videoDesc ?? '', tags: shared?.videoTags ?? [], durS: shared?.videoDurS ?? 0 },
+	});
 	let via = '';
 	let textErr = '';
 	if (text !== '') {
