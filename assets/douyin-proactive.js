@@ -30,6 +30,9 @@ const KV_MUTUAL = 'douyin.dm.mutual';
 const KV_RECENT = 'douyin.dm.recent';
 const KV_ERROR = 'douyin.dm.error';
 
+/** 希希自己的个人主页：从这里点「关注 N」进关注列表（用户要的就是这个页）。 */
+const PROFILE_URL = 'https://www.douyin.com/user/self';
+/** 兜底：点不开「关注」按钮时，直接开关注页 URL（同一个列表）。 */
 const FOLLOW_URL = 'https://www.douyin.com/user/self?showTab=follow';
 
 const errText = (e) => String(e instanceof Error ? e.message : e);
@@ -96,10 +99,42 @@ export function proactiveStatus(social) {
 	};
 }
 
+/**
+ * 关注列表里挑「互相关注」的人：用户说的现象就是——名单里所有人都会列出来，
+ * 只有跟她互相关注的那几个，名字后面会多一个「互相关注」标记。所以以这个标记为准。
+ */
 const MUTUAL_JS = String.raw`(() => {
-  const STOP = /^(互相关注|已关注|关注|私信|作品|喜欢|收藏|粉丝|获赞|回关)$/;
+  const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const BAD = /^(互相关注|已关注|关注|取消关注|回关|私信|发消息|粉丝|获赞|作品|喜欢|收藏)$/;
+  const numLike = /^\d+(\.\d+)?\s*[万wW]?$/;
+  const okName = (s) => {
+    const t = clean(s);
+    if (t === '' || t.length > 24) return '';
+    if (BAD.test(t) || numLike.test(t)) return '';
+    return t;
+  };
+  // 名字后面跟着「互相关注」：先看同一行「张三 互相关注」，再看标记独占一行时的上一行
+  const nameOf = (el, a) => {
+    const lines = String(el.innerText || '').split('\n').map(clean).filter((x) => x !== '');
+    for (const ln of lines) {
+      const m = /^(.*?)\s*互相关注\s*$/.exec(ln);
+      if (m) { const n = okName(m[1]); if (n) return n; }
+    }
+    const i = lines.findIndex((x) => x === '互相关注' || x.endsWith('互相关注'));
+    if (i > 0) { const n = okName(lines[i - 1]); if (n) return n; }
+    for (const x of String(a?.innerText || '').split('\n').map(clean)) {
+      const n = okName(x);
+      if (n) return n;
+    }
+    // 兜底：卡片里第一个像名字的行（跳过「互相关注」「已关注」这类按钮字）
+    for (const x of lines) {
+      const n = okName(x);
+      if (n) return n;
+    }
+    return okName(a?.getAttribute('title') || a?.getAttribute('aria-label') || '');
+  };
   const out = new Map();
-  const cards = [...document.querySelectorAll('div,li,a')]
+  const cards = [...document.querySelectorAll('div,li')]
     .map((el) => {
       const t = el.innerText || '';
       if (!t.includes('互相关注')) return null;
@@ -108,20 +143,69 @@ const MUTUAL_JS = String.raw`(() => {
       const r = el.getBoundingClientRect();
       const area = r.width * r.height;
       if (area < 1500 || area > 500000) return null;
-      return { el, a, area, t };
+      return { el, a, area };
     })
     .filter(Boolean)
     .sort((x, y) => x.area - y.area);
   for (const c of cards) {
-    const href = String(c.a.getAttribute('href') || '');
-    const m = /\/user\/([A-Za-z0-9_-]{4,})/.exec(href);
-    if (!m) continue;
-    const lines = c.t.split('\n').map((s) => s.trim()).filter((s) => s !== '');
-    const name = lines.find((s) => s !== '' && !STOP.test(s) && !/^\d+$/.test(s) && !/^\d+(\.\d+)?[万wW]?$/.test(s));
-    if (!name || name.length > 24) continue;
-    if (!out.has(m[1])) out.set(m[1], { name, uid: m[1] });
+    const m = /\/user\/([A-Za-z0-9_-]{4,})/.exec(String(c.a.getAttribute('href') || ''));
+    if (!m || out.has(m[1])) continue;
+    const name = nameOf(c.el, c.a);
+    if (!name) continue;
+    out.set(m[1], { name, uid: m[1] });
   }
-  return { list: [...out.values()] };
+  return { list: [...out.values()], users: document.querySelectorAll('a[href*="/user/"]').length };
+})()`;
+
+/** 个人主页顶部那个「关注 123」/「123 关注」——点它才是进关注列表的正路。 */
+const CLICK_FOLLOW_JS = String.raw`(() => {
+  const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const re = /^(\d+(\.\d+)?\s*[万wW]?\s*关注|关注\s*\d+(\.\d+)?\s*[万wW]?|关注)$/;
+  const users = () => document.querySelectorAll('a[href*="/user/"]').length;
+  const cands = [...document.querySelectorAll('div,span,a,button,p')]
+    .filter((el) => {
+      const t = clean(el.innerText);
+      if (!re.test(t)) return false;
+      if (/互相关注|已关注|关注你|取消关注/.test(t)) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 8 && r.height > 8 && r.top > -5 && r.top < window.innerHeight;
+    })
+    .sort((a, b) => a.getBoundingClientRect().width - b.getBoundingClientRect().width);
+  const el = cands[0];
+  if (!el) return { ok: false, users: users() };
+  try { el.scrollIntoView({ block: 'center' }); } catch (e) { /* 滚不动就算了 */ }
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  for (const type of ['mouseover', 'mouseenter', 'mousedown', 'mouseup', 'click']) {
+    el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }));
+  }
+  try { el.click(); } catch (e) { /* 上面的事件已经发过了 */ }
+  return { ok: true, text: clean(el.innerText), users: users() };
+})()`;
+
+/** 关注列表可能是整页、也可能是弹层：滚动所有能滚的容器（弹层优先），再看下一屏。 */
+const SCROLL_LIST_JS = String.raw`(() => {
+  const canScroll = (e) => {
+    if (!e || e.scrollHeight <= e.clientHeight + 120) return false;
+    if (e.clientHeight < 160) return false;
+    const st = getComputedStyle(e);
+    return st.overflowY === 'auto' || st.overflowY === 'scroll';
+  };
+  const boxes = [...document.querySelectorAll('div,section,ul')].filter(canScroll)
+    .sort((a, b) => b.clientHeight - a.clientHeight);
+  let moved = false;
+  for (const e of boxes.slice(0, 3)) {
+    const before = e.scrollTop;
+    e.scrollTop = before + Math.max(240, Math.floor(e.clientHeight * 0.85));
+    if (e.scrollTop > before) moved = true;
+  }
+  if (!moved) {
+    const before = window.scrollY;
+    window.scrollBy(0, 900);
+    moved = window.scrollY > before;
+  }
+  return { moved, boxes: boxes.length };
 })()`;
 
 /** 个人主页上点「私信」（文本匹配，取最内层那个可点的）。 */
@@ -185,25 +269,57 @@ const READ_INPUT_JS = String.raw`(() => {
 /* ── 抓名单 ──────────────────────────────────────────────────────── */
 
 /**
- * 关注页上抓「互相关注」的人。调用方必须已经在 host.exclusive 里。
- * @returns {Promise<{ok: boolean, list: Array<{name: string, uid: string}>, error?: string}>}
+ * 拉互关名单：进希希自己的个人主页 → 点「关注」按钮 → 关注列表里挑名字后面带「互相关注」的人。
+ * 调用方必须已经在 host.exclusive 里。
+ * @returns {Promise<{ok: boolean, list: Array<{name: string, uid: string}>, error?: string, via?: string}>}
  */
 export async function listMutualFriends(host) {
 	const browser = host.browser;
-	try { await browser.goto(FOLLOW_URL, { settleMs: 7000 }); } catch (e) { return { ok: false, list: [], error: errText(e) }; }
-	await sleep(1200);
-	let list = [];
-	for (let i = 0; i < 4; i++) {
+	// ① 个人主页（点关注按钮的正路）
+	try {
+		await browser.goto(PROFILE_URL, { settleMs: 7000 });
+	} catch (e) {
+		return { ok: false, list: [], error: errText(e) };
+	}
+	await sleep(1400);
+	let via = 'profile';
+	const hit = await browser.eval(CLICK_FOLLOW_JS).catch(() => null);
+	const before = Number(hit?.users ?? 0);
+	if (hit?.ok === true) {
+		await sleep(2800);
+		// ② 点完看列表有没有真的出来（用户链接变多才算），没出来就换关注页 URL 兜底
+		const after = Number(await browser.eval('document.querySelectorAll(\'a[href*="/user/"]\').length').catch(() => 0)) || 0;
+		if (!(after > before + 1)) {
+			try { await browser.goto(FOLLOW_URL, { settleMs: 6000 }); } catch { /* 兜底也打不开就按空处理 */ }
+			await sleep(1800);
+			via = 'url';
+		}
+	} else {
+		try { await browser.goto(FOLLOW_URL, { settleMs: 6000 }); } catch { /* 兜底也打不开就按空处理 */ }
+		await sleep(1800);
+		via = 'url';
+	}
+
+	// ③ 边滚边抓（列表可能是弹层，SCROLL_LIST_JS 会滚弹层而不是整页）
+	const seen = new Map();
+	for (let i = 0; i < 8; i++) {
 		const r = await browser.eval(MUTUAL_JS).catch(() => null);
-		if (Array.isArray(r?.list) && r.list.length > 0) list = r.list;
-		await browser.eval('window.scrollBy(0, 900); true').catch(() => false);
-		await sleep(1100);
+		for (const x of Array.isArray(r?.list) ? r.list : []) {
+			if (x?.name && x?.uid && !seen.has(x.uid)) seen.set(x.uid, x);
+		}
+		const moved = await browser.eval(SCROLL_LIST_JS).catch(() => null);
+		await sleep(1200);
+		if (moved && moved.moved === false && seen.size > 0) break; // 已经滚到底了
 	}
-	if (list.length === 0) list = (await browser.eval(MUTUAL_JS).catch(() => null))?.list ?? [];
-	if (!Array.isArray(list) || list.length === 0) {
-		return { ok: false, list: [], error: '关注页上没读到「互相关注」的人（可能没加载出来，或者现在还没人跟她互关）' };
+	if (seen.size === 0) {
+		return {
+			ok: false,
+			list: [],
+			via,
+			error: '关注列表里没读到名字后面标着「互相关注」的人（可能列表没加载出来，或者现在还没有人跟她互关）'
+		};
 	}
-	return { ok: true, list };
+	return { ok: true, list: [...seen.values()], via };
 }
 
 /* ── 发送 ────────────────────────────────────────────────────────── */
