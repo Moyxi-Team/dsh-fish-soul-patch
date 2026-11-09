@@ -47,7 +47,7 @@ const DEFAULT_SHARE_TYPES = {
 	美食: ['美食', '做饭', '菜', '探店', '甜品', '火锅', '小吃', '厨房', '烘焙', '食堂', '下饭', '夜宵', '奶茶'],
 	宠物: ['猫', '狗', '宠物', '萌宠', '喵', '汪', '仓鼠', '铲屎', '撸猫', '撸狗', '毛孩子'],
 	旅行: ['旅行', '旅游', '风景', '露营', '自驾', '出游', 'citywalk', 'city walk', '爬山', '海边', '打卡', '攻略', '出片'],
-	音乐舞蹈: ['翻唱', '音乐', '唱歌', '舞蹈', '跳舞', '吉他', '钢琴', 'live', '舞台', '歌曲', '翻跳', '配音', 'remix', 'bgm'],
+	音乐舞蹈: ['翻唱', '音乐', '唱歌', '舞蹈', '跳舞', '广场舞', '编舞', '街舞', '吉他', '钢琴', 'live', '舞台', '歌曲', '翻跳', '配音', 'remix', 'bgm'],
 	颜值穿搭: ['穿搭', '化妆', '护肤', '颜值', '发型', '搭配', 'look', '口红', 'ootd', '妆容', '变美', '穿搭分享'],
 	剧情影视: ['剧情', '短剧', '影视', '电影', '解说', '追剧', '片段', '演技', '反转', '悬疑', '动漫'],
 	数码科技: ['数码', '科技', '手机', '电脑', 'ai', '评测', '开箱', '显卡', '软件', '硬件', 'deepseek', 'chatgpt', '大模型', '编程', '代码', '装机'],
@@ -573,87 +573,149 @@ const CLICK_SHARE_BTN_JS = String.raw`(() => {
   return true;
 })()`;
 
-/** 分享面板里选「私信 / 发送给朋友」。 */
-const CLICK_SHARE_DM_JS = String.raw`(() => {
+/** 视频页上分享图标的屏幕坐标。抖音这个按钮是 hover 才出面板的，纯 click 唤不出来。 */
+const SHARE_ICON_POS_JS = String.raw`(() => {
   const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
-  const WANT = /^(私信|发送给朋友|发给朋友|分享给朋友|发给好友|好友|发消息)$/;
-  const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 8 && r.height > 8; };
-  const cands = [...document.querySelectorAll('button,div,span,li,a')].filter((el) => {
-    if (!vis(el)) return false;
-    const t = clean(el.innerText);
-    if (!WANT.test(t)) return false;
-    return ![...el.children].some((c) => clean(c.innerText) === t); // 只要最内层
-  }).sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return ra.width * ra.height - rb.width * rb.height; });
-  const el = cands[0];
-  if (!el) return false;
-  const r = el.getBoundingClientRect();
-  const x = r.left + r.width / 2;
-  const y = r.top + r.height / 2;
-  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-    try { el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window })); } catch (e) { /* 忽略 */ }
+  const inView = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 10 && r.height > 10 && r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth;
+  };
+  const cands = [];
+  const icon = document.querySelector('[data-e2e="video-share-icon-container"]');
+  if (icon) cands.push(icon);
+  cands.push(...document.querySelectorAll('[data-e2e="video-player-share"]'));
+  let el = cands.find(inView);
+  if (!el) {
+    el = [...document.querySelectorAll('div,span,button,a')].find((e) => {
+      if (!inView(e)) return false;
+      const t = clean(e.innerText);
+      if (t !== '分享' && !/^分享[（(]?\d*[)）]?$/.test(t)) return false;
+      return ![...e.children].some((c) => clean(c.innerText) === t);
+    });
   }
-  try { el.click(); } catch (e) { /* 忽略 */ }
-  return true;
+  if (!el) return JSON.stringify({ ok: false });
+  try { el.scrollIntoView({ block: 'center' }); } catch (e) { /* 忽略 */ }
+  const r = el.getBoundingClientRect();
+  return JSON.stringify({ ok: true, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) });
 })()`;
 
-/** 分享面板的好友列表里点中她（有搜索框就先搜一下）。 */
-const shareFriendJs = (name) => `(() => {
+/**
+ * 分享面板开没开。
+ *
+ * 踩过的坑：`[data-e2e="video-share-container"]` 这个节点常驻、且**自身渲染尺寸是 0×0**
+ * （真正的面板挂在它内部的子节点上），早先拿「容器 > 40×40 且可见」当判据，
+ * 结果面板明明弹出来了也一律判成「没弹出来」——主动分享一直卡在这一步。
+ * 现在只看文本：容器里出现「分享给朋友 / 好友名 + 分享 / 复制链接」才算开。
+ */
+const SHARE_PANEL_JS = String.raw`(() => {
+  const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const q = (sel) => document.querySelector(sel);
+  const host = q('[data-e2e="video-share-icon-container"]');
+  const sc = q('[data-e2e="video-share-container"]');
+  if (!host && !sc) return JSON.stringify({ open: false, text: '' });
+  const text = clean((host ? host.innerText : '') + ' ' + (sc ? sc.innerText : ''));
+  const has = /分享给朋友|捎句话|复制链接/.test(text);
+  const rows = (text.match(/分享/g) || []).length;
+  const open = has && rows >= 2;
+  return JSON.stringify({ open: open, text: text.slice(0, 240) });
+})()`;
+
+/**
+ * 分享面板里她那一行的「分享」按钮坐标。
+ * 原生面板对每个好友是行内「分享」按钮（不是「私信 / 发送给朋友」那种入口），
+ * 点成功后该行会变成「捎句话」——正好用来判定发送成功。
+ */
+const shareRowJs = (name) => `(() => {
   const clean = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();
   const NAME = ${JSON.stringify(String(name ?? ''))};
   const KEY = NAME.replace(/[^\\u4e00-\\u9fa5A-Za-z0-9_.-]/g, '');
-  const short = KEY.slice(0, 4);
-  const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 6 && r.height > 6; };
-  const box = [...document.querySelectorAll('input')].filter(vis)
-    .find((i) => /搜索|好友|昵称|用户/.test(String(i.placeholder || '') + String(i.getAttribute('aria-label') || '')));
-  if (box) {
-    box.focus();
-    box.value = NAME;
-    box.dispatchEvent(new Event('input', { bubbles: true }));
+  const sc = document.querySelector('[data-e2e="video-share-container"]') || document.querySelector('[data-e2e="video-share-icon-container"]');
+  if (!sc) return JSON.stringify({ err: 'no-panel' });
+  const inView = (el) => { const r = el.getBoundingClientRect(); return r.width > 6 && r.height > 6 && r.bottom > 0 && r.top < window.innerHeight; };
+  const nameNodes = [...sc.querySelectorAll('div,span,p,a')].filter((e) => {
+    if (!inView(e)) return false;
+    const t = clean(e.innerText);
+    if (t === '' || t.length > 40) return false;
+    if (t !== NAME && !t.startsWith(NAME) && !(KEY.length >= 2 && t.includes(KEY))) return false;
+    return ![...e.children].some((c) => clean(c.innerText) === t);
+  }).sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return ra.width * ra.height - rb.width * rb.height; });
+  const out = [];
+  for (const n of nameNodes) {
+    let row = n;
+    for (let i = 0; i < 6 && row && row !== sc; i += 1) {
+      const rt = clean(row.innerText);
+      if (rt.includes('捎句话')) { out.push({ state: 'sent' }); break; }
+      if (rt.length > 240) break;
+      const btn = [...row.querySelectorAll('div,span,button,a')].find((e) => {
+        if (!inView(e)) return false;
+        if (clean(e.innerText) !== '分享') return false;
+        return ![...e.children].some((c) => clean(c.innerText) === '分享');
+      });
+      if (btn) {
+        const r = btn.getBoundingClientRect();
+        if (r.width >= 16 && r.height >= 12) out.push({ state: 'ready', x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) });
+        break;
+      }
+      row = row.parentElement;
+    }
   }
-  const score = (t) => {
-    if (t === '' || t.length > 40) return 0;
-    if (NAME !== '' && (t === NAME || t.startsWith(NAME))) return 3;
-    if (NAME !== '' && t.includes(NAME)) return 2;
-    if (short.length >= 2 && t.includes(short)) return 1;
-    return 0;
-  };
-  const items = [...document.querySelectorAll('div,li,span,p')].map((el) => ({ el, s: score(clean(el.innerText)) }))
-    .filter((x) => x.s > 0 && vis(x.el))
-    .sort((a, b) => (b.s - a.s) || (a.el.getBoundingClientRect().width * a.el.getBoundingClientRect().height - b.el.getBoundingClientRect().width * b.el.getBoundingClientRect().height));
-  const el = items[0]?.el;
-  if (!el) return { ok: false };
-  const r = el.getBoundingClientRect();
-  const x = r.left + r.width / 2;
-  const y = r.top + r.height / 2;
-  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-    try { el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window })); } catch (e) { /* 忽略 */ }
-  }
-  try { el.click(); } catch (e) { /* 忽略 */ }
-  return { ok: true, picked: clean(el.innerText).slice(0, 24) };
+  const ready = out.find((x) => x.state === 'ready');
+  return JSON.stringify({
+    ok: !!ready || out.some((x) => x.state === 'sent'),
+    sent: out.some((x) => x.state === 'sent'),
+    ready: ready ? { x: ready.x, y: ready.y } : null,
+    text: clean(sc.innerText).slice(0, 160)
+  });
 })()`;
 
-/** 点了好友之后点「发送」。 */
-const CLICK_SHARE_SEND_JS = String.raw`(() => {
-  const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
-  const WANT = /^(发送|发送给ta|发送给TA|确认发送|发送消息)$/;
-  const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 8 && r.height > 8; };
-  const cands = [...document.querySelectorAll('button,div,span,a')].filter((el) => {
-    if (!vis(el)) return false;
-    const t = clean(el.innerText);
-    if (!WANT.test(t)) return false;
-    return ![...el.children].some((c) => clean(c.innerText) === t);
-  }).sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return ra.width * ra.height - rb.width * rb.height; });
-  const el = cands[0];
-  if (!el) return false;
-  const r = el.getBoundingClientRect();
-  const x = r.left + r.width / 2;
-  const y = r.top + r.height / 2;
-  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-    try { el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window })); } catch (e) { /* 忽略 */ }
-  }
-  try { el.click(); } catch (e) { /* 忽略 */ }
-  return true;
+/** 她不在面板的「最近分享」里时，用面板搜索框搜一下。 */
+const shareSearchJs = (name) => `(() => {
+  const sc = document.querySelector('[data-e2e="video-share-container"]') || document.querySelector('[data-e2e="video-share-icon-container"]');
+  if (!sc) return JSON.stringify({ ok: false });
+  const box = [...sc.querySelectorAll('input')].find((i) => { const r = i.getBoundingClientRect(); return r.width > 20 && r.height > 10; });
+  if (!box) return JSON.stringify({ ok: false });
+  const val = ${JSON.stringify(String(name ?? ''))};
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+  box.focus();
+  try { setter.set.call(box, val); } catch (e) { box.value = val; }
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+  return JSON.stringify({ ok: true });
 })()`;
+
+/** 真实鼠标移动：分享面板是 hover 出来的，JS 里 dispatching 事件唤不出来。 */
+async function cdpMove(browser, x, y) {
+	try {
+		await browser.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 }, browser.sessionId);
+	} catch { /* 忽略 */ }
+}
+
+/** 分几步滑到目标上再停住（一步跳过去有时不触发 hover）。 */
+async function cdpHover(browser, x, y) {
+	const x0 = Math.max(20, Math.round(x * 0.35));
+	const y0 = Math.max(40, Math.round(y * 0.4));
+	await cdpMove(browser, x0, y0);
+	await sleep(150);
+	for (let i = 1; i <= 8; i += 1) {
+		await cdpMove(browser, Math.round(x0 + ((x - x0) * i) / 8), Math.round(y0 + ((y - y0) * i) / 8));
+		await sleep(60);
+	}
+	await cdpMove(browser, x, y);
+}
+
+/** 真实鼠标点击。中途不绕路，免得把 hover 出来的面板弄没了。 */
+async function cdpClick(browser, x, y) {
+	await cdpMove(browser, x, y);
+	await sleep(120);
+	await browser.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 }, browser.sessionId).catch(() => {});
+	await sleep(70);
+	await browser.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 }, browser.sessionId).catch(() => {});
+}
+
+/** 页面 JS 统一返回 JSON 字符串，这里兜一层。 */
+function parseJson(raw) {
+	if (typeof raw !== 'string') return raw ?? null;
+	try { return JSON.parse(raw); } catch { return null; }
+}
 
 /** 把一条接口里的作品归一成「挑类型」要用的形状；页面兜底时只有 id/desc，其余留空。 */
 function toVideoItem(a) {
@@ -846,29 +908,75 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 	if (pickedVideo.fellBack) {
 		social.log?.('info', `[fish-soul] 抖音：${name} 只看「${wantTypes.join('/')}」，她作品里没有这类的，这次退回不限`);
 	}
-	await browser.goto(`https://www.douyin.com/video/${id}`, { settleMs: 6500 }).catch(() => {});
-	await sleep(1600);
-	let clicked = false;
-	for (let i = 0; i < 3 && !clicked; i++) {
-		clicked = (await browser.eval(CLICK_SHARE_BTN_JS).catch(() => false)) === true;
-		if (!clicked) await sleep(1300);
+	// 详情页偶发被抖音弹回首页（风控 / 视频受限），确认地址真落到视频页再动手
+	let onVideo = false;
+	for (let i = 0; i < 2 && !onVideo; i += 1) {
+		if (i > 0) await sleep(1200);
+		await browser.goto(`https://www.douyin.com/video/${id}`, { settleMs: 6500, retries: 0 }).catch(() => {});
+		await sleep(1600);
+		const href = String(await browser.eval('location.href').catch(() => '') ?? '');
+		onVideo = href.includes(`/video/${id}`);
 	}
-	if (!clicked) return { ok: false, error: '视频页上没找到「分享」按钮' };
-	await sleep(1600);
-	const toDm = (await browser.eval(CLICK_SHARE_DM_JS).catch(() => false)) === true;
-	if (!toDm) return { ok: false, error: '分享面板里没找到「私信 / 发送给朋友」' };
-	await sleep(2000);
-	const picked = await browser.eval(shareFriendJs(name)).catch(() => null);
-	if (picked?.ok !== true) return { ok: false, error: `分享面板里没找到「${name}」` };
-	await sleep(1200);
-	const sent = (await browser.eval(CLICK_SHARE_SEND_JS).catch(() => false)) === true;
-	if (!sent) return { ok: false, error: '选了好友但没找到「发送」按钮' };
-	await sleep(2400);
+	if (!onVideo) return { ok: false, error: `视频详情页打不开（${id} 被弹回首页了）` };
+	// 1) 真实鼠标 hover 分享图标唤出面板（纯 click 唤不出来 —— 这就是之前一直失败的原因）
+	let panel = null;
+	for (let i = 0; i < 3 && !panel?.open; i += 1) {
+		const pos = parseJson(await browser.eval(SHARE_ICON_POS_JS).catch(() => null));
+		if (pos?.ok === true) {
+			await cdpHover(browser, pos.x, pos.y);
+			await sleep(1800);
+			panel = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
+		}
+		if (panel?.open !== true) {
+			// 兜底：万一这一版面板是点击展开的
+			const clicked = (await browser.eval(CLICK_SHARE_BTN_JS).catch(() => false)) === true;
+			if (clicked) {
+				await sleep(1600);
+				panel = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
+			}
+		}
+		if (panel?.open !== true) await sleep(1200);
+	}
+	if (panel?.open !== true) {
+		const seen = String(panel?.text ?? '').slice(0, 40);
+		return { ok: false, error: `视频页的分享面板没弹出来${seen !== '' ? `（面板里只有：${seen}）` : '（页面里没找到分享图标）'}` };
+	}
+
+	// 2) 面板里直接点她那一行的「分享」按钮
+	let row = parseJson(await browser.eval(shareRowJs(name)).catch(() => null));
+	if (row?.sent === true) return { ok: false, error: `这条视频她已经收过了（面板显示「捎句话」）` };
+	if (row?.ready == null) {
+		const searched = parseJson(await browser.eval(shareSearchJs(name)).catch(() => null));
+		if (searched?.ok === true) {
+			await sleep(1800);
+			row = parseJson(await browser.eval(shareRowJs(name)).catch(() => null));
+			if (row?.ready == null && row?.sent !== true) {
+				await browser.eval(shareSearchJs('')).catch(() => {});
+				await sleep(900);
+				row = parseJson(await browser.eval(shareRowJs(name)).catch(() => null));
+			}
+		}
+	}
+	if (row?.ready == null) return { ok: false, error: `分享面板里没找到「${name}」` };
+	// 排障用：只走到「按钮已就位」这一步，不真发（测试 / 冒烟时传 dryRun）
+	if (opts.dryRun === true) {
+		return { ok: true, dryRun: true, videoId: id, picked: name, ready: row.ready, videoDesc: String(item.desc ?? '').slice(0, 60) };
+	}
+
+	// 3) 点「分享」→ 该行变成「捎句话」就算发出去了
+	await cdpClick(browser, row.ready.x, row.ready.y);
+	await sleep(2600);
+	const done = parseJson(await browser.eval(shareRowJs(name)).catch(() => null));
+	if (done?.sent !== true) {
+		const now = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
+		const toast = /已发送|发送成功|分享成功/.test(String(now?.text ?? ''));
+		if (!toast) return { ok: false, error: '点了「分享」但没发出去（面板没变成「捎句话」）' };
+	}
 	noteShared(social, name, id);
 	return {
 		ok: true,
 		videoId: id,
-		picked: String(picked?.picked ?? ''),
+		picked: name,
 		videoDesc: String(item.desc ?? '').slice(0, 60),
 		videoTypes: pickedVideo.types,
 		fellBack: pickedVideo.fellBack,
