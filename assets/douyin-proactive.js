@@ -172,7 +172,7 @@ function quotaLeft(cfg, sent, day) {
 	const now = Date.now();
 	let left = 0;
 	for (const x of cfg.targets) {
-		if (cfg.master !== '' && x.name === cfg.master) continue;
+		// [FS-DM-ALLOW-MASTER] 主人也算可发对象（名单是显式勾选的），不再在这里剔掉
 		const last = Number(sent[x.name] ?? 0);
 		if (last > 0 && now - last < cfg.coolMs) continue; // 这个人还在冷却期
 		if (sentToday(day, x.name) >= cfg.perDay) continue; // 这个人今天发满了
@@ -982,13 +982,16 @@ export async function runProactive(social, { manual = false } = {}) {
 		return { ok: false, error: '还没选要发给谁（设置 → 平台 → 抖音 → 主动私信，先拉互相关注名单再点选）' };
 	}
 
-	// ② 挑人：排除主人、排除还在冷却期里的、排除「今天已经发到上限」的
+	// ② 挑人：排除还在冷却期里的、排除「今天已经发到上限」的
+	//    [FS-DM-ALLOW-MASTER] 名单是设置页里显式勾选的，勾了主人就照发。
+	//    以前这里会先把主人名字剔掉，导致只勾了一个人（就是主人自己）时池子直接空，
+	//    还会误报成「选中的人都在冷却期」。
 	let sent = {};
 	try { sent = getKv(social.db, KV_SENT, {}) ?? {}; } catch { sent = {}; }
 	const dateStr = social.clock.getRoleDateParts().dateStr;
 	const day = readDay(social, dateStr);
-	const notMaster = c.targets.filter((x) => c.master === '' || x.name !== c.master);
-	const cooled = notMaster.filter((x) => {
+	const picked = c.targets;
+	const cooled = picked.filter((x) => {
 		const last = Number(sent[x.name] ?? 0);
 		return !(last > 0 && Date.now() - last < c.coolMs);
 	});
