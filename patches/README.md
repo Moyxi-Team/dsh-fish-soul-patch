@@ -1,50 +1,80 @@
 # dsh-fish-soul-patch
 
-`dsh-fish-soul` 的补丁归档。上游：<https://github.com/britneycode/dsh-fish-soul>
+给 [`dsh-fish-soul`](https://github.com/britneycode/dsh-fish-soul) 打补丁的地方。
 
-> **本仓库定位**：补丁归档 + 使用说明。根目录下的源码树是本仓库 fork 时留下的 **v0.15.8** 快照，**不要整包覆盖到新版插件**（见下方「整包冲突」）。要用的是 `patches/` 里的东西。
+**一句话原则：补丁跟着上游走，不跟版本号走。**
 
-| 目录 | 适配版本 | 内容 |
+脚本不绑任何版本，直接对着「你机器上当前装的那一版」找锚点打；上游哪天自己把某个功能做出来了，那个补丁就**自动退役**——不改文件、不再维护，也不会因为上游升级而报错。所以这里没有「停在 0.15.8」「只适配 0.15.31」这种说法。
+
+| 补丁 | 内容 | 退役条件（上游自己做好就撒手） |
 |---|---|---|
-| [`patches/v0.15.31-meme-bridge/`](patches/v0.15.31-meme-bridge/) | 0.15.31 | 借 dsh-meme 只读图库 + 设置页开关（幂等脚本，15 处） |
-| [`patches/v0.15.30-douyin/`](patches/v0.15.30-douyin/) | 0.15.30 / 0.15.31 | 抖音回评论 4 项修复（整文件替换） |
+| `meme-bridge` | 表情包借 `dsh-meme` 的只读取图服务（`ctx.get('dshMeme')`）+ 设置页开关，没装 / 关着都自己降级 | 上游 `lib/` 里自己出现 `dshMeme` 调用 |
+| `douyin-comment-visible` | 评论区按**可见性**判定是否真展开（折叠态 0×0 不再误报「已打开」） | 上游代码里出现 `itemsVisible` 判定 |
+| `douyin-note-tab` | 作品详情页只走 `note` / `video` 直链 + 点右侧「评论(n)」Tab（不再靠 `?modal_id=` 白等 7 秒） | 上游代码里不再出现 `modal_id` |
+| `douyin-reply-visible` | 回评论只在**可见**评论条目里找，并用真实鼠标点击（合成 click 抖音不响应） | 上游代码里出现 `const pool = shown.length ? shown : all;` |
+| `douyin-music-trace` | BGM 抓取留痕 + 挑歌兜底（滤掉「创作的原声」这类非歌曲条目） | 上游代码里出现 `douyin.music.last` 落库 |
 
 ---
 
-## 一、已有补丁与现版本（0.15.31）的兼容性核查
+## 一、用起来
 
-本仓库源码停在 0.15.8，但额外带 4 个本地补丁 commit（2026-11-06）。逐条比对上游 CHANGELOG 与 0.15.31 的实际代码：
+```bash
+# 1) 先看现状（不改任何文件）
+node patch-fish-soul.mjs --check
 
-| 补丁 | 上游状态 | 0.15.31 实际代码 | 结论 |
-|---|---|---|---|
-| **QQ 出站兜底**（剥 `</think>` 这类模板标签、同轮整段复读只留一份、超长无空行单段按空格拆条、同频道 2 分钟内一字不差拦截） | ✅ **已修**，v0.15.9 条目明写「QQ 出站兜底（来源 moonie-starlight，本地合并时带审查修复）」 | `gateway.js` 仍有 `dropRepeats()`、`noteSent`、`findRepeatedParagraphs`，相似度门槛 12 字 | **不必再打**。整包覆盖反而会把 0.15.31 的 13 个版本改动一起回退 |
-| **抖音评论正文读成「...」**（正文改取 `.comment-item-info-wrap` 的下一个兄弟节点、`[data-e2e="video-comment-more"]` 的「更多」按钮文本就是「...」） | ✅ **已修**，v0.15.9 条目明写「实测 19/20 条被读成『...』」 | `douyin-social.js` 仍有 `comment-item-info-wrap`、`nextElementSibling` 取正文 | 已含，无需再打 |
-| **回评论时 `reply()` 把「...」当内容**（截断残渣退化按作者名定位） | ✅ **已修**，同 v0.15.9 | 同上 | 已含，无需再打 |
-| **抖音评论区没真的展开**（`COMMENT_STATE_JS` 只判元素存在，`display:none` 的隐藏副本会被误判成「已打开」） | ⚠️ **v0.15.9 修过，0.15.30 重构 douyin-social.js 后丢掉了（回归）** | 0.15.31 原版又退回 `document.querySelector(SEL.input)` 单元素判定 | **仍需打**，见 `patches/v0.15.30-douyin/` |
+# 2) 真正打补丁（自动找 ~/.dsh/profiles/*/node_modules/dsh-fish-soul，自动备份到 ~/.dsh/backup/）
+node patch-fish-soul.mjs
 
-**整包冲突（重要）**：本仓库 `lib/` 是 0.15.8 的形状，与 0.15.31 差距很大——`lib/douyin-social.js` 39,458B → 49,492B，新增 `routes-v07.js`、`douyin-social.js` 等模块，`client.js`、`config-schema.js` 也都重写过。**禁止把本仓库 `lib/` 整体覆盖到新版插件**，那样会同时回退十几个版本的功能。补丁只能按目录单独取用。
+# 3) 重启 DeepSeek Harness（require 缓存不会重读文件）
+```
 
-## 二、`D:\重要文件\桌面\dsh-fish-soul-patch` 的核查结论
+其他参数：
 
-那份抖音补丁基准是 **0.15.30**，本次逐字节比对：
+| 参数 | 作用 |
+|---|---|
+| `--root <dir>` | 指定插件目录（默认自动找 `~/.dsh/profiles/*/node_modules/dsh-fish-soul`） |
+| `--only meme` / `--only douyin` | 只打其中一组 |
+| `--check` | 只报告状态，不写文件 |
+| `--json` | 输出机器可读结果（给 CI / 脚本用） |
 
-- 0.15.30 与 0.15.31 的 `lib/douyin-social.js` **SHA-256 完全相同** → 补丁对 0.15.31 直接可用，**没有版本冲突**。
-- 它修的 4 项在 0.15.31 原版**全部仍然存在**，上游**一个都没修**：
-  1. `COMMENT_STATE_JS` 仍是 `querySelector(SEL.input)` 单元素判定（隐藏副本 → 恒判「未展开」）；
-  2. `openWork()` 的 URL 列表第一项仍是 `https://www.douyin.com/?modal_id=<id>`（该地址下评论接口返回空列表，白等 7 秒 settle + 12 轮轮询）；
-  3. 回评论仍用 `leaf.click()`（抖音对合成 click 不响应，要 `realClick`）；
-  4. `chooseMusic()` 拿不到推荐歌单时直接 `return ''`，没有 `douyin.music.last` 落库兜底。
-- 上游 CHANGELOG 里「评论区 / 折叠 / 可见」的命中全部落在 ≤ v0.15.9 的旧条目，0.15.9 之后没有任何对应修复记录。
+跑完会明确告诉你四类结果：`改了几处` / `已经打过` / `上游已实现（自动退役）` / `漂移（锚点过期，需要更新锚点）`。
 
-结论：**这份补丁没有被原版修复，仍然需要**，已原样归档到 `patches/v0.15.30-douyin/`，并作为 P2 并入 `patches/v0.15.31-meme-bridge/patch-fish-soul.mjs`（可一条命令同时打）。
+## 二、脚本怎么做到「不会被版本甩下」
 
-## 三、通用注意事项
+- **锚点替换，不是整文件覆盖**：每处改动是一小段 `old → new` 替换，存在 [`assets/douyin-hunks.json`](assets/douyin-hunks.json) 里，各自独立。上游只改了其中一处，另外三处照样能打。
+- **每处自带退役判据**：`upstreamFixed` 字段写明「上游什么样子算它自己做好了」。命中即跳过，并在结果里标成 `自动退役`——这类补丁从此不需要人管。
+- **认不出就报漂移，不硬改**：锚点找不到、上游也没实现，脚本判定为 `DRIFT`（退出码 2），提示「上游改版挪了代码，需要按新版更新锚点」。它绝不会把不匹配的内容硬塞进去。
+- **幂等**：每处改动都有唯一标记，重跑 0 改动。插件升级（pnpm 重装会整体覆盖目录）后重跑一次即可恢复。
 
-1. 所有补丁**改前自动备份**到 `~/.dsh/backup/`；插件升级（pnpm 重装）会整体覆盖目录，改动必然丢失，升级后重跑脚本即可。
-2. 打完后**必须重启 DeepSeek Harness**，`require` 缓存不会重读文件。
+## 三、上游体检（自动跑，不用人盯）
+
+```bash
+node audit-upstream.mjs            # 直接拉 npm 上的 latest 体检，输出 Markdown
+node audit-upstream.mjs --version 0.15.31
+node audit-upstream.mjs --tarball ./dsh-fish-soul.tgz   # 离线
+node audit-upstream.mjs --out reports/upstream-compatibility.md
+```
+
+结果写进 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)，每处补丁标一个状态：
+
+| 状态 | 含义 | 该怎么办 |
+|---|---|---|
+| 🟢 `RETIRED` | 上游自己已经实现了 | 这处不用再维护，从脚本里删掉或留着不管都行 |
+| 🟡 `NEEDED` | 上游还没有 | 补丁继续有效，照常跟最新版 |
+| 🔴 `DRIFT` | 上游改了这段代码但**没**实现同样功能 | 按上游新版对应片段更新 `assets/douyin-hunks.json` 的 `old` 锚点 |
+
+全部 `RETIRED` 时结论会直接写「这些补丁可以整体退役，仓库不必再跟着上游版本维护」。
+
+**`.github/workflows/upstream-audit.yml` 每周一自动跑一次**，把报告提交回仓库；一旦出现 `DRIFT` 会自动开 / 追加一个带 `upstream-drift` 标签的 issue，免得上游改版后补丁静默失效。
+
+## 四、注意事项
+
+1. 改动前自动备份到 `~/.dsh/backup/fish-soul-patch-<时间戳>/`；插件升级会覆盖目录，升级后重跑脚本。
+2. 打完后**必须重启 DeepSeek Harness**。
 3. 打补丁期间最好先退出 DSH，避免宿主把内存态回写覆盖改动。
-4. 每个补丁都有唯一标记串，重跑是幂等的（检测到标记就跳过），可以放心重复执行。
+4. 本仓库根目录的 `lib/`、`test/` 是 fork 上游时的 **v0.15.8 快照**，只作历史参考，**禁止整包覆盖到新版插件**（会回退十几个版本的功能）。真正要用的是根目录的两个脚本 + `assets/`。
+5. `patches/v0.15.30-douyin/` 是早期整文件覆盖式补丁的**历史归档**，仅供追溯，不要再用（整文件覆盖会被上游改版打回原形）。
 
-## 四、许可
+## 五、许可
 
-上游 MIT。补丁代码同样 MIT；`assets/douyin-social-fixed.js` 是上游 `dsh-fish-soul@0.15.30` 文件的修改版，版权归上游作者。
+上游 MIT。补丁代码同样 MIT；`assets/` 里含上游代码片段的文件，版权归上游作者。

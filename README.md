@@ -1,7 +1,9 @@
 # dsh-fish-soul
 
-> **补丁归档见 [`patches/`](patches/)**：`dsh-fish-soul` 的「借 dsh-meme 图库」补丁与抖音回评论修复补丁，附各自与现版本 0.15.31 的兼容性 / 是否已被上游修复的核查结论。
-> 本仓库根目录的源码是 fork 时的 **v0.15.8 快照**，请勿整包覆盖新版插件（结构差异很大，会回退十几个版本的功能）。
+> **补丁见 [`patches/`](patches/)，且补丁跟着上游走，不跟版本号走。**
+> [`patch-fish-soul.mjs`](patch-fish-soul.mjs) 不绑版本，直接对着你机器上**当前安装的那一版**按锚点打；上游哪天自己把某个功能做出来了，对应补丁**自动退役**，不再维护。
+> [`audit-upstream.mjs`](audit-upstream.mjs) 每周自动体检 npm 上的最新版，结果写进 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)，告诉你每处补丁是「可退役 / 仍需 / 漂移」。
+> 本仓库根目录的源码树是 fork 时留下的 **v0.15.8 快照**，仅作历史参考，**不要整包覆盖到新版插件**（结构差异很大，会回退十几个版本的功能）。
 
 
 让一个 QQ 小号背后有"同一个人"：固定人格、按人记记忆、有自己的生活节奏、会主动开口；同一个"她"同时出现在 QQ、B站、抖音。

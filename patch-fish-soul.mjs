@@ -1,21 +1,32 @@
 #!/usr/bin/env node
 /**
- * patch-fish-soul.mjs —— dsh-fish-soul 的两处本地补丁，幂等可重跑。
+ * patch-fish-soul.mjs —— dsh-fish-soul 的本地补丁，**版本无关**、幂等、可自动退役。
  *
- *   P1 fish-soul-meme-bridge  ：接上 dsh-meme 的只读取图服务（ctx.get('dshMeme')），
- *                               新增 lib/meme-bridge.js、表情包设置里一个带说明的开关。
- *   P2 douyin-social-0.15.30  ：抖音「回评论发不出 / 图文无 BGM」修复（lib/douyin-social.js 四处改动，
- *                               由 patches/douyin-social/ 里的 fixed 文件整体替换）。
+ * 设计前提：补丁是有寿命的。上游把同一件事做好之后，补丁就该自己退出，而不是继续粘在旧版本上。
+ * 所以每个补丁都声明了「上游做完了长什么样」（upstreamFixed），每次运行按三态判定：
+ *
+ *   PATCHED  锚点在、上游没做 → 打上
+ *   ALREADY  本补丁已经打过   → 跳过
+ *   UPSTREAM 上游已原生实现   → **自动退役**，一行代码都不改
+ *   DRIFT    锚点没了、上游也没做（改版挪了代码）→ 停手并报错，交给人（或 CI）来更新锚点
+ *
+ *   P1 meme-bridge  ：接上 dsh-meme 的只读取图服务（ctx.get('dshMeme')），
+ *                     新增 lib/meme-bridge.js、表情包设置里一个带说明的开关。
+ *   P2 douyin-social：抖音「回评论发不出 / 图文无 BGM」，按 assets/douyin-hunks.json 的
+ *                     小块锚点逐处替换（不再整文件覆盖，上游小改不会整体冲突）。
  *
  * 为什么会丢：node_modules 下的第三方插件被 pnpm 整体重写，升级 / 重装就没了。
- * 所以补丁都带唯一标记，重跑时检测到标记就跳过；改之前把原文件备份到 ~/.dsh/backup/。
+ * 改之前把原文件备份到 ~/.dsh/backup/。
  *
  * 用法：
  *   node patch-fish-soul.mjs                       # 自动找 ~/.dsh/profiles/<profile>/node_modules/dsh-fish-soul
  *   node patch-fish-soul.mjs --root <插件目录>      # 指定插件目录（含 package.json 的那层）
  *   node patch-fish-soul.mjs --check               # 只报告状态，不改文件
  *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin）
+ *   node patch-fish-soul.mjs --json                # 结尾额外打印一段机器可读汇总（CI / audit 用）
  *   node patch-fish-soul.mjs --force               # 忽略「已打过」判断，按文件内容重算（谨慎）
+ *
+ * 上游是否还需要这些补丁，用配套的 audit-upstream.mjs 判断（直接对 npm 最新版体检）。
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -58,7 +69,8 @@ function findRoot() {
 }
 
 const root = findRoot();
-const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+// 有人用记事本 / PowerShell 改过 package.json 的话会带 BOM，JSON.parse 直接炸，先剔掉
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8').replace(/^\uFEFF/, ''));
 const lib = join(root, 'lib');
 const backupDir = join(homedir(), '.dsh', 'backup', 'fish-soul-patch-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19));
 
@@ -66,6 +78,23 @@ const log = (msg) => console.log(msg);
 let changed = 0;
 let skipped = 0;
 let failed = 0;
+let retired = 0;
+let drifted = 0;
+/** 每个补丁点的判定结果，供 --json 汇总。 */
+const report = [];
+const note = (patchId, status, detail) => report.push({ patch: patchId, status, detail });
+
+/**
+ * 「上游自己已经做完了」的统一判定。
+ * @param {{present?: string, absent?: string}} spec present=出现这段就算做完了；absent=这段消失了才算做完
+ * @param {string} text
+ */
+const upstreamDone = (spec, text) => {
+	if (!spec) return false;
+	if (typeof spec.present === 'string' && spec.present !== '') return text.includes(spec.present);
+	if (typeof spec.absent === 'string' && spec.absent !== '') return !text.includes(spec.absent);
+	return false;
+};
 
 /** 读成字符串（保留原换行符）。 */
 const read = (rel) => readFileSync(join(lib, rel), 'utf8');
@@ -83,7 +112,8 @@ function write(rel, text) {
 	const src = join(lib, rel);
 	const bak = join(backupDir, rel);
 	mkdirSync(dirname(bak), { recursive: true });
-	copyFileSync(src, bak);
+	// 同一个文件本次会被改多处：只在第一次备份，留下的是「本次改动前」的原文
+	if (!existsSync(bak)) copyFileSync(src, bak);
 	writeFileSync(src, text, 'utf8');
 }
 
@@ -105,14 +135,10 @@ function replaceOnce(rel, oldStr, newStr, title, probe = '') {
 			skipped += 1;
 			return 'skipped';
 		}
-		if (text.includes(MARK_MEME) || text.includes(MARK_DOUYIN)) {
-			log(`  ＝ ${rel}：${title} 找不到锚点，但文件已带补丁标记（当作已打过；插件若大改过请用 --force 前先看 README）`);
-			skipped += 1;
-			return 'skipped';
-		}
-		log(`  × ${rel}：${title} 找不到锚点（插件版本可能变了）`);
-		failed += 1;
-		return 'failed';
+		log(`  × ${rel}：${title} 找不到锚点（上游改版挪了这段代码）；本补丁没有退役，是锚点过期了`);
+		log('     → 用 audit-upstream.mjs 对着上游新版看这段改成了什么，更新锚点后重跑；不要直接 --force');
+		drifted += 1;
+		return 'drift';
 	}
 	if (text.split(oldStr).length > 2) {
 		log(`  × ${rel}：${title} 的锚点出现多次，不敢改`);
@@ -160,8 +186,38 @@ function replaceFunction(rel, startPattern, build, title) {
 
 const MEME_BRIDGE_SRC = join(HERE, 'assets', 'meme-bridge.js');
 
+/**
+ * 上游自己接上 dsh-meme 了吗：lib 下任意 js（不含我们自己铺的 meme-bridge.js）里出现 dshMeme。
+ * 出现即代表 P1 已经被上游原生吸收，整个补丁退役。
+ * 注意：本补丁自己会往 index.js 里写一行带 dshMeme 的注释，所以先剔掉带 FS-MEME-BRIDGE-PATCH 标记的行，
+ * 否则「自己写的注释」会被当成「上游已经做了」。
+ */
+function memeUpstreamDone() {
+	const files = [];
+	const walk = (dir) => {
+		for (const name of readdirSync(dir)) {
+			const p = join(dir, name);
+			let st;
+			try { st = statSync(p); } catch { continue; }
+			if (st.isDirectory()) walk(p);
+			else if (name.endsWith('.js') && name !== 'meme-bridge.js') files.push(p);
+		}
+	};
+	try { walk(lib); } catch { return false; }
+	const strip = (s) => s.split('\n').filter((line) => !line.includes(MARK_MEME)).join('\n');
+	return files.some((p) => {
+		try { return strip(readFileSync(p, 'utf8')).includes('dshMeme'); } catch { return false; }
+	});
+}
+
 function patchMeme() {
 	log('\n[P1] fish-soul-meme-bridge —— 借 dsh-meme 的只读取图服务');
+	if (memeUpstreamDone()) {
+		log('  ↷ 上游已原生接入 dsh-meme（lib 下已有 dshMeme 调用）→ 本补丁自动退役，不改任何文件');
+		note('meme-bridge', 'UPSTREAM', '插件源码已自带 dshMeme 取图服务');
+		retired += 1;
+		return;
+	}
 	const bridgePath = join(lib, 'meme-bridge.js');
 	if (existsSync(bridgePath) && readFileSync(bridgePath, 'utf8').includes(MARK_MEME)) {
 		log('  ＝ lib/meme-bridge.js 已经存在');
@@ -362,37 +418,65 @@ function patchMeme() {
 		'设置页加开关', '借 dsh-meme 的表情库');
 }
 
-// ───────────────────────────── P2：抖音 0.15.30 修复 ─────────────────────────────
+// ───────────────────────────── P2：抖音回评论 / 图文 BGM ─────────────────────────────
 
+const DOUYIN_HUNKS = join(HERE, 'assets', 'douyin-hunks.json');
+
+/**
+ * 每处改动都是一小段锚点替换（old → new），各自带 upstreamFixed：
+ * 上游哪天自己把某一处改好了，那一处就自动退役，其余几处继续打，互不牵连。
+ * 全部退役时整段 P2 就自然什么都不做了。
+ */
 function patchDouyin() {
-	log('\n[P2] douyin-social —— 回评论发不出 / 图文无 BGM（0.15.30 补丁）');
+	log('\n[P2] douyin-social —— 回评论发不出 / 图文无 BGM（锚点补丁）');
 	const target = join(lib, 'douyin-social.js');
-	const fixed = join(HERE, 'assets', 'douyin-social-fixed.js');
 	if (!existsSync(target)) {
 		log('  × 没有 lib/douyin-social.js，插件版本可能太老 / 太新');
 		failed += 1;
 		return;
 	}
-	const now = readFileSync(target, 'utf8');
-	if (now.includes(MARK_DOUYIN)) {
-		log('  ＝ lib/douyin-social.js 已经打过');
-		skipped += 1;
-		return;
-	}
-	if (!existsSync(fixed)) {
-		log('  × 缺 assets/douyin-social-fixed.js');
+	if (!existsSync(DOUYIN_HUNKS)) {
+		log('  × 缺 assets/douyin-hunks.json（补丁包根目录 assets 下应带着它）');
 		failed += 1;
 		return;
 	}
-	const fixedText = readFileSync(fixed, 'utf8');
-	if (!CHECK) {
-		const bak = join(backupDir, 'lib', 'douyin-social.js');
-		mkdirSync(dirname(bak), { recursive: true });
-		copyFileSync(target, bak);
-		writeFileSync(target, fixedText, 'utf8');
+	const hunks = JSON.parse(readFileSync(DOUYIN_HUNKS, 'utf8'));
+	let up = 0;
+	for (const h of hunks) {
+		const rel = String(h.file ?? '').replace(/^lib\//, '');
+		const text = read(rel);
+		const result = (() => {
+			if (text.includes(h.marker) || text.includes(h.new)) {
+				log(`  ＝ ${rel}：${h.title} 已经打过`);
+				return 'skipped';
+			}
+			if (upstreamDone(h.upstreamFixed, text)) {
+				up += 1;
+				log(`  ↷ ${rel}：${h.title} —— 上游已自己修好（${JSON.stringify(h.upstreamFixed)}）→ 本处退役`);
+				note(h.id, 'UPSTREAM', h.title);
+				return 'upstream';
+			}
+			if (!text.includes(h.old)) {
+				log(`  × ${rel}：${h.title} 找不到锚点（上游改版挪了这段代码），本补丁没退役、是锚点过期了`);
+				drifted += 1;
+				note(h.id, 'DRIFT', h.title);
+				return 'drift';
+			}
+			write(rel, text.replace(h.old, h.new));
+			log(`  ✓ ${rel}：${h.title}`);
+			changed += 1;
+			note(h.id, 'PATCHED', h.title);
+			return 'patched';
+		})();
+		if (result === 'skipped') {
+			skipped += 1;
+			note(h.id, 'ALREADY', h.title);
+		}
 	}
-	log('  ✓ lib/douyin-social.js 换成修好的版本');
-	changed += 1;
+	if (up === hunks.length) {
+		log('  ↷ 四处在最新上游里都已自行修好 → P2 整体退役，不需要再维护');
+		retired += 1;
+	}
 }
 
 // ───────────────────────────── 主流程 ─────────────────────────────
@@ -408,6 +492,26 @@ try {
 }
 
 if (!CHECK && changed > 0) log(`\n原文件备份在：${backupDir}`);
-log(`\n结果：改了 ${changed} 处，已打过 ${skipped} 处，失败 ${failed} 处`);
+log(`\n结果：改了 ${changed} 处，已打过 ${skipped} 处，上游已实现 / 自动退役 ${retired} 段，漂移 ${drifted} 处，失败 ${failed} 处`);
+if (retired > 0) log('退役的补丁不需要再维护：上游已经自己做好了，下次升级也不用管它。');
+if (drifted > 0) log('漂移的补丁不是「上游修好了」，是上游改版把锚点挪走了，需要更新锚点（见上游新版对应片段）。');
 if (changed > 0 && !CHECK) log('改完重启 DeepSeek Harness（或重新加载插件）才生效。');
-if (failed > 0) process.exitCode = 1;
+if (failed > 0 || drifted > 0) process.exitCode = 1;
+
+if (has('--json')) {
+	console.log(
+		'\n' +
+			JSON.stringify(
+				{
+					plugin: 'dsh-fish-soul',
+					version: pkg.version,
+					root,
+					check: CHECK,
+					summary: { patched: changed, already: skipped, retired, drifted, failed },
+					patches: report
+				},
+				null,
+				2
+			)
+	);
+}

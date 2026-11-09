@@ -1,0 +1,79 @@
+name: upstream-audit
+
+# 目的：补丁跟着上游走，而不是让仓库停在某个旧版本上。
+# 每周一自动拉一次 npm 上的 dsh-fish-soul 最新版，逐处判断每个补丁：
+#   上游已经自己实现了 → 标记「可退役」，不再维护；
+#   上游还没实现       → 继续有效，照常跟版本；
+#   上游改版挪了锚点   → 开 issue 提醒更新锚点（不是上游修好了，别误判）。
+on:
+  schedule:
+    - cron: '0 2 * * 1' # 每周一 02:00 UTC（北京时间 10:00）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 核查上游最新版
+        id: audit
+        continue-on-error: true
+        run: node audit-upstream.mjs --out reports/upstream-compatibility.md
+
+      - name: 提交核查报告
+        run: |
+          if [ ! -f reports/upstream-compatibility.md ]; then
+            echo "没有生成报告，跳过提交"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/upstream-compatibility.md
+          if git diff --cached --quiet; then
+            echo "报告无变化"
+          else
+            git commit -m "chore(audit): 上游兼容性核查 $(date -u +%F)"
+            git push
+          fi
+
+      - name: 锚点漂移时开 issue
+        if: steps.audit.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const title = '上游改版导致补丁锚点漂移，需要更新锚点';
+            const body = fs.readFileSync('reports/upstream-compatibility.md', 'utf8') +
+              '\n\n> 自动创建：`audit-upstream.mjs` 发现上游代码改了但没实现同样功能。' +
+              '请对照上游新版对应片段更新 `assets/douyin-hunks.json` 的 old 锚点，然后重跑补丁。\n';
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'upstream-drift'
+            });
+            if (open.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: open.data[0].number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['upstream-drift']
+              });
+            }
