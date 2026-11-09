@@ -1012,19 +1012,10 @@ export async function runProactive(social, { manual = false } = {}) {
 		}, { maxMs: 90_000 }).catch(() => []) ?? [];
 	}
 
-	// ④ 写一句（这次一定带视频分享，文字就写得像「你看这个」，不描述画面）
-	// [FS-DM-ALWAYS-SHARE] 抖音主动私信一律是「分享她的一条视频」：不再有「只发文字」这个开关。
-	const wantShare = true;
-	const text = await draft(social, friend, history, { withVideo: wantShare });
-	if (text === '') {
-		remember(social, { name: friend.name, text: '', ok: false, error: '这次没想说的' });
-		return { ok: false, error: '这次没想说的（模型选了不发）' };
-	}
-
-	// ⑤ 分享一条她自己的视频：走抖音自带的「分享 → 私信」，对方收到的是视频卡片，不是链接。
+	// ④ 先分享一条她自己的视频：走抖音自带的「分享 → 私信」，对方先收到视频卡片，不是链接。
 	//    挑哪条按这个人在设置里选定的类型（friend.wantTypes，空 = 不限）；挑不到就退回不限，别卡住。
-	// [FS-DM-ALWAYS-SHARE] 主动私信只有这一种形态：视频卡片。分享没成就不发文字，
-	// 免得又悄悄退回「只说一句话」——那样对方收到的东西跟设置页说的不一致。
+	//    [FS-DM-ALWAYS-SHARE] 主动私信只有这一种形态：视频卡片 + 一句话。
+	//    分享没成 → 这次什么都不发（连那句文字也不发），免得对方收到的东西跟设置页说的不一致。
 	const shared = await host.exclusive('把她的一条视频分享给好友', () => shareVideoToFriend(social, friend, {
 		wantTypes: Array.isArray(friend.wantTypes) ? friend.wantTypes : [],
 		types: c.shareTypes,
@@ -1032,22 +1023,31 @@ export async function runProactive(social, { manual = false } = {}) {
 		.catch((e) => ({ ok: false, error: errText(e) }));
 	if (shared?.ok !== true) {
 		const why = shared?.error ?? '未知';
-		remember(social, { name: friend.name, text, ok: false, error: `分享视频没成：${why}` });
-		social.log('warn', `[fish-soul] 抖音主动私信：分享视频没成（${friend.name}）：${why}，这次不发`);
+		remember(social, { name: friend.name, text: '', ok: false, error: `分享视频没成：${why}` });
+		social.log('warn', `[fish-soul] 抖音主动私信：分享视频没成（${friend.name}）：${why}，这次什么都不发`);
 		return { ok: false, error: `分享视频没成：${why}` };
 	}
 
-	// ⑥ 发那句文字
-	const r = await host.exclusive('主动给互关好友发私信', () => sendToFriend(host, friend, text), { maxMs: 240_000 })
-		.catch((e) => ({ ok: false, error: errText(e) }));
-	remember(social, { name: friend.name, text, ok: r?.ok === true, error: r?.ok === true ? '' : (r?.error ?? '没发出去'), shared: shared?.ok === true });
-
-	if (r?.ok !== true) {
-		social.log('warn', `[fish-soul] 抖音主动私信失败（${friend.name}）：${r?.error ?? '未知'}`);
-		return { ok: false, error: r?.error ?? '没发出去' };
+	// ⑤ 再补一句话（卡片后面跟一句「你看这个」，不描述画面）；这次不想说话就只留卡片
+	const text = await draft(social, friend, history, { withVideo: true });
+	let via = '';
+	let textErr = '';
+	if (text !== '') {
+		const r = await host.exclusive('主动给互关好友发私信', () => sendToFriend(host, friend, text), { maxMs: 240_000 })
+			.catch((e) => ({ ok: false, error: errText(e) }));
+		via = r?.via ?? '';
+		if (r?.ok !== true) {
+			textErr = r?.error ?? '没发出去';
+			social.log('warn', `[fish-soul] 抖音主动私信：视频卡片已经发了，这句话没发成（${friend.name}）：${textErr}`);
+		}
 	}
+	// 卡片已经发出去了，这一条就算发过：记下来（文字没跟上只算小瑕疵，不吞掉这次的记录）
+	remember(social, {
+		name: friend.name, text, ok: true, shared: true,
+		error: textErr === '' ? '' : `视频卡片已发，文字没发成：${textErr}`
+	});
 
-	// ⑦ 记账：今天总共几条 + 这个人今天第几条、下次什么时候才能再发
+	// ⑥ 记账：今天总共几条 + 这个人今天第几条、下次什么时候才能再发
 	try {
 		const byName = { ...(day.byName ?? {}) };
 		byName[friend.name] = sentToday(day, friend.name) + 1;
@@ -1056,7 +1056,7 @@ export async function runProactive(social, { manual = false } = {}) {
 		setKv(social.db, KV_SENT, sent);
 	} catch { /* 记账失败不影响已经发出去的消息 */ }
 	social.note?.('dm', { title: '抖音主动私信', reason: `给选中的 ${friend.name} 分享了一条她的视频`, text });
-	return { ok: true, name: friend.name, text, via: r.via ?? '', shared: shared?.ok === true, videoId: shared?.videoId ?? '' };
+	return { ok: true, name: friend.name, text, via, shared: true, videoId: shared?.videoId ?? '', textError: textErr };
 }
 
 export function maybeSendProactive(social, ctx = {}) {
