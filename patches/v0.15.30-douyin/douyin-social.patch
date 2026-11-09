@@ -1,0 +1,154 @@
+--- a/lib/douyin-social.js
++++ b/lib/douyin-social.js
+@@ -136,14 +136,16 @@
+ /** 评论区状态。box 必须是「可见」的（有布局尺寸）——note 页评论区默认折叠，
+  *  容器在 DOM 里但 display:none，只判存在会把折叠态误判成「已打开」，
+  *  于是 openWork 不点图标就返回 ok，后面 reply() 必然 NO_BOX（2026-11-06 实测）。 */
+ export const COMMENT_STATE_JS = `(() => {
+-  const box = document.querySelector('${SEL.input}');
+-  const r = box ? box.getBoundingClientRect() : null;
++  const vis = (x) => { const r = x.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
++  const boxes = [...document.querySelectorAll('${SEL.input}')];
++  const items = [...document.querySelectorAll('${SEL.item}')];
+   return {
+-    box: Boolean(r && r.width > 0 && r.height > 0),
+-    inDom: Boolean(box),
+-    items: document.querySelectorAll('${SEL.item}').length,
++    box: boxes.some(vis),
++    inDom: boxes.length > 0,
++    items: items.length,
++    itemsVisible: items.filter(vis).length,
+     btn: Boolean(document.querySelector('${SEL.commentBtn}')),
+     url: location.href
+   };
+ })()`;
+@@ -466,17 +468,27 @@
+ 		 *  所以每 3 轮重试一次、最多点 4 次；全程以「输入框可见」为准，不靠「元素存在」误判。 */
+ 		async openWork(w) {
+ 			const br = b();
+ 			let last = null;
+-			for (const url of [`https://www.douyin.com/?modal_id=${w.id}`, `https://www.douyin.com/${w.kind === 'note' ? 'note' : 'video'}/${w.id}`]) {
++			// 只走详情页：`?modal_id=<id>` 现在会 302 到 /jingxuan 精选流（2026-11-09 实测：评论区根本不存在），白等 12 秒
++			for (const url of [`https://www.douyin.com/${w.kind === 'note' ? 'note' : 'video'}/${w.id}`]) {
+ 				try { await br.goto(url, { settleMs: 7000 }); } catch { continue; }
+ 				let clicks = 0;
+ 				for (let i = 0; i < 12; i++) {
+ 					const st = await br.eval(COMMENT_STATE_JS).catch(() => null);
+ 					last = st ?? last;
+ 					if (st?.box) return { ok: true };
+-					if (st?.btn && clicks < 4 && i % 3 === 0) {
+-						const p = await br.eval(`(() => { const el = document.querySelector('${SEL.commentBtn}'); if (!el) return null; const r = el.getBoundingClientRect(); return r.width && r.top >= 0 && r.bottom <= innerHeight ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null; })()`).catch(() => null);
++					if (clicks < 4 && i % 3 === 0) {
++						// note 页评论区默认折在右侧「评论(n)」Tab 后面，先点 Tab，没有 Tab 再点左侧评论气泡
++						const p = await br.eval(`(() => {
++  const vis = (x) => { const r = x.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
++  const tab = [...document.querySelectorAll('div, span, button')].find((x) => vis(x) && /^评论[（(]?\\d+[)）]?$/.test((x.innerText || '').trim()));
++  const el = tab || document.querySelector('${SEL.commentBtn}');
++  if (!el) return null;
++  el.scrollIntoView({ block: 'center' });
++  const r = el.getBoundingClientRect();
++  return r.width && r.height && r.top >= 0 && r.bottom <= innerHeight ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null;
++})()`).catch(() => null);
+ 						if (p) { await realClick(br, p.x, p.y); clicks++; }
+ 					}
+ 					await sleep(1000);
+ 				}
+@@ -581,27 +593,38 @@
+ 			const br = b();
+ 			const before = await br.eval(`document.querySelectorAll('${SEL.input}').length`).catch(() => 0);
+ 			const usable = String(content ?? '').trim();
+ 			const contentKey = usable === '' || usable === '...' || usable === '···' || usable === '…' ? null : usable.slice(0, 40);
+-			const clicked = await br.eval(`(() => {
++			// 评论区在 DOM 里有两份（隐藏的 SSR 副本 + 可见副本），隐藏那份点了没反应 —— 只在可见条目里找
++			const target = await br.eval(`(() => {
+   const want = ${JSON.stringify({ author, content: contentKey })};
+-  const el = [...document.querySelectorAll('${SEL.item}')].find((x) => { const t = x.innerText || ''; return t.includes(want.author) && (want.content === null || t.includes(want.content)); });
+-  if (!el) return false;
++  const vis = (x) => { const r = x.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
++  const all = [...document.querySelectorAll('${SEL.item}')];
++  const shown = all.filter(vis);
++  const pool = shown.length ? shown : all;
++  const el = pool.find((x) => { const t = x.innerText || ''; return t.includes(want.author) && (want.content === null || t.includes(want.content)); });
++  if (!el) return null;
+   el.scrollIntoView({ block: 'center' });
++  el.setAttribute('data-fish-reply', '1');
+   const stats = el.querySelector('${SEL.stats}');
+   const leaf = stats && [...stats.querySelectorAll('*')].find((x) => (x.innerText || '').trim() === '回复');
+-  if (!leaf) return false;
+-  el.setAttribute('data-fish-reply', '1');
+-  leaf.click();
+-  return true;
+-})()`).catch(() => false);
+-			if (!clicked) return { ok: false, code: 'NOT_FOUND', error: '评论区里没找到这条评论' };
++  if (!leaf) return null;
++  el.scrollIntoView({ block: 'center' });
++  const r = leaf.getBoundingClientRect();
++  return r.width && r.height ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null;
++})()`).catch(() => null);
++			if (!target) {
++				await br.eval(`(() => { for (const el of document.querySelectorAll('[data-fish-reply]')) el.removeAttribute('data-fish-reply'); return true; })()`).catch(() => {});
++				return { ok: false, code: 'NOT_FOUND', error: '评论区里没找到这条评论' };
++			}
++			await realClick(br, target.x, target.y);
+ 			await sleep(1200);
+ 			// 回复框：这条评论里面的输入框，没有就用新冒出来的那个
+ 			const pos = await br.eval(`(() => {
++  const vis = (x) => { const r = x.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+   const item = document.querySelector('[data-fish-reply="1"]');
+   const all = [...document.querySelectorAll('${SEL.input}')];
+-  const box = (item && item.querySelector('${SEL.input}')) || (all.length > ${Number(before) || 0} ? all[all.length - 1] : null);
++  const box = (item && [...item.querySelectorAll('${SEL.input}')].find(vis)) || all.find(vis) || (all.length > ${Number(before) || 0} ? all[all.length - 1] : null);
+   if (!box) return null;
+   box.setAttribute('data-fish-box', '1');
+   box.scrollIntoView({ block: 'center' });
+   const r = box.getBoundingClientRect();
+@@ -737,29 +760,45 @@
+ 			if (!pre?.ok) return pre;
+ 			let songs = [];
+ 			try { songs = await this.driver.listRecommendedMusic(); } catch { songs = []; }
+ 			song = await this.chooseMusic(text, songs).catch(() => '');
+-			return await this.driver.publishNote({ music: song });
++			const res = await this.driver.publishNote({ music: song });
++			// 留下痕迹：这次抓到哪些歌、挑了哪首、页面到底配上了没（之前只进内存 decisions，重启即失）
++			try {
++				setKv(this.db, 'douyin.music.last', { at: Date.now(), songs: songs.slice(0, 5), song: song || '', picked: res?.musicPicked === true });
++			} catch { /* 记录失败不影响发布 */ }
++			return res;
+ 		}, { maxMs: 5 * 60_000 });
+ 		if (r?.code === 'NEEDS_VERIFY') this.blocked('发作品');
+ 		if (r?.code === 'NOT_LOGGED_IN') this.notify('douyin.creator', '想在抖音发图文，但创作者中心没登录：在抖音浏览器里打开 creator.douyin.com 登录一次就好');
+ 		if (!r?.ok) throw new Error(r?.error ?? '没发出去');
+ 		this.verifyCleared(); // 这次没被拦：验证计数清零
+ 		if (song && r?.musicPicked === false) this.note('post', { title: this.label, reason: `《${song}》没配上（页面没找到或改版了），图发出去了但没 BGM` });
++		if (!song) this.note('post', { title: this.label, reason: '这次没配 BGM（推荐歌单没抓到 / 没挑出合适的），图发出去了' });
+ 		this.notify('douyin.creator', null);
+ 		return '';
+ 	}
+ 
+ 	/** 从抖音推荐的歌里挑一首配这条图文；挑不出来就不配，不影响发布。 */
+ 	async chooseMusic(text, songs) {
+ 		const list = (Array.isArray(songs) ? songs : []).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 10);
+-		if (!list.length) return '';
++		if (!list.length) {
++			this.note('post', { title: this.label, reason: '音乐面板一首推荐歌都没抓到（页面可能改版了），这条没 BGM' });
++			return '';
++		}
++		// 列表里常混着「@某某创作的原声」「自带流量的音乐」这类不是歌的条目，能不用就不用
++		const junk = /(创作的原声|自带流量|纯音乐|伴奏|BGM)/i;
++		const usable = list.filter((s) => !junk.test(s));
+ 		try {
+ 			const raw = String((await this.callLlm(`给这条抖音图文配背景音乐。从下面这些抖音推荐歌里挑一首最适合的（歌名原样照抄），不适合就回空串。\n\n图文正文：\n${text}\n\n推荐歌：\n${list.map((s) => `- ${s}`).join('\n')}\n\n只输出歌名，不要别的。`)) ?? '').trim();
+ 			const picked = pickRecommendedSong(raw, list);
+ 			if (picked) this.note('post', { title: this.label, reason: `配了首《${picked}》` });
+-			return picked;
+-		} catch { return ''; }
++			if (picked) return picked;
++			// 模型没挑（或挑的名字对不上）→ 退一步用推荐里第一首正经歌，不留空白
++			const fb = usable[0] ?? '';
++			if (fb) this.note('post', { title: this.label, reason: `模型没挑出来，兜底用了《${fb}》` });
++			return fb;
++		} catch { return usable[0] ?? ''; }
+ 	}
+ 
+ 	/** 看最近几个作品的评论区，挨个决定回不回。 */
+ 	async pollComments() {
