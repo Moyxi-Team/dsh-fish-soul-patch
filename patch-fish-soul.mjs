@@ -564,7 +564,7 @@ const DM_SRC = join(HERE, 'assets', 'douyin-proactive.js');
  * 这里新增 lib/douyin-proactive.js（拉希希关注列表里互相关注的人 / 按人格写话 / 发送 + 记账），
  * 再按 assets/dm-hunks.json 打 11 处锚点：douyin-social（方法 + status）、index（tick）、
  * config-platforms（schema）、routes-douyin（回显 / 保存 / 候选名单 + 新路由）、
- * client.douyin（设置页：拉名单 → 自己勾人 + 一天最多几次 + 同一个人隔几小时）。
+ * client.douyin（设置页：拉名单 → 自己勾人 + 同一个人一天最多几次 + 同一个人隔几小时）。
  */
 function patchDm() {
 	log('\n[P5 dm] 主动给抖音互关好友发私信（设置 → 平台 → 抖音 → 主动私信）');

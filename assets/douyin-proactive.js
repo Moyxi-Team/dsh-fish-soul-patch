@@ -10,10 +10,10 @@
  *
  * 三条红线（都在下面的 cfg 里卡着）：
  *  · 默认关闭，开关在 设置 → 平台 → 抖音 → 主动私信；
- *  · 一天最多几个人、同一个人隔几天才能再发，都有硬上限，宁可少发；
+ *  · 「同一个人一天最多几次」「同一个人隔几小时才能再发」都有硬上限，宁可少发；
  *  · 深夜不发（activeHours 之外不发，且最早 9 点、最晚 23 点）。
  *
- * 记账：douyin.dm.day（今天发了几个）/ douyin.dm.sent（每个人上次发的真实时间）/
+ * 记账：douyin.dm.day（今天总共几条 + 每个人各自几条）/ douyin.dm.sent（每个人上次发的真实时间）/
  *       douyin.dm.mutual（互关名单缓存）/ douyin.dm.recent（最近发过什么，设置页能看到）。
  */
 import { getKv, setKv, findPersonByDouyin } from './db.js';
@@ -50,6 +50,7 @@ export function dmCfg(d) {
 	const coolHours = Number.isFinite(Number(dm.coolHours)) ? num(dm.coolHours, 24, 1, 720) : num(dm.coolDays, 1, 1, 60) * 24;
 	return {
 		enabled: on && dm.enabled === true,
+		// perDay 是「同一个人一天最多几次」——每个人单独算，不是所有人加起来
 		perDay: num(dm.perDay, 1, 0, 10),
 		coolHours,
 		coolMs: coolHours * HOUR_MS,
@@ -62,9 +63,33 @@ export function dmCfg(d) {
 function readDay(social, dateStr) {
 	let st = null;
 	try { st = getKv(social.db, KV_DAY, null); } catch { st = null; }
-	return st && st.date === dateStr
-		? { date: dateStr, count: Number(st.count) || 0, lastReal: Number(st.lastReal) || 0 }
-		: { date: dateStr, count: 0, lastReal: 0 };
+	if (!st || st.date !== dateStr) return { date: dateStr, count: 0, lastReal: 0, byName: {} };
+	// byName 是「今天这个人发了几条」——配额按人算，所以必须分开记
+	const byName = st.byName && typeof st.byName === 'object' ? st.byName : {};
+	return { date: dateStr, count: Number(st.count) || 0, lastReal: Number(st.lastReal) || 0, byName };
+}
+
+/** 某个人今天已经发了几条（old 配置里没 byName，就当 0）。 */
+function sentToday(day, name) {
+	const k = String(name ?? '');
+	return Number(day?.byName?.[k] ?? 0) || 0;
+}
+
+/**
+ * 今天还能发几条：每个人各自剩多少，加起来就是总数。
+ * perDay 是「同一个人一天最多几次」，不是全体合计 —— 勾的人越多，理论上总条数越大。
+ */
+function quotaLeft(cfg, sent, day) {
+	const now = Date.now();
+	let left = 0;
+	for (const x of cfg.targets) {
+		if (cfg.master !== '' && x.name === cfg.master) continue;
+		const last = Number(sent[x.name] ?? 0);
+		if (last > 0 && now - last < cfg.coolMs) continue; // 这个人还在冷却期
+		if (sentToday(day, x.name) >= cfg.perDay) continue; // 这个人今天发满了
+		left += cfg.perDay - sentToday(day, x.name);
+	}
+	return left;
 }
 
 /** 设置页要看的：开关、今天发了几个、互关名单多大、最近发过什么、上次出错。 */
@@ -88,6 +113,8 @@ export function proactiveStatus(social) {
 		coolHours: cfg.coolHours,
 		minGapHours: Math.round(cfg.minGapMs / HOUR_MS),
 		todayCount: day.count,
+		// 每人今天发了几条（设置页能看到「今天 3 条：张三 2、李四 1」这种）
+		todayByName: day.byName ?? {},
 		lastAt: day.lastReal,
 		targets: cfg.targets,
 		pickedNames: picked,
@@ -514,16 +541,22 @@ export async function runProactive(social, { manual = false } = {}) {
 		return { ok: false, error: '还没选要发给谁（设置 → 平台 → 抖音 → 主动私信，先拉互相关注名单再点选）' };
 	}
 
-	// ② 挑人：排除主人、排除还在冷却期里的
+	// ② 挑人：排除主人、排除还在冷却期里的、排除「今天已经发到上限」的
 	let sent = {};
 	try { sent = getKv(social.db, KV_SENT, {}) ?? {}; } catch { sent = {}; }
-	const pool = c.targets.filter((x) => {
-		if (c.master !== '' && x.name === c.master) return false;
+	const dateStr = social.clock.getRoleDateParts().dateStr;
+	const day = readDay(social, dateStr);
+	const notMaster = c.targets.filter((x) => c.master === '' || x.name !== c.master);
+	const cooled = notMaster.filter((x) => {
 		const last = Number(sent[x.name] ?? 0);
 		return !(last > 0 && Date.now() - last < c.coolMs);
 	});
+	const pool = cooled.filter((x) => sentToday(day, x.name) < c.perDay);
 	if (pool.length === 0) {
-		return { ok: false, error: `选中的 ${c.targets.length} 个人都在冷却期（同一个人要隔 ${c.coolHours} 小时）` };
+		if (cooled.length === 0) {
+			return { ok: false, error: `选中的 ${c.targets.length} 个人都在冷却期（同一个人要隔 ${c.coolHours} 小时）` };
+		}
+		return { ok: false, error: `选中的每个人今天都发到上限了（同一个人一天最多 ${c.perDay} 次）` };
 	}
 	const friend = pool[Math.floor(social.random() * pool.length) % pool.length];
 
@@ -554,11 +587,11 @@ export async function runProactive(social, { manual = false } = {}) {
 		return { ok: false, error: r?.error ?? '没发出去' };
 	}
 
-	// ⑥ 记账：今天发了几次、这个人下次什么时候才能再发
-	const dateStr = social.clock.getRoleDateParts().dateStr;
-	const day = readDay(social, dateStr);
+	// ⑥ 记账：今天总共几条 + 这个人今天第几条、下次什么时候才能再发
 	try {
-		setKv(social.db, KV_DAY, { date: dateStr, count: day.count + 1, lastReal: Date.now() });
+		const byName = { ...(day.byName ?? {}) };
+		byName[friend.name] = sentToday(day, friend.name) + 1;
+		setKv(social.db, KV_DAY, { date: dateStr, count: day.count + 1, lastReal: Date.now(), byName });
 		sent[friend.name] = Date.now();
 		setKv(social.db, KV_SENT, sent);
 	} catch { /* 记账失败不影响已经发出去的消息 */ }
@@ -581,11 +614,16 @@ export function maybeSendProactive(social, ctx = {}) {
 	if (ctx.slot?.availability === 'sleeping') return false;
 	const dateStr = parts.dateStr ?? (() => { try { return social.clock.getRoleDateParts().dateStr; } catch { return ''; } })();
 	const st = readDay(social, dateStr);
-	if (st.count >= c.perDay) return false;
+	let sent = {};
+	try { sent = getKv(social.db, KV_SENT, {}) ?? {}; } catch { sent = {}; }
+	// 名额按人算：只要还有「今天没发满、又不在冷却期」的人，就还有得发
+	const left = quotaLeft(c, sent, st);
+	if (left <= 0) return false;
+	// 但两条之间还是要隔一会儿，别连着轰炸
 	if (st.lastReal > 0 && Date.now() - st.lastReal < c.minGapMs) return false;
-	// 把今天剩下的名额摊到剩下的 tick 上（自走层 15 分钟一次）
+	// 把剩下的名额摊到剩下的 tick 上（自走层 15 分钟一次）
 	const ticksLeft = Math.max(1, (hi - hour) * 4 - Math.floor((Number(parts.minute) || 0) / 15));
-	if (social.random() >= (c.perDay - st.count) / ticksLeft) return false;
+	if (social.random() >= Math.min(1, left / ticksLeft)) return false;
 	social.proactiveBusy = true;
 	void runProactive(social)
 		.catch((error) => social.log('warn', `[fish-soul] 抖音主动私信失败：${errText(error)}`))
