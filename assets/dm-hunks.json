@@ -26,6 +26,14 @@
 		"new": "\t\tsocial: (x) => { biliSocial.maybePost(x); douyinSocial.maybePost(x); if (typeof douyinSocial.maybeDm === 'function') douyinSocial.maybeDm(x); }, // FS-DM-tick 顺手问她要不要主动给互关的人发一句"
 	},
 	{
+		"id": "dm-persona-soul",
+		"file": "index.js",
+		"title": "抖音主动私信：把人格卡全文递给 DouyinSocial",
+		"marker": "FS-DM-persona",
+		"old": "\t\tnote: (k, x) => gateway?.note(k, x),\n\t\tpersona: () => ({ name: persona.name, brief: personaBrief() }),\n\t\t...(testHooks.douyinSocial ?? {})",
+		"new": "\t\tnote: (k, x) => gateway?.note(k, x),\n\t\t// FS-DM-persona：主动私信那句话要按她的性格写 —— personaBrief 只有 300 字，写出来谁都是一个味，\n\t\t// 所以把人格卡全文和「最要紧的那点性格」一并递给 DouyinSocial（见 douyin-proactive.js 的 draft）\n\t\tpersona: () => ({ name: persona.name, brief: personaBrief(), full: String(persona.staticText ?? ''), anchor: String(persona.anchor ?? '') }),\n\t\t...(testHooks.douyinSocial ?? {})"
+	},
+	{
 		"id": "dm-schema",
 		"file": "config-platforms.js",
 		"title": "config-platforms.js：配置 schema 加 dm（同一个人一天几次 / 同一个人隔几小时 / 选中的名单）",

@@ -877,9 +877,16 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 
 /* ── 说什么 ──────────────────────────────────────────────────────── */
 
-/** 让模型按人格写一句（可以 [不发]）。 */
+/**
+ * 让模型按她自己的性格写一句（可以 [不发]）。
+ * 关键：人格卡全文递进去（persona.brief 只有 300 字，谁写出来都一个味），
+ * 再把她最近发过的话一起给她看，明确要求换角度、换开头、别复用说法。
+ */
 async function draft(social, friend, history, { withVideo = false } = {}) {
 	const p = social.persona?.() ?? { name: '鱼', brief: '' };
+	// 性格优先：full 是人格卡全文；老版本插件没提供 full 就退回 brief，不至于写不出话。
+	const soulRaw = String(p.full ?? '').trim() !== '' ? String(p.full) : String(p.brief ?? '');
+	const soul = soulRaw.replace(/\s+\n/g, '\n').trim().slice(0, 1800);
 	const person = (() => { try { return findPersonByDouyin(social.db, friend.name); } catch { return null; } })();
 	const parts = (() => { try { return social.clock.getRoleDateParts(); } catch { return {}; } })();
 	const who = person
@@ -888,20 +895,35 @@ async function draft(social, friend, history, { withVideo = false } = {}) {
 	const historyLine = Array.isArray(history) && history.length > 0
 		? `你们最近聊过：\n${history.slice(-6).map((m) => `${m.fromMe ? '你' : 'ta'}：${String(m.text ?? '').replace(/\s+/g, ' ').slice(0, 40)}`).join('\n')}`
 		: '你们还没聊过（这是你第一次主动找 ta）';
+	// 最近给别的人发过的话：连着用同一句、同一开头就露馅了
+	const recentTexts = (() => {
+		let list = [];
+		try { list = getKv(social.db, KV_RECENT, []) ?? []; } catch { list = []; }
+		return (Array.isArray(list) ? list : [])
+			.map((x) => String(x?.text ?? '').replace(/\s+/g, ' ').trim())
+			.filter((x) => x !== '')
+			.slice(0, 6);
+	})();
+	const recentLine = recentTexts.length > 0
+		? `你最近给别的人发过这些（别重复同样的说法、开头、句式）：\n${recentTexts.map((x) => `- ${x.slice(0, 40)}`).join('\n')}`
+		: '';
+	const anchorLine = String(p.anchor ?? '').trim() !== '' ? `最要紧的是这一点：${String(p.anchor).slice(0, 120)}` : '';
 	const prompt = [
-		`你是「${p.name}」，一个人。${String(p.brief ?? '').slice(0, 600)}`,
+		`你是「${p.name}」。下面是你自己的设定，写出来的每个字都得是这个人：\n${soul}`,
+		anchorLine,
 		`现在是 ${parts.hour ?? 12} 点 ${parts.minute ?? 0} 分。`,
 		`你要在抖音私信里，主动给一个互相关注的人发一条消息。${who}。`,
 		historyLine,
+		recentLine,
 		'',
 		'要求：',
-		'- 一到两句，一共 10～60 个字，口语，像忽然想起对方随手发的一条，不像群发。',
-		'- 可以问一句、说个此刻的小事、接上次聊的话头；别硬套模板。',
-		'- 不要提「互关」「关注」「看到你」这类平台关系，不要自我介绍，不要说自己是谁。',
+		'- 一到两句，一共 10～60 个字，口语，是你此刻随口说的，不是客服、不是模板、也不像群发。',
+		'- 语气、用词、断句、标点都要照你自己设定里的说法来，别端着、别写成书面语。',
+		'- 说什么你自己挑：吐个槽、说件你此刻在干的小事、问她一句、接上次聊的话头——选最像你会做的那个。',
+		'- 每条都得和上一条不一样：换角度、换开头、换句式，最近发过的说法别再用。',
+		'- 不要提「互关」「关注」「看到你」这类平台关系，不要自我介绍，不要说自己是谁，也不要说「我发你个视频」。',
 		'- 不要推销、不要索要联系方式、不要带链接、话题标签、@ 任何人和表情码。',
-		withVideo
-			? '- 这次会顺手把你自己的一条视频分享给 ta（视频单独发过去），文字就一句「你看这个」那种，别描述画面、别解释自己在分享。'
-			: '',
+		withVideo ? '- 这次会顺手把你自己的一个视频单独发过去；文字就是配在视频旁边的一句闲话，别描述画面、别解释这是分享。' : '',
 		'- 实在没什么想说的，就只输出：[不发]',
 		'- 只输出要发的那句话本身，不要加引号、不要解释。'
 	].filter((x) => x !== '').join('\n');

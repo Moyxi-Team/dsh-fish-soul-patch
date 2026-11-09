@@ -22,7 +22,7 @@
  *                     见 assets/plugins-hunks.json。只读，不装不卸、不联网。
  *   P5 dm           ：让她主动给抖音上「互相关注」的人发私信（默认关，开关在 设置 → 平台 → 抖音 →
  *                     主动私信）：新增 lib/douyin-proactive.js（抓互关名单 / 挑人 / 写话 / 发送 / 记账），
- *                     再打 11 处锚点（douyin-social 2、index 1、config-platforms 1、routes-douyin 3、
+ *                     再打 12 处锚点（douyin-social 2、index 2、config-platforms 1、routes-douyin 3、
  *                     client.douyin 4），见 assets/dm-hunks.json。
  *
  * 为什么会丢：node_modules 下的第三方插件被 pnpm 整体重写，升级 / 重装就没了。
@@ -564,7 +564,7 @@ const DM_SRC = join(HERE, 'assets', 'douyin-proactive.js');
 /**
  * 抖音那边原本只有「别人发来 → 她回」，没有「她主动找人」。
  * 这里新增 lib/douyin-proactive.js（拉希希关注列表里互相关注的人 / 按人格写话 / 发送 + 记账），
- * 再按 assets/dm-hunks.json 打 11 处锚点：douyin-social（方法 + status）、index（tick）、
+ * 再按 assets/dm-hunks.json 打 12 处锚点：douyin-social（方法 + status）、index（tick + 人格全文注入）、
  * config-platforms（schema）、routes-douyin（回显 / 保存 / 候选名单 + 新路由）、
  * client.douyin（设置页：拉名单 → 自己勾人 + 同一个人一天最多几次 + 同一个人隔几小时）。
  */
