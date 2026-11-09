@@ -460,6 +460,13 @@ function patchHunks({ tag, label, jsonName }) {
 		const fixRel = String(h.upstreamFixedIn ?? h.file ?? '').replace(/^lib\//, '');
 		const fixText = fixRel === rel ? text : existsSync(join(lib, fixRel)) ? readFileSync(join(lib, fixRel), 'utf8') : '';
 		const result = (() => {
+			// 先认「完整新版」：h.new 整段已经在文件里，就说明这处是最新的，必须立刻收手。
+			// 这一步不能挪到 upgradeOld 后面 —— 旧版模板经常是新版的前缀（dm-vars 就是），
+			// 那样每跑一次都会再追加一份，跑两次就是重复声明 const dmCands 直接白屏。
+			if (text.includes(h.new)) {
+				log(`  ＝ lib/${rel}：${h.title} 已经打过`);
+				return 'skipped';
+			}
 			// 升级：这处上一版已经打过，现在模板改了内容。按「旧模板原文 → 新模板」整段换掉，
 			// 不用重新找锚点（锚点早就不在原处了）。h.upgradeOld 记的是上一版的 new。
 			if (typeof h.upgradeOld === 'string' && h.upgradeOld !== '' && h.upgradeOld !== h.new && text.includes(h.upgradeOld)) {
