@@ -1,6 +1,6 @@
 {
   "name": "dsh-fish-soul-patch",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "dsh-fish-soul 的补丁仓库：不含上游源码，只放版本无关的补丁脚本、补丁数据与上游兼容性体检结果",
   "type": "module",

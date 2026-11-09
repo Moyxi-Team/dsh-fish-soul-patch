@@ -17,6 +17,9 @@
  *   P3 index        ：插件热更新后人格卡 + 「此刻状态 / Top5 记忆」掉线（会话还活着，
  *                     ensureSession 见 live 直接 return 不再 setup），按 assets/index-hunks.json
  *                     补挂人格段；同样是小块锚点，不整文件覆盖。
+ *   P4 plugins      ：系统设置里加「已装插件」只读清单（装了什么、从哪装的、启用没启用），
+ *                     新增 lib/routes-plugins.js + 4 处锚点（client.js 3 处、routes.js 2 处），
+ *                     见 assets/plugins-hunks.json。只读，不装不卸、不联网。
  *
  * 为什么会丢：node_modules 下的第三方插件被 pnpm 整体重写，升级 / 重装就没了。
  * 改之前把原文件备份到 ~/.dsh/backup/。
@@ -25,7 +28,7 @@
  *   node patch-fish-soul.mjs                       # 自动找 ~/.dsh/profiles/<profile>/node_modules/dsh-fish-soul
  *   node patch-fish-soul.mjs --root <插件目录>      # 指定插件目录（含 package.json 的那层）
  *   node patch-fish-soul.mjs --check               # 只报告状态，不改文件
- *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount）
+ *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins）
  *   node patch-fish-soul.mjs --json                # 结尾额外打印一段机器可读汇总（CI / audit 用）
  *   node patch-fish-soul.mjs --force               # 忽略「已打过」判断，按文件内容重算（谨慎）
  *
@@ -492,6 +495,36 @@ function patchHunks({ tag, label, jsonName }) {
 	}
 }
 
+// ───────────────────────────── P4：系统设置里的「已装插件」─────────────────────────────
+
+const PLUGINS_ROUTE_SRC = join(HERE, 'assets', 'plugins-route.js');
+
+/**
+ * 设置页加一个只读的「已装插件」清单：新增 lib/routes-plugins.js（读当前 profile 的 dependencies
+ * 与各插件自己的 package.json，本地算出来，不联网），再按 assets/plugins-hunks.json 打锚点。
+ */
+function patchPlugins() {
+	log('\n[P4 plugins] 设置里列出已装插件（只读清单）');
+	const routePath = join(lib, 'routes-plugins.js');
+	if (existsSync(routePath) && readFileSync(routePath, 'utf8').includes('installedPlugins')) {
+		log('  ＝ lib/routes-plugins.js 已经存在');
+		skipped += 1;
+	} else {
+		if (!existsSync(PLUGINS_ROUTE_SRC)) {
+			log('  × 缺 assets/plugins-route.js（补丁包根目录 assets 下应带着它）');
+			failed += 1;
+			return;
+		}
+		if (!CHECK) {
+			mkdirSync(dirname(routePath), { recursive: true });
+			writeFileSync(routePath, readFileSync(PLUGINS_ROUTE_SRC, 'utf8'), 'utf8');
+		}
+		log('  ✓ lib/routes-plugins.js（新文件）');
+		changed += 1;
+	}
+	patchHunks({ tag: 'P4 plugins', label: '设置 → 系统 → 已装插件', jsonName: 'plugins-hunks.json' });
+}
+
 // ───────────────────────────── 主流程 ─────────────────────────────
 
 log(`dsh-fish-soul ${pkg.version} → ${root}`);
@@ -502,6 +535,7 @@ try {
 		patchHunks({ tag: 'P2 douyin', label: 'douyin-social —— 回评论发不出 / 图文无 BGM', jsonName: 'douyin-hunks.json' });
 	if (ONLY === '' || ONLY === 'remount')
 		patchHunks({ tag: 'P3 remount', label: 'index —— 热更新后人格卡 + 记忆块掉线', jsonName: 'index-hunks.json' });
+	if (ONLY === '' || ONLY === 'plugins') patchPlugins();
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;

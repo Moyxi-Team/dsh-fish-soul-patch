@@ -1,0 +1,57 @@
+[
+	{
+		"id": "client-system-plugins-tab",
+		"title": "系统设置多一个「已装插件」子页",
+		"file": "lib/client.js",
+		"marker": "[\"plugins\", \"已装插件\"]",
+		"old": "\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"version\", \"版本更新\"]]]",
+		"new": "\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"plugins\", \"已装插件\"], [\"version\", \"版本更新\"]]]",
+		"upstreamFixed": {
+			"present": "[\"plugins\", \"已装插件\"]"
+		}
+	},
+	{
+		"id": "client-installed-plugins-pane",
+		"title": "已装插件的只读清单组件（名字 / 版本 / 来源 / 是否启用）",
+		"file": "lib/client.js",
+		"marker": "function InstalledPlugins()",
+		"old": "\t\t// 某一块渲染出错只换成一行提示，别让整个设置页变空白",
+		"new": "\t\t// 已装插件：只读清单（装了什么、从哪装的、启用没启用）；不装不卸、不联网\n\t\tfunction InstalledPlugins() {\n\t\t\tconst [data, setData] = react.useState(null);\n\t\t\tconst [error, setError] = react.useState(null);\n\t\t\tconst [busy, setBusy] = react.useState(false);\n\t\t\tconst load = react.useCallback(async () => {\n\t\t\t\tsetBusy(true);\n\t\t\t\tconst r = await api(\"GET\", \"/plugins/installed\");\n\t\t\t\tsetBusy(false);\n\t\t\t\tif (r?.ok) { setData(r); setError(null); } else setError(r?.error ?? \"插件清单读不出来\");\n\t\t\t}, []);\n\t\t\treact.useEffect(() => { load(); }, [load]);\n\t\t\tif (!data) return error ? h(\"div\", { className: \"fs-notice\", role: \"alert\" }, h(\"b\", null, \"插件清单加载失败\"), h(\"span\", null, error), Button({ variant: \"secondary\", onClick: load }, \"重试\")) : h(\"div\", { className: \"fs-empty\" }, Dot(\"ongoing\"));\n\t\t\tconst KIND = { official: \"官方\", third: \"社区\", local: \"本地\" };\n\t\t\tconst plugins = Array.isArray(data.plugins) ? data.plugins : [];\n\t\t\treturn Group({ title: \"已装插件\", aside: h(\"span\", { className: \"fs-group-aside\" }, `${plugins.length} 个 · 启用 ${data.enabled ?? 0} 个`, Button({ variant: \"ghost\", onClick: load, disabled: busy }, busy ? \"读取中…\" : \"刷新\")) },\n\t\t\t\th(\"div\", { className: \"fs-list\" }, plugins.map((x) => h(\"div\", { className: \"fs-item\", key: x.name },\n\t\t\t\t\th(\"span\", { className: cx(\"fs-item-main\", x.enabled === false && \"fs-muted\") }, x.name),\n\t\t\t\t\th(\"span\", { className: \"fs-item-meta\" },\n\t\t\t\t\t\tx.self ? Tag(\"本插件\", \"outline\") : null,\n\t\t\t\t\t\tTag(`${KIND[x.kind] ?? \"其他\"}${x.version ? ` ${x.version}` : \"\"}`, x.enabled ? \"success\" : \"outline\"),\n\t\t\t\t\t\tx.enabled ? null : Tag(\"未启用\", \"outline\", { title: \"装在依赖里，但没列进 profile 的 bundles，宿主不会加载\" }))))),\n\t\t\t\th(\"p\", { className: \"fs-row-meta\" }, `profile：${data.profile ?? \"\"} · 只读清单；要装要卸走 dshmarket`));\n\t\t}\n\t\t// 某一块渲染出错只换成一行提示，别让整个设置页变空白",
+		"upstreamFixed": {
+			"present": "function InstalledPlugins()"
+		}
+	},
+	{
+		"id": "client-plugins-pane-route",
+		"title": "把「已装插件」子页接到面板分发",
+		"file": "lib/client.js",
+		"marker": "subtab === \"plugins\" ? h(Boundary, { name: \"已装插件\" }",
+		"old": "\t\t\t\t: subtab === \"version\" ? h(Boundary, { name: \"版本\" }, h(UpdateBar, { notify, onUpdateState: setUpdateAvailable }))",
+		"new": "\t\t\t\t: subtab === \"plugins\" ? h(Boundary, { name: \"已装插件\" }, h(InstalledPlugins))\n\t\t\t\t: subtab === \"version\" ? h(Boundary, { name: \"版本\" }, h(UpdateBar, { notify, onUpdateState: setUpdateAvailable }))",
+		"upstreamFixed": {
+			"present": "subtab === \"plugins\" ? h(Boundary, { name: \"已装插件\" }"
+		}
+	},
+	{
+		"id": "routes-import-plugins",
+		"title": "routes.js 引入 plugins 路由",
+		"file": "lib/routes.js",
+		"marker": "import { handlePluginsRoute } from './routes-plugins.js';",
+		"old": "import { handleUpdateRoute } from './routes-update.js';",
+		"new": "import { handleUpdateRoute } from './routes-update.js';\nimport { handlePluginsRoute } from './routes-plugins.js'; // [FS-PLUGINS-PANEL-PATCH]",
+		"upstreamFixed": {
+			"present": "handlePluginsRoute"
+		}
+	},
+	{
+		"id": "routes-mount-plugins",
+		"title": "路由分派里挂上 /plugins/*",
+		"file": "lib/routes.js",
+		"marker": "handlePluginsRoute({ method, path, req, send, sameOrigin })",
+		"old": "\t\t\t\tif (await handleUpdateRoute({ method, path, req, send, readBody, sameOrigin, deps })) return;",
+		"new": "\t\t\t\tif (await handleUpdateRoute({ method, path, req, send, readBody, sameOrigin, deps })) return;\n\t\t\t\t// ── 已装插件：只读清单（设置 → 系统 → 已装插件） [FS-PLUGINS-PANEL-PATCH] ──\n\t\t\t\tif (await handlePluginsRoute({ method, path, req, send, sameOrigin })) return;",
+		"upstreamFixed": {
+			"present": "handlePluginsRoute({ method, path, req, send, sameOrigin })"
+		}
+	}
+]

@@ -124,7 +124,12 @@ function auditHunks(dir, jsonName) {
 }
 
 const { dir, version } = fetchUpstream();
-const rows = [auditMeme(dir), ...auditHunks(dir, 'douyin-hunks.json'), ...auditHunks(dir, 'index-hunks.json')];
+const rows = [
+	auditMeme(dir),
+	...auditHunks(dir, 'douyin-hunks.json'),
+	...auditHunks(dir, 'index-hunks.json'),
+	...auditHunks(dir, 'plugins-hunks.json')
+];
 
 const retired = rows.filter((r) => r.status === 'RETIRED').length;
 const needed = rows.filter((r) => r.status === 'NEEDED').length;
