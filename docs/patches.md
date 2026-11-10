@@ -12,10 +12,10 @@
 | P2 | `douyin` | douyin-social —— 回评论发不出 / 图文无 BGM | 5 | — | `assets/douyin-hunks.json` |
 | P3 | `remount` | index —— 热更新后人格卡 + 记忆块掉线 | 2 | — | `assets/index-hunks.json` |
 | P4 | `plugins` | 设置 → 系统 → 已装插件 | 5 | `assets/plugins-route.js` → 插件 `lib/` | `assets/plugins-hunks.json` |
-| P5 | `dm` | 抖音 —— 主动给互关好友发私信 | 19 | `assets/douyin-proactive.js` → 插件 `lib/` | `assets/dm-hunks.json` |
+| P5 | `dm` | 抖音 —— 主动给互关好友发私信 | 21 | `assets/douyin-proactive.js` → 插件 `lib/` | `assets/dm-hunks.json` |
 | P6 | `share` | 刷到有意思的就发给你 → 视频卡片 | 9 | — | `assets/share-hunks.json` |
 
-合计锚点 **40 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
+合计锚点 **42 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
 
 每处补丁在运行时按四种判定之一处理：`PATCHED` 打上 / `ALREADY` 跳过 / `UPSTREAM` 上游已原生实现则自动退役 / `DRIFT` 锚点没了停手报错（见 README「用法」）。
 
@@ -135,7 +135,7 @@ handlePluginsRoute({ method, path, req, send, sameOrigin })
 
 </details>
 
-## P5 · 抖音 —— 主动给互关好友发私信（`--only dm`，19 处）
+## P5 · 抖音 —— 主动给互关好友发私信（`--only dm`，21 处）
 
 另有整文件模块：`assets/douyin-proactive.js` → 插件 `lib/`（内容变了要同步升脚本里的版本戳，见维护约定）。
 
@@ -160,6 +160,8 @@ handlePluginsRoute({ method, path, req, send, sameOrigin })
 | 17 | `gw-dm-session-reply` | `lib/gateway.js` | sendReply：主动私信那一轮允许回抖音（forceDouyin） | — |
 | 18 | `gw-dm-session-silent` | `lib/gateway.js` | sendReply：她这轮不说话时回置 douyinSilent | — |
 | 19 | `gw-dm-session-send` | `lib/gateway.js` | sendReply：抖音单独一条、只发文字（sendDouyinDm） | — |
+| 20 | `dm-session-social-field` | `lib/douyin-social.js` | DouyinSocial 记住 sayViaSession（没接上就退回插件自己发） | — |
+| 21 | `dm-session-wire` | `lib/index.js` | index.js 把 gateway.triggerDouyinProactive 接到 DouyinSocial.sayViaSession | — |
 
 <details><summary>锚点原文（marker）</summary>
 
@@ -220,6 +222,12 @@ douyinOutbound
 
 # gw-dm-session-send
 [FS-DM-SESSION]
+
+# dm-session-social-field
+this.sayViaSession = typeof sayViaSession
+
+# dm-session-wire
+sayViaSession: (name, hint) =>
 
 ```
 
@@ -283,7 +291,7 @@ afterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, 
 | P2 | 5 | 4 | 少 1 条（合并成功能项） |
 | P3 | 2 | 2 | 一致 |
 | P4 | 6 | 5 | 少 1 条（合并成功能项） |
-| P5 | 20 | 11 | 少 9 条（合并成功能项） |
+| P5 | 22 | 11 | 少 11 条（合并成功能项） |
 | P6 | 9 | 10 | 多 1 条（一处拆成多项） |
 
 页面上某一组显示「已打 N / M」，N 是按探针数出来的；锚点数以本文件为准。探针漏了某处时，页面会少报，但补丁器 `--check` 仍然会管到那一处。

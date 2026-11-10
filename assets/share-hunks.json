@@ -5,7 +5,11 @@
 		"file": "lib/douyin-social.js",
 		"marker": "[FS-SHARE-CARD] 引入 shareBrowsedVideo",
 		"old": "import { dmCfg, listCandidates, maybeSendProactive, proactiveStatus, sendProactiveNow } from './douyin-proactive.js';",
-		"new": "import { dmCfg, listCandidates, maybeSendProactive, proactiveStatus, sendProactiveNow, shareBrowsedVideo } from './douyin-proactive.js'; // [FS-SHARE-CARD] 引入 shareBrowsedVideo（刷到的视频也发卡片）"
+		"new": "import { dmCfg, listCandidates, maybeSendProactive, proactiveStatus, sendProactiveNow, shareBrowsedVideo } from './douyin-proactive.js'; // [FS-SHARE-CARD] 引入 shareBrowsedVideo（刷到的视频也发卡片）",
+		"dependsOn": [
+			"dm-social-import"
+		],
+		"note": "锚点原样是前序 P5 补丁写入的那段（上游本没有），按依赖判在位，不按上游源码判漂移"
 	},
 	{
 		"id": "share-social-method",
@@ -13,7 +17,11 @@
 		"file": "lib/douyin-social.js",
 		"marker": "dmShareBrowsed(opts)",
 		"old": "\t/** 设置页「重新拉名单」：读一遍关注页上「互相关注」的人，返回候选给她勾。 */\n\tasync dmCandidates() {\n\t\treturn listCandidates(this, { refresh: true });\n\t}\n",
-		"new": "\t/** 设置页「重新拉名单」：读一遍关注页上「互相关注」的人，返回候选给她勾。 */\n\tasync dmCandidates() {\n\t\treturn listCandidates(this, { refresh: true });\n\t}\n\n\t/**\n\t * [FS-SHARE-CARD]「刷到有意思的就发给你」也走视频卡片（不是发链接）：把刚刷到的那条视频\n\t * 用抖音自带的「分享 → 私信」发给主人，再补一句话。卡片没发成返回 ok:false，调用方退回发链接。\n\t */\n\tdmShareBrowsed(opts) {\n\t\treturn shareBrowsedVideo(this, opts);\n\t}\n"
+		"new": "\t/** 设置页「重新拉名单」：读一遍关注页上「互相关注」的人，返回候选给她勾。 */\n\tasync dmCandidates() {\n\t\treturn listCandidates(this, { refresh: true });\n\t}\n\n\t/**\n\t * [FS-SHARE-CARD]「刷到有意思的就发给你」也走视频卡片（不是发链接）：把刚刷到的那条视频\n\t * 用抖音自带的「分享 → 私信」发给主人，再补一句话。卡片没发成返回 ok:false，调用方退回发链接。\n\t */\n\tdmShareBrowsed(opts) {\n\t\treturn shareBrowsedVideo(this, opts);\n\t}\n",
+		"dependsOn": [
+			"dm-social-methods"
+		],
+		"note": "锚点原样是前序 P5 补丁写入的那段（上游本没有），按依赖判在位，不按上游源码判漂移"
 	},
 	{
 		"id": "share-index-target",

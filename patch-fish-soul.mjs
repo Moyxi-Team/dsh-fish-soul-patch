@@ -112,6 +112,24 @@ const upstreamDone = (spec, text) => {
 const read = (rel) => readFileSync(join(lib, rel), 'utf8');
 const crlf = (rel) => read(rel).includes('\r\n');
 
+/**
+ * 这条补丁「最长的一句新增内容」：new 里有、old 里没有的行里最长的那条。
+ * 同文件多条补丁共用 marker 时，用它分辨「是这条打过了」还是「只是兄弟那条打过了」。
+ */
+const keyAddedLine = (h) => {
+	const oldLines = new Set(
+		String(h.old ?? '')
+			.split('\n')
+			.map((l) => l.trim())
+	);
+	const cand = String(h.new ?? '')
+		.split('\n')
+		.map((l) => l.trim())
+		.filter((l) => l.length >= 12 && !oldLines.has(l));
+	cand.sort((a, b) => b.length - a.length);
+	return cand[0] ?? '';
+};
+
 /** 把模板里的 \n 换成跟目标文件一致的换行符。 */
 const fit = (text, useCrlf) => (useCrlf ? text.replace(/\n/g, '\r\n') : text);
 
@@ -449,6 +467,21 @@ function patchHunks({ tag, label, jsonName }) {
 		return;
 	}
 	const hunks = JSON.parse(readFileSync(hunksPath, 'utf8'));
+	// marker 归属：同一个文件里，这段文字出现在几条补丁的 old/new 里？
+	// 只被一条补丁用到 → 看到它就算这条打过了；被好几条用到（共用 / 被兄弟补丁蹭到）→ marker 说明不了问题。
+	const markerOwners = new Map();
+	for (const h of hunks) {
+		if (!h.marker) continue;
+		const rel = String(h.file ?? '').replace(/^lib\//, '');
+		const k = `${rel}|${h.marker}`;
+		const owners = markerOwners.get(k) ?? new Set();
+		for (const g of hunks) {
+			if (String(g.file ?? '').replace(/^lib\//, '') !== rel) continue;
+			if (!`${g.old ?? ''}\n${g.new ?? ''}`.includes(h.marker)) continue;
+			owners.add(g.id);
+		}
+		markerOwners.set(k, owners);
+	}
 	let up = 0;
 	for (const h of hunks) {
 		const rel = String(h.file ?? '').replace(/^lib\//, '');
@@ -478,9 +511,18 @@ function patchHunks({ tag, label, jsonName }) {
 				note(h.id, 'UPGRADED', h.title);
 				return 'upgraded';
 			}
-			if (text.includes(h.marker) || text.includes(h.new)) {
-				log(`  ＝ lib/${rel}：${h.title} 已经打过`);
-				return 'skipped';
+			// marker 是「这块补丁打过」的记号。大多数补丁的 marker 是自己独有的，看到就算打过。
+			// 但同一个文件里几条补丁可能共用同一个 marker（P5 的 gateway.js 三条都是 [FS-DM-SESSION]），
+			// 那时只看 marker 就会把「兄弟那条打过了」当成「我这条也打过了」→ 全新安装漏打、还不报错。
+			// 共用 marker 的改用「这条补丁最长的一句新增内容」核对，对不上才继续往下打。
+			if (text.includes(h.marker)) {
+				const shared = (markerOwners.get(`${rel}|${h.marker}`)?.size ?? 0) > 1;
+				const key = shared ? keyAddedLine(h) : '';
+				if (!shared || key === '' || text.includes(key)) {
+					log(`  ＝ lib/${rel}：${h.title} 已经打过`);
+					return 'skipped';
+				}
+				log(`  · lib/${rel}：${h.title} 只碰到兄弟补丁共用的 marker，这条还没打 → 继续`);
 			}
 			if (upstreamDone(h.upstreamFixed, fixText)) {
 				up += 1;

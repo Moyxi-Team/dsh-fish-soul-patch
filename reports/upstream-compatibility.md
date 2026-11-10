@@ -12,28 +12,8 @@
 | P2 douyin | 5 | 0 | 5 | 0 | 🟡 继续用 |
 | P3 remount | 2 | 0 | 2 | 0 | 🟡 继续用 |
 | P4 plugins | 6 | 0 | 6 | 0 | 🟡 继续用 |
-| P5 dm | 20 | 0 | 19 | 1 | 🔴 要更新锚点 |
-| P6 share | 9 | 0 | 7 | 2 | 🔴 要更新锚点 |
-
-## 上游改了什么（通俗版）
-
-> 补丁锚点与上游现状逐行对齐后的结论；对不上的行以 `-`(补丁原写法) / `+`(上游现状) 成对列出。
-
-### gw-dm-session-reply（P5 dm · lib/gateway.js）
-- 通俗说：**上游改动了这段里的几行**（上游第 1395 行附近，6 行里原样还剩 4 行）。照下面成对的对比改锚点。
-- 对不上的行（上=补丁原来的写法，下=上游现在这一行；从差异处开始截取）：
-  - `const bound = this.bound.get(sessionId);`
-  + （这一行已对不上，多半整体挪位或被替换，别照它改锚点）
-  - `if (bound === undefined) return false;`
-  + `if (platformOf(st?.channelId || bound.channel_id) === 'douyin') return false;`
-
-### share-social-import（P6 share · lib/douyin-social.js）
-- 通俗说：**这段在上游里已经找不到对应代码** —— 函数改名、挪了位置或整体重构了。先在该文件里搜补丁依赖的函数名再定位。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
-
-### share-social-method（P6 share · lib/douyin-social.js）
-- 通俗说：**上游把这段基本重写了**（上游第 41 行附近，4 行里只剩 1 行原样）。补丁逻辑要按新写法重新落。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
+| P5 dm | 22 | 0 | 22 | 0 | 🟡 继续用 |
+| P6 share | 9 | 0 | 9 | 0 | 🟡 继续用 |
 
 ## 逐处明细
 
@@ -69,12 +49,14 @@
 | P5 dm | DouyinSocial 接纯 HTTP 客户端（分享视频按类型挑作品） | `dm-http-social` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P5 dm | 实例化 DouyinSocial 时传入 douyinHttp | `dm-http-index` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P5 dm | gateway：加 triggerDouyinProactive / sendDouyinDm（主动私信走会话） | `gw-dm-session-methods` | 🟡 仍需 | 锚点在，补丁仍有效 |
-| P5 dm | sendReply：主动私信那一轮允许回抖音（forceDouyin） | `gw-dm-session-reply` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
+| P5 dm | sendReply：主动私信那一轮允许回抖音（forceDouyin） | `gw-dm-session-reply` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P5 dm | sendReply：她这轮不说话时回置 douyinSilent | `gw-dm-session-silent` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P5 dm | sendReply：抖音单独一条、只发文字（sendDouyinDm） | `gw-dm-session-send` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P5 dm | DouyinSocial 记住 sayViaSession（没接上就退回插件自己发） | `dm-session-social-field` | 🟡 仍需 | 锚点是前序补丁 dm-http-social 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
+| P5 dm | index.js 把 gateway.triggerDouyinProactive 接到 DouyinSocial.sayViaSession | `dm-session-wire` | 🟡 仍需 | 锚点是前序补丁 dm-persona-soul 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
 | P5 dm | 主动私信实现（整文件 douyin-proactive.js） | `dm-proactive-file` | 🟡 仍需 | 上游无 lib/douyin-proactive.js，本仓库新增文件仍需要 |
-| P6 share | douyin-social.js：引入 shareBrowsedVideo（刷到的视频也发卡片） | `share-social-import` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
-| P6 share | douyin-social.js：加 dmShareBrowsed（把刷到的视频用卡片发给主人） | `share-social-method` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
+| P6 share | douyin-social.js：引入 shareBrowsedVideo（刷到的视频也发卡片） | `share-social-import` | 🟡 仍需 | 锚点是前序补丁 dm-social-import 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
+| P6 share | douyin-social.js：加 dmShareBrowsed（把刷到的视频用卡片发给主人） | `share-social-method` | 🟡 仍需 | 锚点是前序补丁 dm-social-methods 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
 | P6 share | index.js：抖音刷到的分享改发抖音私信卡片（douyinShareTarget + douyinShareCard） | `share-index-target` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P6 share | life.js：LifeEngine 接 douyinShareCard（发视频卡片） | `share-life-dep` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P6 share | life.js：queueShare 收下 videoId（刷到的那条视频） | `share-life-queuesig` | 🟡 仍需 | 锚点在，补丁仍有效 |
@@ -83,6 +65,6 @@
 | P6 share | life.js：deliverOne 先发视频卡片，卡片不通才退回发链接（QQ） | `share-life-deliver` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P6 share | douyin-browse.js：把刷到的那条视频的 id 一起交上去（发卡片要用） | `share-browse-videoid` | 🟡 仍需 | 锚点在，补丁仍有效 |
 
-**结论**：需要更新锚点：3 处的上游代码改版了，补丁本身没被上游吸收。
+**结论**：仍有 45 处补丁有效、0 处已可退役。补丁继续适配上游最新版（0.15.32）即可。
 
 > 说明：`可退役` = 上游自己已经做完了，这类补丁不必再维护、也不必跟版本；`仍需` = 上游还没有，补丁继续用；`漂移` = 上游改了这段代码但没实现同样功能，需要按新版更新锚点。

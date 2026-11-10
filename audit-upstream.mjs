@@ -153,6 +153,17 @@ function auditHunks(dir, jsonName, group = jsonName) {
 		if (upstreamFixedHit)
 			return { group, id: h.id, title: h.title, status: 'RETIRED', detail: `上游已自己修好（${JSON.stringify(h.upstreamFixed)}${fixRel !== rel ? ` @ lib/${fixRel}` : ''}）` };
 		if (text.includes(h.old)) return { group, id: h.id, title: h.title, status: 'NEEDED', detail: '锚点在，补丁仍有效' };
+		// 锚点原样本来就是前序补丁写进去的（h.dependsOn 指向同文件里更早的那处补丁）：
+		// 上游干净源码里当然找不到这段，不能算「上游改版把代码挪走了」。
+		// 这种补丁跟着前序补丁走 —— 前序补丁的锚点还在，它就还能打；前序补丁退役了，它自然也用不上。
+		if (Array.isArray(h.dependsOn) && h.dependsOn.length > 0)
+			return {
+				group,
+				id: h.id,
+				title: h.title,
+				status: 'NEEDED',
+				detail: `锚点是前序补丁 ${h.dependsOn.join('、')} 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移`
+			};
 		return { group, id: h.id, title: h.title, status: 'DRIFT', detail: '锚点找不到、上游也没修 → 需要按新版更新锚点' };
 	});
 	// 附带锚点原文与文件位置，供 --explain 通俗解释「上游改了什么」；JSON 输出时会剥掉这两个字段

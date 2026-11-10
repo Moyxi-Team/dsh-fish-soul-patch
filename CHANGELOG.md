@@ -5,6 +5,33 @@
 
 ---
 
+## 锚点跟上 0.15.32 · 补丁仓重装也不漏打（新增 `sayViaSession` 两处）
+
+**为什么改**：上游 0.15.32 把几段代码重写了排版，补丁仓里 3 处锚点对不上（`gw-dm-session-reply` / `share-social-import` / `share-social-method`）——**本机已经打过所以看不出来，一旦重装或换机就装不上**。顺带查出一个更隐蔽的问题：同一个文件里几条补丁**共用同一个 marker** 时，「兄弟那条打过了」会被当成「我这条也打过了」，全新安装会**悄悄漏打一整块功能**（`forceDouyin` 那轮、`douyinSilent` 标记就漏过）。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `assets/dm-hunks.json` · `gw-dm-session-reply` | `old` 换成 0.15.32 干净源码的现状（上游还在，只是换了排版）；`new` 补回开头 `const bound` / `if (bound === undefined)` 两行——旧 `new` 不含这两行，直接替换会把守卫删掉 |
+| `assets/share-hunks.json` · `share-social-import` / `share-social-method` | 加 `dependsOn`：这两段的锚点是**前序补丁写进去的**（上游本来没有），不该拿去和上游源码比对 |
+| `audit-upstream.mjs` | 判定链加一支：有 `dependsOn` 的直接判 `NEEDED`（锚点由前面的补丁写入，不参与漂移判定） |
+| `patch-fish-soul.mjs` | 新增 `markerOwners`：统计同一文件里「这段文字被几条补丁的 old/new 用到」，只有**独占**才算打过；共用或被兄弟补丁蹭到的，改用这条补丁最长的一句新增内容（`keyAddedLine`）复核，对不上就继续打 |
+| `assets/dm-hunks.json` · 新增 `dm-session-social-field` / `dm-session-wire` | 补上 `sayViaSession` 链路（`douyin-social.js` 存下来 + `index.js` 接到 `gateway.triggerDouyinProactive`）。这两处本机早就有、补丁仓里却**没有**，重装后「主动私信那句话由会话来说」会静默退回插件自己发 |
+| `dm-http-social` | 构造参数顺手带上 `sayViaSession`（和 `http` 同一条补丁一次改完，避免两条补丁抢同一行锚点） |
+| `docs/patches.md` / `README.md` / `reports/upstream-compatibility.md` | 由 `tools/gen-patch-docs.mjs` 重新生成，处数 40 → 42（dm 组 19 → 21） |
+
+**怎么验证**
+
+```powershell
+node audit-upstream.mjs --brief --explain            # 0 可退役 / 45 仍需 / 0 漂移
+node patch-fish-soul.mjs --check --root <本机插件>    # 改 0 / 已打 58 / 漂移 0 / 失败 0
+node patch-fish-soul.mjs --root <0.15.32 干净源码>    # 全新安装 58 处，装完与本机逐字节一致
+node patch-fish-soul.mjs --check --root <同上>        # 幂等：改 0 / 已打 58
+```
+
+---
+
 ## 工具与文档 · 判完兼容要能说人话（`audit --explain` + `AGENTS.md` §8）
 
 **为什么改**：只看「漂移 3 处」等于没说——用户要知道的是**上游到底动了什么**才导致补丁不兼容。原来 `--explain` 不存在，Agent 只能自己啃 `-hunks.json` 和上游源码，或者干巴巴回一句「3 处锚点失配」，等于把问题又丢回去。
