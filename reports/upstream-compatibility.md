@@ -1,3 +1,14 @@
+---
+AIGC:
+    Label: "1"
+    ContentProducer: 001191440300708461136T1XGW3
+    ProduceID: c3040d704551dfa25d47107616a7e32f_cc90bbf7dd2611f1bc42525400638852
+    ReservedCode1: mRFA+IQuf/JU2T23aOtKFx7ZlSkc0jAczc2EuZGh7tdR2xBGpEvhDq9h4pfs3ZFcHX3TL9eaMROuci+3nQF33V+Ss86RSL8e9fAJfvrOstfnWKrxpl+Gu7gfZPJbnybByfmByd1OilOEMa/X6+bl0Y25C1JHU9jiKSKl1cQ8aN6jhNEEdYs/56tFoFs=
+    ContentPropagator: 001191440300708461136T1XGW3
+    PropagateID: c3040d704551dfa25d47107616a7e32f_cc90bbf7dd2611f1bc42525400638852
+    ReservedCode2: mRFA+IQuf/JU2T23aOtKFx7ZlSkc0jAczc2EuZGh7tdR2xBGpEvhDq9h4pfs3ZFcHX3TL9eaMROuci+3nQF33V+Ss86RSL8e9fAJfvrOstfnWKrxpl+Gu7gfZPJbnybByfmByd1OilOEMa/X6+bl0Y25C1JHU9jiKSKl1cQ8aN6jhNEEdYs/56tFoFs=
+---
+
 # 上游兼容性核查（自动生成）
 
 - 核查时间：2026-11-11
@@ -91,3 +102,4 @@
 **结论**：仍有 67 处补丁有效、0 处已可退役。补丁继续适配上游最新版（0.15.33）即可。
 
 > 说明：`可退役` = 上游自己已经做完了，这类补丁不必再维护、也不必跟版本；`仍需` = 上游还没有，补丁继续用；`漂移` = 上游改了这段代码但没实现同样功能，需要按新版更新锚点。
+*（内容由AI生成，仅供参考）*

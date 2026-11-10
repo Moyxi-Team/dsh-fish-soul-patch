@@ -5,6 +5,33 @@
 
 ---
 
+## 补丁被「整包重装」冲掉之后：加一道启动前体检
+
+**为什么改**：2026-11-11 凌晨把 0.15.32 换成 0.15.33 时，只把 profile `package.json` 里的版本号改成 `0.15.33`、直接把干净源码铺进 `node_modules`，**没有让 pnpm 重算 `pnpm-lock.yaml`**。之后重开 DSH，启动阶段的依赖安装发现「声明的 0.15.33」与「lock 里的 0.15.32」不一致，就把整个 `dsh-fish-soul` 按 registry tarball 重装了一遍 —— 80 处补丁被整包覆盖，`--check` 从「已打 80」掉到「已打 0」，界面不报错，只是功能静默消失。
+
+排查时先排除了两个常见误判：`@chendaleiq/dsh-plugin-auto-update` 的 `packages` 白名单里**没有** `dsh-fish-soul`，它的 6 小时周期不会碰这个包；`profile` 的 `package.json` 也没有再被写入 BOM。真正的触发点是**三处版本不一致**（profile 声明 / pnpm-lock 锁定 / 装好的包里 `package.json`）。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `tools/verify-install.mjs` · 新增 | 一键体检：比对三处版本是否完全一致，并调用 `patch-fish-soul.mjs --check` 汇总补丁在位情况；不一致时直接给出「先统一版本 → 再重跑 patch」的两步处方。`--json` 供脚本消费，退出码 0 健康 / 1 有风险 / 2 体检失败 |
+| `package.json` · scripts | 新增 `npm run verify` |
+| `AGENTS.md` §2 | 「固定三步」扩为「固定四步」，加 ④ 体检命令与判读说明（本机文档，已在 `.gitignore`） |
+| `AGENTS.md` §6 | 新增硬规则：手改版本号却不同步 lock，重开 DSH 必被整包重装；升版本必须走正常安装，装完再打补丁（本机文档，已在 `.gitignore`） |
+
+**怎么验证**
+
+```powershell
+node tools/verify-install.mjs            # 期望：三行 ✓、结论「健康」、退出码 0
+node tools/verify-install.mjs --json     # 机器可读
+node patch-fish-soul.mjs --check --root <本机插件>   # 改 0 / 已打 80 / 漂移 0 / 失败 0
+```
+
+**回滚**：本次只新增体检脚本与文档，不改任何补丁锚点；回滚只需删掉 `tools/verify-install.mjs` 与对应文档段落。
+
+---
+
 ## P7 微信互通进补丁仓 · 顺带修掉「CRLF 文件永远打不上」
 
 **为什么改**：微信（WechatAgent）↔ 人格记忆互通这一整套改动原先只在**本机真身里**手改过，补丁仓里一处都没有 —— 重装、换机、上游发版都会**整块功能静默消失**（微信侧还会退化成把微信 id 当 QQ 号查人）。这一轮把它收成 P7 组 21 处锚点，并顺手揪出两处会让「全新安装打不上」的底层坑。

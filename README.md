@@ -57,6 +57,7 @@ node patch-fish-soul.mjs --check            # 只报告状态，不改文件
 node patch-fish-soul.mjs --only meme        # 只跑一组（meme / douyin / remount / plugins / dm / share / wechat）
 node patch-fish-soul.mjs --json             # 结尾多打一段机器可读汇总（CI / 体检用）
 node patch-fish-soul.mjs --force            # 忽略「已打过」判断按内容重算（谨慎）
+node tools/verify-install.mjs               # 体检：三处版本是否一致 + 补丁是否还在（防被整包重装冲掉）
 ```
 
 每次运行对每处补丁给出四种判定之一：
@@ -90,6 +91,26 @@ node audit-upstream.mjs
 
 > **Agent 动手前先看 [`AGENTS.md`](AGENTS.md)**：上游更新时怎么在 1 分钟内判完兼容性、`audit` 与 `--check` 两套结论为什么不一致、漂移了按什么顺序改锚点。人读到这里就够。
 
+## 安装体检（防补丁被整包重装冲掉）
+
+```bash
+node tools/verify-install.mjs            # 默认体检 ~/.dsh/profiles/desktop
+node tools/verify-install.mjs --root <插件目录>
+node tools/verify-install.mjs --json     # 机器可读
+```
+
+DSH 启动时会按 profile 的 `package.json` + `pnpm-lock.yaml` 做依赖安装。只要 **profile 声明 / lock 锁定 / 装好的包里 `package.json` 版本** 三者有一处对不上，它就会把 `dsh-fish-soul` 按 registry tarball **整包重装**，补丁文件被覆盖、功能静默消失（不报错、不弹窗）。
+
+| 输出 | 含义 |
+| --- | --- |
+| 三行 `✓` + 结论「健康」 | 版本三处一致、补丁在位，下次启动不会被覆盖 |
+| 某行 `×` | 该处版本不一致 → 按提示先统一版本，再重跑 `patch` |
+| 补丁行 `×` | 版本没问题但补丁不全 → 直接重跑 `patch-fish-soul.mjs --root <目录>` |
+
+退出码：`0` 健康 / `1` 有风险 / `2` 体检本身失败（找不到目录等）。打完补丁后、以及每次重开 DSH 之后各跑一次即可。
+
+> 顺带一个已经排除的误判：`@chendaleiq/dsh-plugin-auto-update` 的 `packages` 白名单里没有 `dsh-fish-soul`，它的周期检查不会动这个包 —— 会重装它的是上面这套「启动时依赖安装」。
+
 ## 仓库内容
 
 ```
@@ -111,6 +132,7 @@ docs/
   patches.md           逐处清单（P1–P7 全部 64 处锚点 + 3 个整文件模块），由 tools/gen-patch-docs.mjs 生成
 tools/
   gen-patch-docs.mjs   由 assets/*-hunks.json 生成 docs/patches.md；--check 校验两者不一致
+  verify-install.mjs   安装体检：profile 声明 / pnpm-lock / 实际版本三处是否一致 + 补丁是否在位
 reports/
   upstream-compatibility.md   体检报告（自动生成）
 .github/workflows/
