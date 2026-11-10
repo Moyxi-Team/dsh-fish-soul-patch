@@ -1039,36 +1039,70 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 		? opts.types
 		: (() => { try { return dmCfg(social.getConfig() ?? {}).shareTypes; } catch { return normalizeShareTypes(null); } })();
 	const wantTypes = Array.isArray(opts.wantTypes) ? opts.wantTypes : [];
-	// [FS-DM-SHARE-OTHERS] 用户要求：分享视频不要分享希希自己发的 —— 只从「别人的视频」里挑，
-	// 她自己作品的 id 一路剔掉，连兜底都不许回到她自己发的；挑不到就不发（宁可不发，也不发错来源）。
-	const selfIds = (await videoPool(social).catch(() => []))
-		.map((x) => String(x?.id ?? ''))
-		.filter((x) => /^\d{8,}$/.test(x));
-	const others = await othersPool(social, { wantTypes, types }).catch(() => []);
-	const items = others.filter((x) => !selfIds.includes(String(x?.id ?? '')));
-	if (items.length === 0) return { ok: false, error: '没找到可分享的「别人的」视频（她自己的作品按设置不再分享）' };
-	const strictTypes = wantTypes.length > 0;
-	const pickedVideo = pickShareVideo(items, {
-		wantTypes,
-		types,
-		sentIds: sharedIds(social, name),
-		excludeIds: selfIds,
-		strictTypes,
-		random: () => (typeof social.random === 'function' ? social.random() : Math.random()),
-	});
-	const item = pickedVideo.item;
-	if (!item) {
-		return {
-			ok: false,
-			error: strictTypes
-				? `没抓到「${wantTypes.join('/')}」这类的视频，这次不发（宁愿不发也不发不对类型的）`
-				: '没找到可分享的「别人的」视频',
+	// [FS-SHARE-CARD] 指定了 videoId（她刷到的那条视频）就发这一条，不再去池子里另挑 ——
+	//   「刷到有意思的就发给你」改走卡片之后走这里有。
+	const forcedId = /^\d{8,}$/.test(String(opts.videoId ?? '')) ? String(opts.videoId) : '';
+	let item = null;
+	let pickedVideo = { item: null, types: [], fellBack: false };
+	let strictTypes = false;
+	let want = [];
+	if (forcedId !== '') {
+		item = {
+			id: forcedId,
+			desc: String(opts.videoDesc ?? ''),
+			tags: Array.isArray(opts.videoTags) ? opts.videoTags : [],
+			durS: Number(opts.videoDurS) > 0 ? Number(opts.videoDurS) : 0,
 		};
+		pickedVideo = { item, types: classifyVideo(item, types), fellBack: false };
+	} else {
+		// [FS-DM-SHARE-OTHERS] 用户要求：分享视频不要分享希希自己发的 —— 只从「别人的视频」里挑，
+		// 她自己作品的 id 一路剔掉，连兜底都不许回到她自己发的；挑不到就不发（宁可不发，也不发错来源）。
+		const selfIds = (await videoPool(social).catch(() => []))
+			.map((x) => String(x?.id ?? ''))
+			.filter((x) => /^\d{8,}$/.test(x));
+		// [FS-DM-SHARE-ONE-TYPE] 用户要求：主动分享的类型，从她在设置里选的几个里**挑一个**去搜，
+		// 不是把每个类型都搜一遍。选了几个就每次随机挑一个，只搜这一类；挑不到这次就不发。
+		const rnd = () => (typeof social.random === 'function' ? social.random() : Math.random());
+		const one = wantTypes.length === 0
+			? ''
+			: String(wantTypes[Math.min(wantTypes.length - 1, Math.max(0, Math.floor(rnd() * wantTypes.length)))] ?? '').trim();
+		want = one === '' ? [] : [one];
+		if (want.length > 0) {
+			social.log?.('info', `[fish-soul] 抖音：这次只按「${want[0]}」搜视频（她选的是 ${wantTypes.join('/')}）`);
+		}
+		const others = await othersPool(social, { wantTypes: want, types }).catch(() => []);
+		const items = others.filter((x) => !selfIds.includes(String(x?.id ?? '')));
+		if (items.length === 0) {
+			return {
+				ok: false,
+				error: want.length > 0
+					? `没找到「${want[0]}」这类的「别人的」视频，这次不发`
+					: '没找到可分享的「别人的」视频（她自己的作品按设置不再分享）',
+			};
+		}
+		strictTypes = want.length > 0;
+		pickedVideo = pickShareVideo(items, {
+			wantTypes: want,
+			types,
+			sentIds: sharedIds(social, name),
+			excludeIds: selfIds,
+			strictTypes,
+			random: rnd,
+		});
+		item = pickedVideo.item;
+		if (!item) {
+			return {
+				ok: false,
+				error: strictTypes
+					? `没抓到「${want.join('/')}」这类的视频，这次不发（宁愿不发也不发不对类型的）`
+					: '没找到可分享的「别人的」视频',
+			};
+		}
+		if (pickedVideo.fellBack) {
+			social.log?.('info', `[fish-soul] 抖音：${name} 只看「${want.join('/')}」，别人的池里没这类的，这次退回不限（仍不发她自己发的）`);
+		}
 	}
 	const id = String(item.id);
-	if (pickedVideo.fellBack) {
-		social.log?.('info', `[fish-soul] 抖音：${name} 只看「${wantTypes.join('/')}」，别人的池里没这类的，这次退回不限（仍不发她自己发的）`);
-	}
 	// 详情页偶发被抖音弹回首页（风控 / 视频受限），确认地址真落到视频页再动手
 	let onVideo = false;
 	for (let i = 0; i < 2 && !onVideo; i += 1) {
@@ -1153,16 +1187,19 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
  * 关键：人格卡全文递进去（persona.brief 只有 300 字，谁写出来都一个味），
  * 再把她最近发过的话一起给她看，明确要求换角度、换开头、别复用说法。
  */
-export async function draft(social, friend, history, { withVideo = false, video = null } = {}) {
+export async function draft(social, friend, history, { withVideo = false, video = null, toMaster = false } = {}) {
 	const p = social.persona?.() ?? { name: '鱼', brief: '' };
 	// 性格优先：full 是人格卡全文；老版本插件没提供 full 就退回 brief，不至于写不出话。
 	const soulRaw = String(p.full ?? '').trim() !== '' ? String(p.full) : String(p.brief ?? '');
 	const soul = soulRaw.replace(/\s+\n/g, '\n').trim().slice(0, 1800);
 	const person = (() => { try { return findPersonByDouyin(social.db, friend.name); } catch { return null; } })();
 	const parts = (() => { try { return social.clock.getRoleDateParts(); } catch { return {}; } })();
-	const who = person
-		? `这个人你认识：${String(person.display_name || friend.name).slice(0, 20)}${person.impression ? `（你心里对 ta 的印象：${String(person.impression).slice(0, 60)}）` : ''}`
-		: '你们互相关注，但你其实还不太了解 ta';
+	// [FS-SHARE-CARD] 分享给主人（刷到的视频）时，「互相关注」那句就不对了，单独说一声
+	const who = toMaster === true
+		? `这是你主人${person?.impression ? `（你心里对 ta 的印象：${String(person.impression).slice(0, 60)}）` : '，把视频发给 ta 看'}`
+		: person
+			? `这个人你认识：${String(person.display_name || friend.name).slice(0, 20)}${person.impression ? `（你心里对 ta 的印象：${String(person.impression).slice(0, 60)}）` : ''}`
+			: '你们互相关注，但你其实还不太了解 ta';
 	const historyLine = Array.isArray(history) && history.length > 0
 		? `你们最近聊过：\n${history.slice(-6).map((m) => `${m.fromMe ? '你' : 'ta'}：${String(m.text ?? '').replace(/\s+/g, ' ').slice(0, 40)}`).join('\n')}`
 		: '你们还没聊过（这是你第一次主动找 ta）';
@@ -1192,7 +1229,7 @@ export async function draft(social, friend, history, { withVideo = false, video 
 			dur !== '' ? `时长：${dur}` : '',
 		].filter((x) => x !== '').join('；');
 		return [
-			`这次会顺手把你自己的一个视频单独发过去（先卡片、后这句话）。这条视频的真实信息只有这些：${facts}。`,
+			`这次会顺手${video?.toMaster === true ? '把刚刷到的一个视频' : '把你自己的一个视频'}单独发过去（先卡片、后这句话）。这条视频的真实信息只有这些：${facts}。`,
 			'- 这句话就配在视频旁边，可以顺着它说一句，也可以只是随口一句闲话、只问她一句。',
 			'- 硬规矩：凡是提到视频内容的，必须和上面这几项对得上。视频里没有的东西一个字都不许编 —— 别为了接以前聊过的由头，硬说「刚翻到个××的」；拿不准就不提视频。',
 			'- 别报菜名式复述文案，别解释这是分享，别带话题标签。',
@@ -1202,7 +1239,7 @@ export async function draft(social, friend, history, { withVideo = false, video 
 		`你是「${p.name}」。下面是你自己的设定，写出来的每个字都得是这个人：\n${soul}`,
 		anchorLine,
 		`现在是 ${parts.hour ?? 12} 点 ${parts.minute ?? 0} 分。`,
-		`你要在抖音私信里，主动给一个互相关注的人发一条消息。${who}。`,
+		`你要在抖音私信里，主动给${toMaster === true ? '你主人' : '一个互相关注的人'}发一条消息。${who}。`,
 		historyLine,
 		recentLine,
 		'',
@@ -1230,6 +1267,54 @@ export async function draft(social, friend, history, { withVideo = false, video 
 		.replace(/\s+/g, ' ')
 		.trim()
 		.slice(0, 80);
+}
+
+/**
+ * 卡片发出去之后补的那一句话（[FS-SHARE-CARD] 主动私信 和「刷到有意思的就发给你」共用同一段）。
+ * 优先让「抖音·某某」这个会话里的她来说 —— 宿主接着把这一轮回给抖音，DSH 的抖音对话里才有她发出去的那句；
+ * 会话没接上 / 她这次不想说 / 没落到抖音，才退回插件自己写、自己发。
+ * @returns {Promise<{text: string, via: string, textError: string, silent: boolean}>}
+ */
+async function sayAfterCard(social, friend, video, history) {
+	const host = social.host;
+	const info = [
+		String(video?.desc ?? ''),
+		Array.isArray(video?.tags) && video.tags.length > 0 ? `话题：${video.tags.join(' ')}` : '',
+		Number(video?.durS) > 0 ? `约${Math.round(Number(video.durS))}秒` : '',
+		String(video?.impression ?? '').trim() !== '' ? `她当时看完的想法：${String(video.impression).slice(0, 120)}` : '',
+	].filter((x) => String(x ?? '').trim() !== '').join('；') || '（读不到这条视频的信息）';
+	let text = '';
+	let via = '';
+	let textError = '';
+	let silent = false; // 她这轮明说了不说话 —— 别拿插件兜底的话硬塞给她
+	if (typeof social.sayViaSession === 'function') {
+		const say = await social.sayViaSession(friend.name, info)
+			.catch((e) => ({ ok: false, sent: false, text: '', error: errText(e) }));
+		if (String(say?.text ?? '').trim() !== '') {
+			text = String(say.text).trim();
+			if (say?.sent === true) via = 'session';
+			else social.log('warn', `[fish-soul] 抖音：会话里写了话但没落到抖音（${friend.name}）：${say?.error ?? ''}，改由页面补发同一句`);
+		} else if (say?.silent === true) {
+			silent = true;
+			social.log('info', `[fish-soul] 抖音：她这轮不想说话，只留视频卡片（${friend.name}）`);
+		} else {
+			social.log('warn', `[fish-soul] 抖音：会话这次没写出话来（${friend.name}）：${say?.error ?? ''}，退回插件自己写`);
+		}
+	}
+	if (text === '' && silent !== true) {
+		text = await draft(social, friend, history, { withVideo: true, video, toMaster: video?.toMaster === true }).catch(() => '');
+	}
+	// via === 'session'：这句已经由会话发到抖音了，别再重发一遍
+	if (text !== '' && via !== 'session') {
+		const r = await host.exclusive('主动给互关好友发私信', () => sendToFriend(host, friend, text), { maxMs: 240_000 })
+			.catch((e) => ({ ok: false, error: errText(e) }));
+		if (typeof r?.via === 'string' && r.via !== '') via = via === '' ? r.via : `${via}+${r.via}`;
+		if (r?.ok !== true) {
+			textError = r?.error ?? '没发出去';
+			social.log('warn', `[fish-soul] 抖音：视频卡片已经发了，这句话没发成（${friend.name}）：${textError}`);
+		}
+	}
+	return { text, via, textError, silent };
 }
 
 /* ── 主流程 ──────────────────────────────────────────────────────── */
@@ -1342,44 +1427,13 @@ export async function runProactive(social, { manual = false } = {}) {
 	}
 
 	// ⑤ 再补一句话（卡片后面跟一句「你看这个」，不描述画面）；这次不想说话就只留卡片
-	//    [FS-DM-SESSION] 优先让「抖音·某某」这个会话里的她来说这句 —— 宿主接着把这一轮回给抖音，
-	//    DSH 的抖音对话里才有她发出去的那句（以前插件直接在页面上点发送，只进了抖音、没进会话，界面里看不到）。
-	//    会话没接上 / 她这次不想说 / 没落到抖音，才退回插件自己写、自己发。
-	const video = { desc: shared?.videoDesc ?? '', tags: shared?.videoTags ?? [], durS: shared?.videoDurS ?? 0 };
-	const videoInfo = [
-		video.desc,
-		Array.isArray(video.tags) && video.tags.length > 0 ? `话题：${video.tags.join(' ')}` : '',
-		video.durS ? `约${Math.round(video.durS)}秒` : ''
-	].filter((x) => String(x ?? '').trim() !== '').join('；') || '（读不到这条视频的信息）';
-	let text = '';
-	let via = '';
-	let textErr = '';
-	let skipFallback = false; // 她这轮明说了不说话 —— 别拿插件兜底的话硬塞给她
-	if (typeof social.sayViaSession === 'function') {
-		const say = await social.sayViaSession(friend.name, videoInfo)
-			.catch((e) => ({ ok: false, sent: false, text: '', error: errText(e) }));
-		if (String(say?.text ?? '').trim() !== '') {
-			text = String(say.text).trim();
-			if (say?.sent === true) via = 'session';
-			else social.log('warn', `[fish-soul] 抖音主动私信：会话里写了话但没落到抖音（${friend.name}）：${say?.error ?? ''}，改由页面补发同一句`);
-		} else if (say?.silent === true) {
-			skipFallback = true;
-			social.log('info', `[fish-soul] 抖音主动私信：她这轮不想说话，只留视频卡片（${friend.name}）`);
-		} else {
-			social.log('warn', `[fish-soul] 抖音主动私信：会话这次没写出话来（${friend.name}）：${say?.error ?? ''}，退回插件自己写`);
-		}
-	}
-	if (text === '' && !skipFallback) text = await draft(social, friend, history, { withVideo: true, video });
-	// via === 'session'：这句已经由会话发到抖音了，别再重发一遍
-	if (text !== '' && via !== 'session') {
-		const r = await host.exclusive('主动给互关好友发私信', () => sendToFriend(host, friend, text), { maxMs: 240_000 })
-			.catch((e) => ({ ok: false, error: errText(e) }));
-		if (typeof r?.via === 'string' && r.via !== '') via = via === '' ? r.via : `${via}+${r.via}`;
-		if (r?.ok !== true) {
-			textErr = r?.error ?? '没发出去';
-			social.log('warn', `[fish-soul] 抖音主动私信：视频卡片已经发了，这句话没发成（${friend.name}）：${textErr}`);
-		}
-	}
+	//    [FS-SHARE-CARD] 这段抽成 sayAfterCard：「刷到有意思的就发给你」发完卡片也要补同一句话，别写两份。
+	const said = await sayAfterCard(social, friend, {
+		desc: shared?.videoDesc ?? '', tags: shared?.videoTags ?? [], durS: shared?.videoDurS ?? 0,
+	}, history);
+	const text = said.text;
+	let via = said.via;
+	const textErr = said.textError;
 	// 卡片已经发出去了，这一条就算发过：记下来（文字没跟上只算小瑕疵，不吞掉这次的记录）
 	remember(social, {
 		name: friend.name, text, ok: true, shared: true,
@@ -1396,6 +1450,53 @@ export async function runProactive(social, { manual = false } = {}) {
 	} catch { /* 记账失败不影响已经发出去的消息 */ }
 	social.note?.('dm', { title: '抖音主动私信', reason: `给选中的 ${friend.name} 分享了一条她的视频`, text });
 	return { ok: true, name: friend.name, text, via, shared: true, videoId: shared?.videoId ?? '', textError: textErr };
+}
+
+/**
+ * [FS-SHARE-CARD]「刷到有意思的就发给你」也走卡片：把刚刷到的那条视频用抖音自带的分享面板发给主人，
+ * 再补一句话（和主动私信同一套说法）。ok=false 表示卡片没发成，调用方退回老路（发链接到 QQ）。
+ */
+export async function shareBrowsedVideo(social, opts = {}) {
+	const host = social.host;
+	if (!host) return { ok: false, error: '抖音浏览器还没就绪' };
+	if (host.running !== true) return { ok: false, error: '抖音浏览器没在运行' };
+	if (host.loggedIn !== true) return { ok: false, error: '抖音还没登录' };
+	const name = String(social.getConfig?.()?.masterName ?? '').trim();
+	if (name === '') return { ok: false, error: '设置里没填「主人在抖音里的昵称」，分享面板里搜不到人' };
+	const videoId = String(opts.videoId ?? '');
+	if (!/^\d{8,}$/.test(videoId)) return { ok: false, error: '这条没有视频 id，分享不了' };
+	const cfg = (() => { try { return dmCfg(social.getConfig() ?? {}); } catch { return null; } })();
+	const types = cfg?.shareTypes ?? normalizeShareTypes(null);
+	// [FS-SHARE-CARD] 用户要求：主动分享的类型，从她在设置里选的几个里**挑一个**去搜 —— 和主动私信同一套
+	// （shareVideoToFriend 的 FS-DM-SHARE-ONE-TYPE：随机挑一个类型，只按这一类搜，挑不到就不发）。
+	// 这一类一条都搜不到时，才退回「就发她刚刷到的这条」，再不成就发链接（由 life.js 兜）。
+	// 她选的几个类型：设置里给主人单独选过就用那个人的，否则用「默认分享哪几类」
+	const masterTarget = Array.isArray(cfg?.targets) ? cfg.targets.find((x) => x.name === name) : null;
+	const herTypes = Array.isArray(opts.wantTypes) && opts.wantTypes.length > 0
+		? opts.wantTypes
+		: (masterTarget?.wantTypes ?? cfg?.defaultWantTypes ?? []);
+	let shared = await host.exclusive('把刷到的视频分享给主人', () => shareVideoToFriend(social, { name }, {
+		wantTypes: herTypes,
+		types,
+	}), { maxMs: 200_000 }).catch((e) => ({ ok: false, error: errText(e) }));
+	if (shared?.ok !== true) {
+		social.log('warn', `[fish-soul] 抖音刷到的分享：按选的类型搜不到（${shared?.error ?? ''}），退回就发刚刷到的这条`);
+		shared = await host.exclusive('把刷到的视频分享给主人', () => shareVideoToFriend(social, { name }, {
+			videoId,
+			videoDesc: String(opts.desc ?? opts.title ?? ''),
+			types,
+		}), { maxMs: 200_000 }).catch((e) => ({ ok: false, error: errText(e) }));
+	}
+	if (shared?.ok !== true) return { ok: false, error: shared?.error ?? '分享没成' };
+	const said = await sayAfterCard(social, { name }, {
+		desc: shared?.videoDesc ?? '', tags: shared?.videoTags ?? [], durS: shared?.videoDurS ?? 0,
+		impression: String(opts.impression ?? ''), toMaster: true,
+	}, []);
+	social.note?.('share', { title: '抖音', reason: `把刷到的《${String(opts.title ?? '').slice(0, 24)}》用卡片分享给了主人`, text: said.text });
+	if (said.textError !== '') {
+		social.log('warn', `[fish-soul] 抖音刷到的分享：卡片已经发了，这句话没发成：${said.textError}`);
+	}
+	return { ok: true, videoId: shared?.videoId ?? videoId, text: said.text, via: said.via, textError: said.textError };
 }
 
 export function maybeSendProactive(social, ctx = {}) {

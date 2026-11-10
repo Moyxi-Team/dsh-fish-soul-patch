@@ -5,7 +5,7 @@
  *     ② plugins ：本机这个 profile 里装着的 DSH 插件（名字 / 版本 / 来源 / 是否启用），只作对照
  * 只读：不装、不卸、不发网络请求，也不改任何插件的配置。
  *
- * [FS-PLUGINS-ROUTE v2] ← 这个版本戳给 patch-fish-soul.mjs 认：老版本的这份文件会被自动顶掉
+ * [FS-PLUGINS-ROUTE v3] ← 这个版本戳给 patch-fish-soul.mjs 认：老版本的这份文件会被自动顶掉
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -65,7 +65,7 @@ const PATCH_GROUPS = [
     key: "P5",
     name: "主动给抖音互关好友发私信",
     items: [
-      { t: "import 主动私信模块", f: "douyin-social.js", p: "import { dmCfg, maybeSendProactive, proactiveStatus, sendProactiveNow } from './douyin-proactive.js';", u: null },
+      { t: "import 主动私信模块", f: "douyin-social.js", p: "import { dmCfg, listCandidates, maybeSendProactive, proactiveStatus, sendProactiveNow } from './douyin-proactive.js';", u: null },
       { t: "加 maybeDm / dmNow，status 带 dm", f: "douyin-social.js", p: "return { ...super.status(), blockedUntil: this.blockedUntil > Date.now() ? this.blockedUntil : 0, dm: proactiveStatus(this) };", u: null },
       { t: "自走层 tick 里问一次要不要主动发", f: "index.js", p: "social: (x) => { biliSocial.maybePost(x); douyinSocial.maybePost(x); if (typeof douyinSocial.maybeDm === 'function') douyinSocial.maybeDm(x); }, // FS-DM-tick 顺手问她要不要主动给互关的人发一句", u: null },
       { t: "配置 schema 加 dm", f: "config-platforms.js", p: "// FS-DM-schema：主动给「互相关注」的人发私信（默认关；一天最多几个 + 同一个人隔几天 + 最快几小时一条）", u: null },
@@ -76,6 +76,21 @@ const PATCH_GROUPS = [
       { t: "取出 dm 状态", f: "client.douyin.js", p: "const dmc = d.dm ?? {}; // FS-DM-var", u: null },
       { t: "保存时带上 dm", f: "client.douyin.js", p: "dm: { perDay: Number(form.dmPerDay), coolDays: Number(form.dmCoolDays), ...(p.dm ?? {}) } // FS-DM-saveui", u: null },
       { t: "设置页加「主动私信」分组", f: "client.douyin.js", p: "dmc.enabled ? Row({ title: \"互关的人\", desc: dmSo.mutualCount ? `${dmSo.mutualCount} 个，名单是 ${relTime(dmSo.mutualAt || Date.now(), Date.now())}抓的` : \"还没抓过名单，发第一条时会自己去关注页读（读完缓存 6 小时）\" }) : null,", u: null },
+    ]
+  },
+  {
+    key: "P6",
+    name: "刷到的视频发卡片（不是发链接）",
+    items: [
+      { t: "douyin-social 引入 shareBrowsedVideo", f: "douyin-social.js", p: "shareBrowsedVideo } from './douyin-proactive.js';", u: null },
+      { t: "douyin-social 加 dmShareBrowsed", f: "douyin-social.js", p: "dmShareBrowsed(opts) {", u: null },
+      { t: "index.js：刷到的分享改发抖音私信卡片", f: "index.js", p: "douyinShareCard: (card) => (typeof douyinSocial.dmShareBrowsed", u: null },
+      { t: "life.js 接 douyinShareCard", f: "life.js", p: "this.douyinShareCard = typeof opts.douyinShareCard", u: null },
+      { t: "queueShare 收下 videoId", f: "life.js", p: "queueShare({ platform, title, author, url, impression, videoId }) {", u: null },
+      { t: "刷到的分享存成卡片信息", f: "life.js", p: "function parseShareCard(reason) {", u: null },
+      { t: "deliverOne 先发卡片，卡片不通退回发链接", f: "life.js", p: "[FS-SHARE-CARD] 刷到的分享先发视频卡片", u: null },
+      { t: "douyin-browse 把视频 id 一起交上去", f: "douyin-browse.js", p: "afterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, videoId: w.id }))", u: null },
+      { t: "分享类型：从她选的几类里挑一个来搜", f: "douyin-proactive.js", p: "[FS-DM-SHARE-ONE-TYPE]", u: null },
     ]
   },
 ];

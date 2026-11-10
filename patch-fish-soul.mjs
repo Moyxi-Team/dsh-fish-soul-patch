@@ -521,7 +521,7 @@ function patchHunks({ tag, label, jsonName }) {
 
 const PLUGINS_ROUTE_SRC = join(HERE, 'assets', 'plugins-route.js');
 // routes-plugins.js 自己的版本戳：内容一改就跟着改，老版本会被自动顶掉
-const PLUGINS_ROUTE_VER = 'FS-PLUGINS-ROUTE v2';
+const PLUGINS_ROUTE_VER = 'FS-PLUGINS-ROUTE v3';
 
 /**
  * 设置页加一个只读的「个人插件」清单：新增 lib/routes-plugins.js（读当前 profile 的 dependencies
@@ -598,6 +598,20 @@ function patchDm() {
 }
 
 /**
+ * P6 share：「刷到有意思的就发给你」改成发视频卡片（不是发链接）。
+ *
+ * 老路：douyin-browse 刷完 → life.queueShare 排一条「把链接原样发出去 + 感受」的主动消息（发到 QQ）。
+ * 新路：同上排队，但 deliverOne 里先用抖音自带的「分享 → 私信」把那条视频发给主人（卡片），
+ *       再补一句话；卡片这条路不通才退回发链接。分享的类型从她在设置里选的几个里挑**一个**来搜。
+ *
+ * ⚠️ 必须排在 P5 dm 之后：dm 先把 lib/douyin-proactive.js 换成新版，share 才有 shareBrowsedVideo 可用。
+ */
+function patchShare() {
+	log('\n[P6 share] 抖音 —— 刷到的视频发卡片（不是发链接）');
+	patchHunks({ tag: 'P6 share', label: '刷到有意思的就发给你 → 视频卡片', jsonName: 'share-hunks.json' });
+}
+
+/**
  * 打完补丁后冒烟：真把插件入口 import 一次。
  * 文本上全是 PATCHED 不等于能加载 —— 比如 schemastery 根本没有 z.record（是 z.dict），
  * 写入时毫无报错，要等宿主启用插件才炸成「1 entry did not activate」。
@@ -640,6 +654,7 @@ try {
 		patchHunks({ tag: 'P3 remount', label: 'index —— 热更新后人格卡 + 记忆块掉线', jsonName: 'index-hunks.json' });
 	if (ONLY === '' || ONLY === 'plugins') patchPlugins();
 	if (ONLY === '' || ONLY === 'dm') patchDm();
+	if (ONLY === '' || ONLY === 'share') patchShare();
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;
