@@ -1,7 +1,7 @@
 # 上游兼容性核查（自动生成）
 
-- 核查时间：2026-11-10
-- 核查对象：`dsh-fish-soul@0.15.32`（npm 最新版）
+- 核查时间：2026-11-11
+- 核查对象：`dsh-fish-soul@0.15.33`（npm 最新版）
 - 生成方式：`node audit-upstream.mjs`（GitHub Actions 每周自动跑一次并提交本文件）
 
 ## 分组结论
@@ -14,6 +14,7 @@
 | P4 plugins | 6 | 0 | 6 | 0 | 🟡 继续用 |
 | P5 dm | 22 | 0 | 22 | 0 | 🟡 继续用 |
 | P6 share | 9 | 0 | 9 | 0 | 🟡 继续用 |
+| P7 wechat | 22 | 0 | 22 | 0 | 🟡 继续用 |
 
 ## 逐处明细
 
@@ -64,7 +65,29 @@
 | P6 share | life.js：加 parseShareCard（认 reason 里存的卡片信息，顺手拼出退回用的链接文案） | `share-life-parse` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P6 share | life.js：deliverOne 先发视频卡片，卡片不通才退回发链接（QQ） | `share-life-deliver` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P6 share | douyin-browse.js：把刷到的那条视频的 id 一起交上去（发卡片要用） | `share-browse-videoid` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | 聊天存档：通道归一化（wechat:private / wechat:group）+ 外部桥接写入 append / recent 读取 | `W01` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | 聊天存档：取样 sample() 也按归一化通道查 | `W02` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | db：新增 person_wechat_alias 表（微信 id → canonical_id），person 表结构不动 | `W03` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | db：老库启动时补建微信别名表 + 唯一索引 | `W04` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | db：微信认人（canonicalOfWechat / findPersonByWechat / setWechatAlias / resolveOrCreateWechatPerson） | `W05` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | gateway-util：微信通道判定（wechatKindOf / isWechatChannelId），platformOf 认出 wechat | `W06` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | gateway-util：通道种类识别加微信（wechat-private / wechat-group） | `W07` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | gateway-util：微信私聊 / 微信群的中文名、群聊判定、群主归一口径 | `W08` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | gateway：微信私聊 / 微信群不并进 QQ 会话（两侧通道各自独立，只共享人格与记忆） | `W09` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | index.js：引入微信认人 API | `W10` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | index.js：微信通道取人 / 群 id（兼容 wechat-private: 老写法） | `W11` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | index.js：插件重启重建会话时按平台认人（微信走别名表，不再当 QQ 号查） | `W12` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | index.js：入站消息按微信渠道认人（没登记就建 person + 补登记别名） | `W13` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | life：主动开口的冷却 / 配额把微信算独立平台 | `W14` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | 聊天存档接口：新增 /chat-archive/recent 与 /chat-archive/append，白名单放行微信通道 | `W15` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | slang：引入微信 / QQ 认人 API | `W16` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | slang：私聊跨渠道共桶（同一个人的微信私聊与 QQ 私聊共用黑话 / 表达） | `W17` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | slang：读取时按共桶取，取不到再回退原通道键 | `W18` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | slang：学到的东西写进共桶 | `W19` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | slang：手动合并写进共桶 | `W20` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | slang：外部导入写进共桶 | `W21` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P7 wechat | soul-memory：记忆卡片 / 联系人清单的通道种类认得出微信（wechat-private / wechat-group，不再记成 qq-private） | `W22` | 🟡 仍需 | 锚点在，补丁仍有效 |
 
-**结论**：仍有 45 处补丁有效、0 处已可退役。补丁继续适配上游最新版（0.15.32）即可。
+**结论**：仍有 67 处补丁有效、0 处已可退役。补丁继续适配上游最新版（0.15.33）即可。
 
 > 说明：`可退役` = 上游自己已经做完了，这类补丁不必再维护、也不必跟版本；`仍需` = 上游还没有，补丁继续用；`漂移` = 上游改了这段代码但没实现同样功能，需要按新版更新锚点。

@@ -281,7 +281,8 @@ function auditNewFile(dir, group, id, title, rel, marker) {
 }
 
 const { dir, version, source } = fetchUpstream();
-// 按 P1 → P6 顺序：先跑锚点组，再对「整文件新增」单独判一遍（锚点覆盖不到它们）
+// 按 P1 → P7 顺序：先跑锚点组，再对「整文件新增」单独判一遍（锚点覆盖不到它们）
+// 新增补丁组时只加一行 auditHunks(auditNewFile)，别漏 —— 漏了就等于这组补丁没人替它跟上游对表。
 const rows = [
 	auditMeme(dir),
 	...auditHunks(dir, 'douyin-hunks.json', 'P2 douyin'),
@@ -290,7 +291,8 @@ const rows = [
 	auditNewFile(dir, 'P4 plugins', 'plugins-route-file', '个人插件清单（整文件 routes-plugins.js）', 'routes-plugins.js', 'FS-PLUGINS-ROUTE'),
 	...auditHunks(dir, 'dm-hunks.json', 'P5 dm'),
 	auditNewFile(dir, 'P5 dm', 'dm-proactive-file', '主动私信实现（整文件 douyin-proactive.js）', 'douyin-proactive.js', 'FS-DOUYIN-DM-PATCH'),
-	...auditHunks(dir, 'share-hunks.json', 'P6 share')
+	...auditHunks(dir, 'share-hunks.json', 'P6 share'),
+	...auditHunks(dir, 'wechat-hunks.json', 'P7 wechat')
 ];
 
 const retired = rows.filter((r) => r.status === 'RETIRED').length;
