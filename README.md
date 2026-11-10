@@ -83,6 +83,7 @@ node audit-upstream.mjs
 | --- | --- |
 | `node audit-upstream.mjs --from <插件目录>` | 体检本机那份（指向已打补丁的目录时，靠 `h.new` / `upgradeOld` 反推「已在位」） |
 | `node audit-upstream.mjs --brief` | 只打「一句话结论 + 要处理的 id」，判兼容首选（有漂移时退出码 2） |
+| `node audit-upstream.mjs --explain` | 多打一节「上游改了什么（通俗版）」：把锚点与上游逐行对齐，成对列出对不上的行，并给一句人话结论（只是动了上下文 / 改了几行 / 基本重写 / 整段没了）。配 `--brief` 时直接输出成人能读的几行 |
 | `node audit-upstream.mjs --json` | stdout 只出 JSON（含 `summary` / `groups` / `patches`），CI 与 Agent 直接解析 |
 | `node audit-upstream.mjs --out <路径>` | 报告写文件，不写屏 |
 

@@ -19,6 +19,8 @@
  *   node audit-upstream.mjs --from <插件目录>                 # 体检「本机已装的那一份」（升级后想知道自己这版要不要动）
  *   node audit-upstream.mjs --out reports/upstream-compatibility.md
  *   node audit-upstream.mjs --brief                            # 只打「一句话结论 + 要处理的 id」（Agent 判兼容首选，drift>0 退出码 2）
+ *   node audit-upstream.mjs --explain                          # 追加「上游改了什么（通俗版）」：把锚点与上游逐行对齐，成对列出对不上的行 + 一句人话结论
+ *   node audit-upstream.mjs --brief --explain                  # 结论下面直接补几行人话，判完照着念给用户听
  *   node audit-upstream.mjs --json                            # 机器可读（stdout 只出 JSON，md 走 stderr；含 group / status）
  *
  * 退出码：0 = 一切正常（有需要维护的补丁也算正常）；2 = 有 DRIFT，锚点过期需要更新。
@@ -123,7 +125,7 @@ function auditHunks(dir, jsonName, group = jsonName) {
 	if (!existsSync(hunksPath)) return [{ group, id: jsonName, title: jsonName, status: 'DRIFT', detail: `缺 assets/${jsonName}` }];
 	const libRel = (rel) => String(rel ?? '').replace(/^lib\//, '');
 	const hunks = JSON.parse(readFileSync(hunksPath, 'utf8'));
-	return hunks.map((h) => {
+	const rowsOut = hunks.map((h) => {
 		const rel = libRel(h.file);
 		const p = join(dir, 'lib', rel);
 		if (!existsSync(p)) return { group, id: h.id, title: h.title, status: 'DRIFT', detail: `上游没有 lib/${rel}` };
@@ -153,6 +155,103 @@ function auditHunks(dir, jsonName, group = jsonName) {
 		if (text.includes(h.old)) return { group, id: h.id, title: h.title, status: 'NEEDED', detail: '锚点在，补丁仍有效' };
 		return { group, id: h.id, title: h.title, status: 'DRIFT', detail: '锚点找不到、上游也没修 → 需要按新版更新锚点' };
 	});
+	// 附带锚点原文与文件位置，供 --explain 通俗解释「上游改了什么」；JSON 输出时会剥掉这两个字段
+	return rowsOut.map((r, i) => ({ ...r, file: libRel(hunks[i].file), old: String(hunks[i].old ?? '') }));
+}
+
+/**
+ * 把 DRIFT 翻译成人话：上游到底把这段代码怎么了。
+ * 做法很土但够用——把补丁锚点逐行拿去上游文件里找最佳对齐窗口，看「还有几行原样在、哪几行变了」，
+ * 再按命中比例归类成四种常见改法，并列出改动前后的代码行供人核对。
+ */
+function explainDrifts(rows, dir, source = 'npm') {
+	const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
+	const same = (a, b) => a === b || (a.length > 6 && b.includes(a));
+	// 只在差异处截窗，否则两行前 100 字符常常一模一样，看不出改了什么
+	const clip = (a, b) => {
+		let i = 0;
+		while (i < a.length && i < b.length && a[i] === b[i]) i++;
+		const start = Math.max(0, i - 28);
+		return [a.slice(start, start + 92), b.slice(start, start + 92)];
+	};
+	// 两行毫无共同词时，说明是滑窗错位而不是真改了这一行，别硬凑对比
+	const ov = (a, b) => {
+		const tok = (s) => new Set(String(s).split(/[^A-Za-z0-9_$\u4e00-\u9fa5]+/).filter((w) => w.length > 2));
+		const A = tok(a), B = tok(b);
+		if (!A.size || !B.size) return 0;
+		let n = 0;
+		for (const w of A) if (B.has(w)) n++;
+		return n / Math.min(A.size, B.size);
+	};
+	const who = source === 'npm' ? '上游' : '本机这份';
+	const blocks = [];
+	for (const r of rows) {
+		if (r.status !== 'DRIFT') continue;
+		const head = `### ${r.id}（${r.group}${r.file ? ` · lib/${r.file}` : ''}）`;
+		const p = r.file ? join(dir, 'lib', r.file) : '';
+		const lines = [head];
+		if (source !== 'npm') lines.push(`> 注意：这里比对的是**本机已装的那份**，不是 npm 干净源码。结论意思是「本机与仓库锚点不一致」，修法是补 \`upgradeOld\` 后重跑补丁。`);
+		if (!r.old) {
+			lines.push('- 通俗说：这条没有可对齐的锚点原文（整文件型补丁），只能看文件在不在。');
+			blocks.push(lines.join('\n'));
+			continue;
+		}
+		if (!p || !existsSync(p)) {
+			lines.push(`- 通俗说：上游已经没有 \`lib/${r.file}\` 这个文件了 —— 代码大概被挪到别的文件或整块删了，补丁没地方落。`);
+			blocks.push(lines.join('\n'));
+			continue;
+		}
+		const up = readFileSync(p, 'utf8').split('\n');
+		const upN = up.map(norm);
+		const oldRaw = String(r.old).split('\n');
+		const oldN = oldRaw.map(norm);
+		const idxs = oldN.map((l, i) => (l ? i : -1)).filter((i) => i >= 0);
+		let best = { start: 0, hit: 0 };
+		for (let i = 0; i < upN.length; i++) {
+			let hit = 0;
+			for (const oi of idxs) {
+				const u = upN[i + oi];
+				if (u === undefined) break;
+				if (same(oldN[oi], u)) hit++;
+			}
+			if (hit > best.hit) best = { start: i, hit };
+		}
+		const ratio = idxs.length ? best.hit / idxs.length : 0;
+		const gone = idxs.filter((oi) => {
+			const u = upN[best.start + oi];
+			return u === undefined || !same(oldN[oi], u);
+		});
+		const lineNo = best.hit > 0 ? `${who}第 ${best.start + 1} 行附近` : `${who}全文找不到近似位置`;
+		// 两条线的修法不同：npm 侧改锚点（old），--from 侧补 upgradeOld 兜住本机旧写法
+		const fix = source === 'npm'
+			? ['锚点把上下文扩一圈重新框住即可，逻辑不用改。', '照下面成对的对比改锚点。', '补丁逻辑要按新写法重新落。']
+			: ['补 upgradeOld 把本机写法兜住，再重跑 patch（已在位的补丁不会自动升级）。', '把本机现状塞进 upgradeOld，再重跑 patch。', '先把本机写法补进 upgradeOld 兜住，再按现状更新 new。'];
+		if (ratio >= 0.85) lines.push(`- 通俗说：**这段代码还在，只是前后被塞进了新东西**（${lineNo}，${idxs.length} 行里原样还剩 ${best.hit} 行）。${fix[0]}`);
+		else if (ratio >= 0.5) lines.push(`- 通俗说：**${who}改动了这段里的几行**（${lineNo}，${idxs.length} 行里原样还剩 ${best.hit} 行）。${fix[1]}`);
+		else if (ratio > 0) lines.push(`- 通俗说：**${who}把这段基本重写了**（${lineNo}，${idxs.length} 行里只剩 ${best.hit} 行原样）。${fix[2]}`);
+		else lines.push(`- 通俗说：**这段在${who}里已经找不到对应代码** —— 函数改名、挪了位置或整体重构了。先在该文件里搜补丁依赖的函数名再定位。`);
+		// 对齐很弱时列逐行对比只会误导（滑窗可能落错位置），只在有一半以上行对得上时才列
+		if (gone.length && best.hit > 0 && ratio >= 0.6) {
+			lines.push(`- 对不上的行（上=补丁原来的写法，下=${who}现在这一行；从差异处开始截取）：`);
+			for (const oi of gone.slice(0, 6)) {
+				const u = up[best.start + oi];
+				if (u === undefined) {
+					lines.push(`  - \`${oldRaw[oi].trim().slice(0, 92)}\``);
+					lines.push(`  + （此处已没有对应行）`);
+					continue;
+				}
+				const o = oldRaw[oi].trim();
+				const [a, b] = clip(o, u.trim());
+				lines.push(`  - \`${a}\``);
+				lines.push(ov(o, u) >= 0.34 ? `  + \`${b}\`` : `  + （这一行已对不上，多半整体挪位或被替换，别照它改锚点）`);
+			}
+			if (gone.length > 6) lines.push(`  - ……另有 ${gone.length - 6} 行不同，看 --json 明细`);
+		} else if (gone.length) {
+			lines.push('- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。');
+		}
+		blocks.push(lines.join('\n'));
+	}
+	return blocks;
 }
 
 /**
@@ -187,8 +286,13 @@ const retired = rows.filter((r) => r.status === 'RETIRED').length;
 const needed = rows.filter((r) => r.status === 'NEEDED').length;
 const drift = rows.filter((r) => r.status === 'DRIFT').length;
 
+const whoTop = source === 'npm' ? '上游' : '本机这份';
 let verdict;
-if (drift > 0) verdict = `需要更新锚点：${drift} 处的上游代码改版了，补丁本身没被上游吸收。`;
+if (drift > 0)
+	verdict =
+		source === 'npm'
+			? `需要更新锚点：${drift} 处的上游代码改版了，补丁本身没被上游吸收。`
+			: `本机有 ${drift} 处与仓库锚点对不上：这不是上游改版，是本机停在旧模板 → 补 upgradeOld 后重跑 patch 即可。`;
 else if (needed === 0) verdict = '全部补丁都已被上游原生实现 → 这些补丁可以整体退役，仓库不必再跟着上游版本维护。';
 else verdict = `仍有 ${needed} 处补丁有效、${retired} 处已可退役。补丁继续适配上游最新版（${version}）即可。`;
 
@@ -204,6 +308,8 @@ const groups = groupNames.map((g) => {
 	return { group: g, total: sub.length, retired: c('RETIRED'), needed: c('NEEDED'), drift: c('DRIFT'), state };
 });
 
+const explainBlocks = has('--explain') ? explainDrifts(rows, dir, source) : [];
+
 const md = [
 	'# 上游兼容性核查（自动生成）',
 	'',
@@ -217,6 +323,9 @@ const md = [
 	'| --- | --- | --- | --- | --- | --- |',
 	...groups.map((g) => `| ${g.group} | ${g.total} | ${g.retired} | ${g.needed} | ${g.drift} | ${g.state} |`),
 	'',
+	...(explainBlocks.length
+		? ['## 上游改了什么（通俗版）', '', '> 补丁锚点与上游现状逐行对齐后的结论；对不上的行以 `-`(补丁原写法) / `+`(上游现状) 成对列出。', '', ...explainBlocks.map((b) => b + '\n')]
+		: []),
 	'## 逐处明细',
 	'',
 	'| 组 | 补丁 | 处 | 上游状态 | 说明 |',
@@ -251,6 +360,14 @@ if (has('--brief')) {
 			`可退役 ${retired} / 仍需 ${needed} / 漂移 ${drift}`,
 			`DRIFT: ${ids('DRIFT').length ? ids('DRIFT').join(', ') : '无'}`,
 			retired > 0 ? `可退役: ${ids('RETIRED').join(', ')}` : '',
+			...(has('--explain')
+				? explainBlocks.map((b) => {
+						const ls = b.split('\n');
+						const who = ls[0].replace(/^### /, '');
+						const say = (ls.find((x) => x.startsWith('- 通俗说')) ?? '').replace('- 通俗说：', '').replace(/\*\*/g, '').trim();
+						return `  · ${who} → ${say}`;
+					})
+				: []),
 			verdict
 		]
 			.filter(Boolean)
@@ -262,7 +379,7 @@ if (has('--brief')) {
 if (has('--json')) {
 	process.stdout.write(
 		'\n' +
-			JSON.stringify({ upstream: version, source, checkedAt: today, summary: { retired, needed, drift }, groups, verdict, patches: rows }, null, 2) +
+			JSON.stringify({ upstream: version, source, checkedAt: today, summary: { retired, needed, drift }, groups, verdict, patches: rows.map((r) => ({ group: r.group, id: r.id, title: r.title, status: r.status, detail: r.detail })) }, null, 2) +
 			'\n'
 	);
 }
