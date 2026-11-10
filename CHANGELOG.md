@@ -5,6 +5,35 @@
 
 ---
 
+## P7 微信互通进补丁仓 · 顺带修掉「CRLF 文件永远打不上」
+
+**为什么改**：微信（WechatAgent）↔ 人格记忆互通这一整套改动原先只在**本机真身里**手改过，补丁仓里一处都没有 —— 重装、换机、上游发版都会**整块功能静默消失**（微信侧还会退化成把微信 id 当 QQ 号查人）。这一轮把它收成 P7 组 21 处锚点，并顺手揪出两处会让「全新安装打不上」的底层坑。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `assets/wechat-hunks.json` · 新增（22 处） | P7 组锚点：`chat-archive`（通道归一化 + `sample()` 同口径）3 处 / `db`（`person_wechat_alias` 表、老库补建、认人四函数）3 处 / `gateway-util`（微信通道判定、平台识别、中文名与群口径）3 处 / `gateway`（微信不并进 QQ 会话）1 处 / `index`（引入认人 API、取人取群、重启重建会话、入站认人）4 处 / `life`（主动开口配额算独立平台）1 处 / `routes-soul`（`/chat-archive/recent` 与 `/chat-archive/append`，白名单放行微信）1 处 / `slang`（认人 API、共桶选择、读取回退、两处写入）5 处 / `soul-memory`（通道种类识别认得出微信）1 处 |
+| `patch-fish-soul.mjs` · `patchHunks()` | **换行自适应**：目标文件是 CRLF 时（`lib/slang.js` 这类被 Windows 编辑器动过换行的），模板里的 `\n` 直接 `includes` 永远不中 —— 全新安装会被判「锚点过期」直接停手，已打过也认不出来。现在按目标文件自己的换行风格把 `old` / `new` / `marker` / `upgradeOld` 现算一遍再比，判定与写入用同一份口径 |
+| `patch-fish-soul.mjs` · 新增 `patchWechat()` | 注册 P7 组（`--only wechat` 可单跑），对着 `assets/wechat-hunks.json` 逐处替换，三条硬边界写进注释：不动 `person` 表结构、不让微信会话并入 QQ、不主动发消息 |
+| `assets/plugins-route.js` | `PATCH_GROUPS` 增 P7 组（23 条探针，覆盖 9 个真身文件的微信改造），版本戳 `FS-PLUGINS-ROUTE v4` → `v5`；「设置 → 系统 → 个人插件」页会显示 P7 每组打了几处 |
+| `tools/gen-patch-docs.mjs` · `GROUPS` | 登记 P7，标题与合计从「P1–P6 / 42 处」改为「P1–P7 / 63 处」 |
+
+**marker 共用这个坑再补一刀**：`slang` 那两处「手动合并 / 外部导入」写的是同一行共桶语句，`keyAddedLine` 取出来的新增行一模一样 —— 兄弟那条打完，另一条会被判「已打过」**漏改一整块**。解决办法是让两条的 `marker` 各自带上**后面紧邻的那行差异**（`return d;` vs `return { terms: … }`），既能区分归属，又是单文件内唯一。
+
+**怎么验证**
+
+```powershell
+node patch-fish-soul.mjs --check --root <本机插件>   # 改 0 / 已打 22 / 漂移 0 / 失败 0
+node patch-fish-soul.mjs --root <0.15.32 干净源码>   # 全新安装 22 处，装完与本机逐字节一致（忽略换行）
+node patch-fish-soul.mjs --check --root <同上>       # 幂等：改 0 / 已打 22
+node tools/gen-patch-docs.mjs --check                # docs/patches.md 与 JSON 一致（64 处锚点）
+```
+
+**回滚**：`git -C <插件目录> checkout lib/`（本机是 `~/.dsh/profiles/desktop/node_modules/dsh-fish-soul`），或把 `~/.dsh/backup/fish-soul-patch-*` 里最近一次的备份覆盖回去；只撤 P7 就按 `docs/patches.md` 里 P7 那 8 个文件逐处反向替换。
+
+---
+
 ## 锚点跟上 0.15.32 · 补丁仓重装也不漏打（新增 `sayViaSession` 两处）
 
 **为什么改**：上游 0.15.32 把几段代码重写了排版，补丁仓里 3 处锚点对不上（`gw-dm-session-reply` / `share-social-import` / `share-social-method`）——**本机已经打过所以看不出来，一旦重装或换机就装不上**。顺带查出一个更隐蔽的问题：同一个文件里几条补丁**共用同一个 marker** 时，「兄弟那条打过了」会被当成「我这条也打过了」，全新安装会**悄悄漏打一整块功能**（`forceDouyin` 那轮、`douyinSilent` 标记就漏过）。

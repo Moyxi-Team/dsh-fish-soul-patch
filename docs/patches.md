@@ -1,4 +1,4 @@
-# 补丁逐处清单（P1–P6）
+# 补丁逐处清单（P1–P7）
 
 > **本文件由 `tools/gen-patch-docs.mjs` 根据 `assets/*-hunks.json` 生成，请勿手改。**
 > 锚点增删后跑 `node tools/gen-patch-docs.mjs` 重生成；`--check` 可校验是否与 JSON 一致。
@@ -14,8 +14,9 @@
 | P4 | `plugins` | 设置 → 系统 → 已装插件 | 5 | `assets/plugins-route.js` → 插件 `lib/` | `assets/plugins-hunks.json` |
 | P5 | `dm` | 抖音 —— 主动给互关好友发私信 | 21 | `assets/douyin-proactive.js` → 插件 `lib/` | `assets/dm-hunks.json` |
 | P6 | `share` | 刷到有意思的就发给你 → 视频卡片 | 9 | — | `assets/share-hunks.json` |
+| P7 | `wechat` | 微信（WechatAgent）↔ 人格记忆互通 | 22 | — | `assets/wechat-hunks.json` |
 
-合计锚点 **42 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
+合计锚点 **64 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
 
 每处补丁在运行时按四种判定之一处理：`PATCHED` 打上 / `ALREADY` 跳过 / `UPSTREAM` 上游已原生实现则自动退役 / `DRIFT` 锚点没了停手报错（见 README「用法」）。
 
@@ -281,6 +282,108 @@ afterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, 
 
 </details>
 
+## P7 · 微信（WechatAgent）↔ 人格记忆互通（`--only wechat`，22 处）
+
+| # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |
+| --- | --- | --- | --- | --- |
+| 1 | `W01` | `lib/chat-archive.js` | 聊天存档：通道归一化（wechat:private / wechat:group）+ 外部桥接写入 append / recent 读取 | — |
+| 2 | `W02` | `lib/chat-archive.js` | 聊天存档：取样 sample() 也按归一化通道查 | — |
+| 3 | `W03` | `lib/db.js` | db：新增 person_wechat_alias 表（微信 id → canonical_id），person 表结构不动 | — |
+| 4 | `W04` | `lib/db.js` | db：老库启动时补建微信别名表 + 唯一索引 | — |
+| 5 | `W05` | `lib/db.js` | db：微信认人（canonicalOfWechat / findPersonByWechat / setWechatAlias / resolveOrCreateWechatPerson） | — |
+| 6 | `W06` | `lib/gateway-util.js` | gateway-util：微信通道判定（wechatKindOf / isWechatChannelId），platformOf 认出 wechat | — |
+| 7 | `W07` | `lib/gateway-util.js` | gateway-util：通道种类识别加微信（wechat-private / wechat-group） | — |
+| 8 | `W08` | `lib/gateway-util.js` | gateway-util：微信私聊 / 微信群的中文名、群聊判定、群主归一口径 | — |
+| 9 | `W09` | `lib/gateway.js` | gateway：微信私聊 / 微信群不并进 QQ 会话（两侧通道各自独立，只共享人格与记忆） | — |
+| 10 | `W10` | `lib/index.js` | index.js：引入微信认人 API | — |
+| 11 | `W11` | `lib/index.js` | index.js：微信通道取人 / 群 id（兼容 wechat-private: 老写法） | — |
+| 12 | `W12` | `lib/index.js` | index.js：插件重启重建会话时按平台认人（微信走别名表，不再当 QQ 号查） | — |
+| 13 | `W13` | `lib/index.js` | index.js：入站消息按微信渠道认人（没登记就建 person + 补登记别名） | — |
+| 14 | `W14` | `lib/life.js` | life：主动开口的冷却 / 配额把微信算独立平台 | — |
+| 15 | `W15` | `lib/routes-soul.js` | 聊天存档接口：新增 /chat-archive/recent 与 /chat-archive/append，白名单放行微信通道 | — |
+| 16 | `W16` | `lib/slang.js` | slang：引入微信 / QQ 认人 API | — |
+| 17 | `W17` | `lib/slang.js` | slang：私聊跨渠道共桶（同一个人的微信私聊与 QQ 私聊共用黑话 / 表达） | — |
+| 18 | `W18` | `lib/slang.js` | slang：读取时按共桶取，取不到再回退原通道键 | — |
+| 19 | `W19` | `lib/slang.js` | slang：学到的东西写进共桶 | — |
+| 20 | `W20` | `lib/slang.js` | slang：手动合并写进共桶 | — |
+| 21 | `W21` | `lib/slang.js` | slang：外部导入写进共桶 | — |
+| 22 | `W22` | `lib/soul-memory.js` | soul-memory：记忆卡片 / 联系人清单的通道种类认得出微信（wechat-private / wechat-group，不再记成 qq-private） | — |
+
+<details><summary>锚点原文（marker）</summary>
+
+```text
+# W01
+export function normalizeArchiveChannel
+
+# W02
+const rows = ch !== ''
+
+# W03
+-- 微信身份映射（第一阶段）：照 person_qq_alias 的样子单独一张表
+
+# W04
+老库靠这里补表
+
+# W05
+export function resolveOrCreateWechatPerson
+
+# W06
+export function wechatKindOf
+
+# W07
+wechatKindOf(channelId) === 'group' ? 'wechat-group' : 'wechat-private'
+
+# W08
+if (kind === 'wechat-private') return '微信私聊';
+
+# W09
+if (platformOf(chat?.channelId) === 'wechat') return chat;
+
+# W10
+resolveOrCreateBiliPerson, resolveOrCreateWechatPerson,
+
+# W11
+function wechatIdOfChannel(channelId) {
+
+# W12
+const personId = platform === 'wechat' ? wechatIdOfChannel(row.channel_id) : id;
+
+# W13
+if (platformOf(m?.channelId) === 'wechat') {
+
+# W14
+s.startsWith('wechat-group:')) return 'wechat';
+
+# W15
+if(path === '/chat-archive/recent' && method === 'GET') {
+
+# W16
+import { getKv, setKv, canonicalOfWechat, findPersonByQq } from './db.js';
+
+# W17
+export function slangBucket(db, channelId) {
+
+# W18
+const bucket = slangBucket(this.db, channelId);
+
+# W19
+setKv(this.db, `slang.${slangBucket(this.db, channelId)}`, { ...d, terms: terms.slice(0, MAX_TERMS)
+
+# W20
+setKv(this.db, `slang.${slangBucket(this.db, channelId)}`, d);
+		return d;
+
+# W21
+setKv(this.db, `slang.${slangBucket(this.db, channelId)}`, d);
+		return { terms: addedTerms, expressions: addedExpr, skipped };
+
+# W22
+const isWechat = channelId.startsWith('wechat:')
+
+```
+
+</details>
+
 ## 设置里「个人插件」页显示几处（探针口径）
 
 设置 → 系统 → 个人插件 那一页读的是 `assets/plugins-route.js` 里内联的 `PATCH_GROUPS`（探针：靠一段「只有打过才出现」的代码判断在不在），**按功能合并**，条数与上面的锚点数不是一一对应。核对时别拿两边的数字硬对。
@@ -293,6 +396,7 @@ afterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, 
 | P4 | 6 | 5 | 少 1 条（合并成功能项） |
 | P5 | 22 | 11 | 少 11 条（合并成功能项） |
 | P6 | 9 | 10 | 多 1 条（一处拆成多项） |
+| P7 | 22 | 23 | 多 1 条（一处拆成多项） |
 
 页面上某一组显示「已打 N / M」，N 是按探针数出来的；锚点数以本文件为准。探针漏了某处时，页面会少报，但补丁器 `--check` 仍然会管到那一处。
 

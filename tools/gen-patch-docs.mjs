@@ -2,7 +2,7 @@
 /**
  * gen-patch-docs.mjs —— 由 assets/*-hunks.json 生成 docs/patches.md（逐处清单）
  *
- * 为什么要有这脚本：README 只到「组」这一层（P1–P6 每组改了哪块），
+ * 为什么要有这脚本：README 只到「组」这一层（P1–P7 每组改了哪块），
  * CHANGELOG 只记每轮改了什么。40 处锚点逐处是什么、在哪、上游接管怎么判，
  * 靠手写必然和 JSON 漂移 —— 所以这里按 JSON 生成，锚点增删后重跑即可。
  *
@@ -29,6 +29,7 @@ const GROUPS = [
   { tag: 'P4', only: 'plugins', label: '设置 → 系统 → 已装插件', json: 'plugins-hunks.json', whole: 'plugins-route.js' },
   { tag: 'P5', only: 'dm', label: '抖音 —— 主动给互关好友发私信', json: 'dm-hunks.json', whole: 'douyin-proactive.js' },
   { tag: 'P6', only: 'share', label: '刷到有意思的就发给你 → 视频卡片', json: 'share-hunks.json', whole: null },
+  { tag: 'P7', only: 'wechat', label: '微信（WechatAgent）↔ 人格记忆互通', json: 'wechat-hunks.json', whole: null },
 ];
 
 const esc = (s) => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ');
@@ -96,7 +97,7 @@ for (const g of GROUPS) {
 const L = [];
 const w = (s = '') => L.push(s);
 
-w('# 补丁逐处清单（P1–P6）');
+w('# 补丁逐处清单（P1–P7）');
 w();
 w('> **本文件由 `tools/gen-patch-docs.mjs` 根据 `assets/*-hunks.json` 生成，请勿手改。**');
 w('> 锚点增删后跑 `node tools/gen-patch-docs.mjs` 重生成；`--check` 可校验是否与 JSON 一致。');

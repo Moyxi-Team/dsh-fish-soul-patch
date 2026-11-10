@@ -32,7 +32,7 @@
  *   node patch-fish-soul.mjs                       # 自动找 ~/.dsh/profiles/<profile>/node_modules/dsh-fish-soul
  *   node patch-fish-soul.mjs --root <插件目录>      # 指定插件目录（含 package.json 的那层）
  *   node patch-fish-soul.mjs --check               # 只报告状态，不改文件
- *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm）
+ *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm / share / wechat）
  *   node patch-fish-soul.mjs --json                # 结尾额外打印一段机器可读汇总（CI / audit 用）
  *   node patch-fish-soul.mjs --force               # 忽略「已打过」判断，按文件内容重算（谨慎）
  *   node patch-fish-soul.mjs --smoke               # 额外冒烟：真 import 一次插件入口（改了就会自动跑）
@@ -492,20 +492,28 @@ function patchHunks({ tag, label, jsonName }) {
 			continue;
 		}
 		const text = read(rel);
+		// 目标文件若是 CRLF（slang.js 这类被 Windows 编辑器动过换行的），模板里的 \n 直接 includes 永远不中，
+		// 会被误判成「锚点过期」。所以按目标文件自己的换行风格把模板现算一遍再比。
+		const fileCrlf = text.includes('\r\n');
+		const at = (x) => (typeof x === 'string' ? fit(x, fileCrlf) : x);
+		const NEW = at(h.new);
+		const OLD = at(h.old);
+		const MARK = at(h.marker);
+		const UPOLD = at(h.upgradeOld);
 		const fixRel = String(h.upstreamFixedIn ?? h.file ?? '').replace(/^lib\//, '');
 		const fixText = fixRel === rel ? text : existsSync(join(lib, fixRel)) ? readFileSync(join(lib, fixRel), 'utf8') : '';
 		const result = (() => {
 			// 先认「完整新版」：h.new 整段已经在文件里，就说明这处是最新的，必须立刻收手。
 			// 这一步不能挪到 upgradeOld 后面 —— 旧版模板经常是新版的前缀（dm-vars 就是），
 			// 那样每跑一次都会再追加一份，跑两次就是重复声明 const dmCands 直接白屏。
-			if (text.includes(h.new)) {
+			if (text.includes(NEW)) {
 				log(`  ＝ lib/${rel}：${h.title} 已经打过`);
 				return 'skipped';
 			}
 			// 升级：这处上一版已经打过，现在模板改了内容。按「旧模板原文 → 新模板」整段换掉，
 			// 不用重新找锚点（锚点早就不在原处了）。h.upgradeOld 记的是上一版的 new。
-			if (typeof h.upgradeOld === 'string' && h.upgradeOld !== '' && h.upgradeOld !== h.new && text.includes(h.upgradeOld)) {
-				write(rel, text.replace(h.upgradeOld, h.new));
+			if (typeof UPOLD === 'string' && UPOLD !== '' && UPOLD !== NEW && text.includes(UPOLD)) {
+				write(rel, text.replace(UPOLD, NEW));
 				log(`  ↑ lib/${rel}：${h.title} 旧版已打 → 升到新版`);
 				changed += 1;
 				note(h.id, 'UPGRADED', h.title);
@@ -515,7 +523,7 @@ function patchHunks({ tag, label, jsonName }) {
 			// 但同一个文件里几条补丁可能共用同一个 marker（P5 的 gateway.js 三条都是 [FS-DM-SESSION]），
 			// 那时只看 marker 就会把「兄弟那条打过了」当成「我这条也打过了」→ 全新安装漏打、还不报错。
 			// 共用 marker 的改用「这条补丁最长的一句新增内容」核对，对不上才继续往下打。
-			if (text.includes(h.marker)) {
+			if (text.includes(MARK)) {
 				const shared = (markerOwners.get(`${rel}|${h.marker}`)?.size ?? 0) > 1;
 				const key = shared ? keyAddedLine(h) : '';
 				if (!shared || key === '' || text.includes(key)) {
@@ -530,19 +538,19 @@ function patchHunks({ tag, label, jsonName }) {
 				note(h.id, 'UPSTREAM', h.title);
 				return 'upstream';
 			}
-			if (!text.includes(h.old)) {
+			if (!text.includes(OLD)) {
 				log(`  × lib/${rel}：${h.title} 找不到锚点（上游改版挪了这段代码），本补丁没退役、是锚点过期了`);
 				drifted += 1;
 				note(h.id, 'DRIFT', h.title);
 				return 'drift';
 			}
-			if (text.split(h.old).length > 2) {
+			if (text.split(OLD).length > 2) {
 				log(`  × lib/${rel}：${h.title} 的锚点在文件里出现多次，不敢猜改哪一处`);
 				failed += 1;
 				note(h.id, 'AMBIGUOUS', h.title);
 				return 'ambiguous';
 			}
-			write(rel, text.replace(h.old, h.new));
+			write(rel, text.replace(OLD, NEW));
 			log(`  ✓ lib/${rel}：${h.title}`);
 			changed += 1;
 			note(h.id, 'PATCHED', h.title);
@@ -563,7 +571,7 @@ function patchHunks({ tag, label, jsonName }) {
 
 const PLUGINS_ROUTE_SRC = join(HERE, 'assets', 'plugins-route.js');
 // routes-plugins.js 自己的版本戳：内容一改就跟着改，老版本会被自动顶掉
-const PLUGINS_ROUTE_VER = 'FS-PLUGINS-ROUTE v4';
+const PLUGINS_ROUTE_VER = 'FS-PLUGINS-ROUTE v5';
 
 /**
  * 设置页加一个只读的「个人插件」清单：新增 lib/routes-plugins.js（读当前 profile 的 dependencies
@@ -615,9 +623,14 @@ function patchDm() {
 	const target = join(lib, 'douyin-proactive.js');
 	const hasMarker = existsSync(target) && readFileSync(target, 'utf8').includes('FS-DOUYIN-DM-PATCH');
 	// 老版本装过（内容跟本包里的不一样）→ 整份换成包里的新版；本插件自己的文件，不做逐行 diff。
-	const staleFile = hasMarker && existsSync(DM_SRC) && readFileSync(target, 'utf8') !== readFileSync(DM_SRC, 'utf8');
+	// 比内容时先把换行归一：本机那份若是 CRLF（Windows 编辑器动过），逐字节比会把「一模一样」当成老版本，
+	// 每跑一次都重写一遍、计数也在瞎涨。写回时再按目标文件自己的换行风格还原。
+	const dmText = existsSync(target) ? readFileSync(target, 'utf8') : '';
+	const dmWant = readFileSync(DM_SRC, 'utf8');
+	const dmSame = dmText.replace(/\r\n/g, '\n') === dmWant.replace(/\r\n/g, '\n');
+	const staleFile = hasMarker && existsSync(DM_SRC) && !dmSame;
 	if (staleFile) {
-		if (!CHECK) writeFileSync(target, readFileSync(DM_SRC, 'utf8'), 'utf8');
+		if (!CHECK) writeFileSync(target, fit(dmWant, dmText.includes('\r\n')), 'utf8');
 		log('  ↑ lib/douyin-proactive.js 老版本 → 换成新版');
 		changed += 1;
 	} else if (hasMarker) {
@@ -651,6 +664,29 @@ function patchDm() {
 function patchShare() {
 	log('\n[P6 share] 抖音 —— 刷到的视频发卡片（不是发链接）');
 	patchHunks({ tag: 'P6 share', label: '刷到有意思的就发给你 → 视频卡片', jsonName: 'share-hunks.json' });
+}
+
+// ───────────────────────────── P7：微信侧（WechatAgent）与人格记忆互通 ─────────────────────────────
+
+/**
+ * 微信侧（WechatAgent）接进来之后，鱼要能「认得出同一个人、记得住两边说过的话」。
+ *
+ * 三条硬边界，改造全部围着它们转：
+ *  ① 微信 id（wxid 派生的数字，如 853200206）**不是 QQ 号**（412205303），拿它去 person 表按 QQ 查
+ *     只会查到 null、甚至撞到别人 —— 所以微信身份单独走 person_wechat_alias 别名表；
+ *  ② 通道各聊各的：微信私聊 / 微信群不并进 QQ 会话，只共享人格与记忆（gateway.js 那条 early return）；
+ *  ③ 记忆要合并：同一个 canonical person 的微信私聊与 QQ 私聊共用一份黑话 / 表达（slangBucket），
+ *     群聊按平台分开（group:wechat:<房间>），认不出身份才退回按通道各存。
+ *
+ * 覆盖 8 个文件 21 处锚点（chat-archive 2、db 3、gateway-util 3、gateway 1、index 4、life 1、
+ * routes-soul 1、slang 6），见 assets/wechat-hunks.json。
+ *
+ * ⚠️ 顺带给聊天存档补了两个接口：/chat-archive/append（微信侧把消息落进来）与
+ *    /chat-archive/recent（跨渠道翻刚发生过什么）；设置里「聊天存档」的通道白名单也认微信写法了。
+ */
+function patchWechat() {
+	log('\n[P7 wechat] 微信（WechatAgent）↔ 人格记忆互通');
+	patchHunks({ tag: 'P7 wechat', label: '微信通道认人 + 聊天存档桥接 + 黑话共桶', jsonName: 'wechat-hunks.json' });
 }
 
 /**
@@ -697,6 +733,7 @@ try {
 	if (ONLY === '' || ONLY === 'plugins') patchPlugins();
 	if (ONLY === '' || ONLY === 'dm') patchDm();
 	if (ONLY === '' || ONLY === 'share') patchShare();
+	if (ONLY === '' || ONLY === 'wechat') patchWechat();
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;

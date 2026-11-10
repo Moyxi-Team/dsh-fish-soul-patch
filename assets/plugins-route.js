@@ -5,7 +5,7 @@
  *     ② plugins ：本机这个 profile 里装着的 DSH 插件（名字 / 版本 / 来源 / 是否启用），只作对照
  * 只读：不装、不卸、不发网络请求，也不改任何插件的配置。
  *
- * [FS-PLUGINS-ROUTE v4] ← 这个版本戳给 patch-fish-soul.mjs 认：老版本的这份文件会被自动顶掉
+ * [FS-PLUGINS-ROUTE v5] ← 这个版本戳给 patch-fish-soul.mjs 认：老版本的这份文件会被自动顶掉
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -92,6 +92,35 @@ const PATCH_GROUPS = [
       { t: "douyin-browse 把视频 id 一起交上去", f: "douyin-browse.js", p: "afterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, videoId: w.id }))", u: null },
       { t: "主动私信分享：从她选的几类里挑一个来搜", f: "douyin-proactive.js", p: "[FS-DM-SHARE-ONE-TYPE]", u: null },
       { t: "刷到的分享：只发刚刷到的那条，不按类型搜", f: "douyin-proactive.js", p: "[FS-SHARE-ONLY-BROWSED]", u: null },
+    ]
+  },
+  {
+    key: "P7",
+    name: "微信（WechatAgent）↔ 人格记忆互通",
+    items: [
+      { t: "chat-archive：通道归一化（wechat:private / wechat:group）", f: "chat-archive.js", p: "function normalizeArchiveChannel(channel) {", u: null },
+      { t: "chat-archive：外部桥接写入 append()", f: "chat-archive.js", p: "append({ channel = '', who = '', self = false, content = '', at = 0 } = {}) {", u: null },
+      { t: "chat-archive：跨渠道读取 recent()", f: "chat-archive.js", p: "recent({ channel = '', limit = 20, before = 0 } = {}) {", u: null },
+      { t: "chat-archive：取样 sample() 也按归一化通道查", f: "chat-archive.js", p: "const rows = ch !== ''", u: null },
+      { t: "db：新增 person_wechat_alias 表（微信 id → canonical_id）", f: "db.js", p: "CREATE TABLE IF NOT EXISTS person_wechat_alias (", u: null },
+      { t: "db：老库启动补建微信别名表 + 唯一索引", f: "db.js", p: "老库靠这里补表", u: null },
+      { t: "db：微信认人（canonicalOfWechat / findPersonByWechat / resolveOrCreateWechatPerson）", f: "db.js", p: "export function resolveOrCreateWechatPerson", u: null },
+      { t: "gateway-util：微信通道判定 wechatKindOf / isWechatChannelId", f: "gateway-util.js", p: "export function wechatKindOf", u: null },
+      { t: "gateway-util：通道种类识别加微信（wechat-private / wechat-group）", f: "gateway-util.js", p: "wechatKindOf(channelId) === 'group' ? 'wechat-group' : 'wechat-private'", u: null },
+      { t: "gateway-util：微信私聊 / 微信群中文名与群主归一口径", f: "gateway-util.js", p: "if (kind === 'wechat-private') return '微信私聊';", u: null },
+      { t: "gateway：微信私聊 / 微信群不并进 QQ 会话（只共享人格与记忆）", f: "gateway.js", p: "if (platformOf(chat?.channelId) === 'wechat') return chat;", u: null },
+      { t: "index.js：引入微信认人 API", f: "index.js", p: "resolveOrCreateBiliPerson, resolveOrCreateWechatPerson,", u: null },
+      { t: "index.js：微信通道取人 / 群 id", f: "index.js", p: "function wechatIdOfChannel(channelId) {", u: null },
+      { t: "index.js：重启重建会话时按平台认人", f: "index.js", p: "const personId = platform === 'wechat' ? wechatIdOfChannel(row.channel_id) : id;", u: null },
+      { t: "index.js：入站消息按微信渠道认人（没登记就建 person + 补别名）", f: "index.js", p: "if (platformOf(m?.channelId) === 'wechat') {", u: null },
+      { t: "life：主动开口的冷却 / 配额把微信算独立平台", f: "life.js", p: "s.startsWith('wechat-group:')) return 'wechat';", u: null },
+      { t: "聊天存档接口：新增 /chat-archive/recent", f: "routes-soul.js", p: "if(path === '/chat-archive/recent' && method === 'GET') {", u: null },
+      { t: "聊天存档接口：新增 /chat-archive/append", f: "routes-soul.js", p: "if(path === '/chat-archive/append' && post) {", u: null },
+      { t: "聊天存档设置：通道白名单认微信写法", f: "routes-soul.js", p: "wechat:(?:private|group)", u: null },
+      { t: "slang：引入微信 / QQ 认人 API", f: "slang.js", p: "canonicalOfWechat, findPersonByQq } from './db.js';", u: null },
+      { t: "slang：私聊跨渠道共桶 slangBucket()", f: "slang.js", p: "export function slangBucket(db, channelId) {", u: null },
+      { t: "slang：学到 / 合并 / 导入都写进共桶", f: "slang.js", p: "slangBucket(this.db, channelId)}`, d);", u: null },
+      { t: "soul-memory：记忆卡片 / 联系人清单的通道种类认得出微信", f: "soul-memory.js", p: "const isWechat = channelId.startsWith('wechat:')", u: null },
     ]
   },
 ];
