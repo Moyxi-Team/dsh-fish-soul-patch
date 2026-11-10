@@ -521,7 +521,7 @@ function patchHunks({ tag, label, jsonName }) {
 
 const PLUGINS_ROUTE_SRC = join(HERE, 'assets', 'plugins-route.js');
 // routes-plugins.js 自己的版本戳：内容一改就跟着改，老版本会被自动顶掉
-const PLUGINS_ROUTE_VER = 'FS-PLUGINS-ROUTE v3';
+const PLUGINS_ROUTE_VER = 'FS-PLUGINS-ROUTE v4';
 
 /**
  * 设置页加一个只读的「个人插件」清单：新增 lib/routes-plugins.js（读当前 profile 的 dependencies

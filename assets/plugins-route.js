@@ -5,7 +5,7 @@
  *     ② plugins ：本机这个 profile 里装着的 DSH 插件（名字 / 版本 / 来源 / 是否启用），只作对照
  * 只读：不装、不卸、不发网络请求，也不改任何插件的配置。
  *
- * [FS-PLUGINS-ROUTE v3] ← 这个版本戳给 patch-fish-soul.mjs 认：老版本的这份文件会被自动顶掉
+ * [FS-PLUGINS-ROUTE v4] ← 这个版本戳给 patch-fish-soul.mjs 认：老版本的这份文件会被自动顶掉
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -90,7 +90,8 @@ const PATCH_GROUPS = [
       { t: "刷到的分享存成卡片信息", f: "life.js", p: "function parseShareCard(reason) {", u: null },
       { t: "deliverOne 先发卡片，卡片不通退回发链接", f: "life.js", p: "[FS-SHARE-CARD] 刷到的分享先发视频卡片", u: null },
       { t: "douyin-browse 把视频 id 一起交上去", f: "douyin-browse.js", p: "afterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, videoId: w.id }))", u: null },
-      { t: "分享类型：从她选的几类里挑一个来搜", f: "douyin-proactive.js", p: "[FS-DM-SHARE-ONE-TYPE]", u: null },
+      { t: "主动私信分享：从她选的几类里挑一个来搜", f: "douyin-proactive.js", p: "[FS-DM-SHARE-ONE-TYPE]", u: null },
+      { t: "刷到的分享：只发刚刷到的那条，不按类型搜", f: "douyin-proactive.js", p: "[FS-SHARE-ONLY-BROWSED]", u: null },
     ]
   },
 ];

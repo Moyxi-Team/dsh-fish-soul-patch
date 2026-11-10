@@ -1456,6 +1456,16 @@ export async function runProactive(social, { manual = false } = {}) {
  * [FS-SHARE-CARD]「刷到有意思的就发给你」也走卡片：把刚刷到的那条视频用抖音自带的分享面板发给主人，
  * 再补一句话（和主动私信同一套说法）。ok=false 表示卡片没发成，调用方退回老路（发链接到 QQ）。
  */
+/**
+ * [FS-SHARE-CARD] 「刷到有意思的就发给你」：她刷视频时看到想发的，就用抖音自带的分享面板
+ * 把**刚刷到的这一条**当卡片发到「抖音·主人」会话里（不再发链接）。
+ *
+ * 与主动私信的分工（用户明确要求）：
+ *   · 这条路径 = 刷到哪条发哪条，**不按类型搜**，也不去池子里另挑；
+ *   · 主动私信那条（shareVideoToFriend）才按她在设置里选的类型挑一个去搜。
+ * 标记 [FS-SHARE-ONLY-BROWSED]：这条路径不做类型搜索。
+ * 唯一护栏仍保留：她自己的作品 id 一律不发（FS-DM-SHARE-OTHERS）。卡片发不出去由 life.js 退回发链接。
+ */
 export async function shareBrowsedVideo(social, opts = {}) {
 	const host = social.host;
 	if (!host) return { ok: false, error: '抖音浏览器还没就绪' };
@@ -1467,26 +1477,20 @@ export async function shareBrowsedVideo(social, opts = {}) {
 	if (!/^\d{8,}$/.test(videoId)) return { ok: false, error: '这条没有视频 id，分享不了' };
 	const cfg = (() => { try { return dmCfg(social.getConfig() ?? {}); } catch { return null; } })();
 	const types = cfg?.shareTypes ?? normalizeShareTypes(null);
-	// [FS-SHARE-CARD] 用户要求：主动分享的类型，从她在设置里选的几个里**挑一个**去搜 —— 和主动私信同一套
-	// （shareVideoToFriend 的 FS-DM-SHARE-ONE-TYPE：随机挑一个类型，只按这一类搜，挑不到就不发）。
-	// 这一类一条都搜不到时，才退回「就发她刚刷到的这条」，再不成就发链接（由 life.js 兜）。
-	// 她选的几个类型：设置里给主人单独选过就用那个人的，否则用「默认分享哪几类」
-	const masterTarget = Array.isArray(cfg?.targets) ? cfg.targets.find((x) => x.name === name) : null;
-	const herTypes = Array.isArray(opts.wantTypes) && opts.wantTypes.length > 0
-		? opts.wantTypes
-		: (masterTarget?.wantTypes ?? cfg?.defaultWantTypes ?? []);
-	let shared = await host.exclusive('把刷到的视频分享给主人', () => shareVideoToFriend(social, { name }, {
-		wantTypes: herTypes,
+	// 护栏：不把希希自己发的作品分享出去（读不到自己作品池就照发，只记一条日志，别因为拉不到就卡住这个功能）
+	const selfIds = await videoPool(social).then((l) => l.map((x) => String(x?.id ?? '')).filter((x) => /^\d{8,}$/.test(x))).catch((e) => {
+		social.log?.('warn', `[fish-soul] 抖音刷到的分享：没读到她的作品池，这次不做「是不是她自己发的」校验：${errText(e)}`);
+		return [];
+	});
+	if (selfIds.includes(videoId)) {
+		social.log?.('info', `[fish-soul] 抖音刷到的分享：这条 ${videoId} 是她自己发的，跳过`);
+		return { ok: false, error: '这条是她自己发的，不发' };
+	}
+	const shared = await host.exclusive('把刷到的视频分享给主人', () => shareVideoToFriend(social, { name }, {
+		videoId,
+		videoDesc: String(opts.desc ?? opts.title ?? ''),
 		types,
 	}), { maxMs: 200_000 }).catch((e) => ({ ok: false, error: errText(e) }));
-	if (shared?.ok !== true) {
-		social.log('warn', `[fish-soul] 抖音刷到的分享：按选的类型搜不到（${shared?.error ?? ''}），退回就发刚刷到的这条`);
-		shared = await host.exclusive('把刷到的视频分享给主人', () => shareVideoToFriend(social, { name }, {
-			videoId,
-			videoDesc: String(opts.desc ?? opts.title ?? ''),
-			types,
-		}), { maxMs: 200_000 }).catch((e) => ({ ok: false, error: errText(e) }));
-	}
 	if (shared?.ok !== true) return { ok: false, error: shared?.error ?? '分享没成' };
 	const said = await sayAfterCard(social, { name }, {
 		desc: shared?.videoDesc ?? '', tags: shared?.videoTags ?? [], durS: shared?.videoDurS ?? 0,
