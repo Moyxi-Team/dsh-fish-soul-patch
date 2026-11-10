@@ -5,6 +5,31 @@
 
 ---
 
+## 工具与文档 · 上游更新时判兼容（`AGENTS.md` + `audit --brief`）
+
+**为什么改**：上游一更新，需要一眼判出「哪些补丁还有用、哪些锚点过期、本机这份要不要动」。原来只能读脚本源码 + 40 行报告，判断成本高、结论口径还容易混。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `AGENTS.md`（新增） | 给 Agent 的作业单：触发语 → 固定三步命令 → 决策矩阵 → 六组判定来源 → DRIFT 修复 SOP → 硬规则与已知盲点 → 输出模板 |
+| `audit-upstream.mjs --brief`（新增） | 只打「一句话结论 + 要处理的 id」，判兼容首选；有漂移时退出码 2 |
+| `audit-upstream.mjs` 判定顺序 | 把「补丁已在位（`new` / `upgradeOld`）」提到 `upstreamFixed` 之前，避免 `--from` 已打补丁目录时被自身标记骗成「上游已实现」→ 整组假退役 |
+| `README.md` | 上游体检节补 `--brief` 命令与 `AGENTS.md` 入口，仓库内容清单加一行 |
+
+**怎么验证**
+
+```powershell
+node audit-upstream.mjs --brief                       # npm 那份：一句话结论
+node audit-upstream.mjs --brief --from <本机插件目录> # 本机那份：能看出「补丁在位但模板旧」
+node patch-fish-soul.mjs --check --root <本机插件目录> # 只读，末尾「结果：…」
+```
+
+三份结论口径不同是设计如此：判退役看 npm 干净源码，判本机在位看 `--check`，判「本机模板是否落后」看 `--from`。
+
+---
+
 ## P6 · 刷到的视频改发「视频卡片」（新增，`assets/share-hunks.json` 9 处）
 
 **为什么改**：原来「刷到有意思的就发给你」只是把 `https://...` 链接加一句感受甩到 QQ / 抖音会话里；
@@ -60,6 +85,67 @@ node patch-fish-soul.mjs --only share   # 重跑应 0 改动（幂等）+ 冒烟
 
 ---
 
+## P4 · 设置里列出「个人插件」（`assets/plugins-hunks.json` 5 处 + `assets/plugins-route.js`）
+
+**为什么改**：补丁打在 `node_modules` 里，升级 / 重链会丢，装上之后没有任何地方能看到「现在到底哪几处还在、哪几处被上游接管了」。
+所以在设置里加一页只读清单：**设置 → 系统 → 个人插件**，逐组（P1–P6）列出每处状态：已打 / 上游已接管 / 没打 / 文件不在。
+
+| 锚点 | 文件 | 改了什么 |
+| --- | --- | --- |
+| `client-system-plugins-tab` | `lib/client.js` | 系统设置侧栏多一个「个人插件」子页 |
+| `client-installed-plugins-pane` | `lib/client.js` | 清单组件：按组聚合、逐处显示判定结果 |
+| `client-plugins-pane-route` | `lib/client.js` | 面板分发里把该子页接到清单组件 |
+| `routes-import-plugins` / `routes-mount-plugins` | `lib/routes.js` | 引入并挂上 `/plugins/*` 路由 |
+
+外加新文件 `assets/plugins-route.js` → 插件 `lib/routes-plugins.js`，提供 `GET /plugins/installed`：**纯只读**，不装不卸、不联网、不写任何文件，只把补丁器 `--json` 的结果读出来。
+改这个文件必须同步升脚本里的 `PLUGINS_ROUTE_VER`（现 `FS-PLUGINS-ROUTE v4`），否则老文件会被「已存在」挡住。
+
+> 术语：「个人插件」= 本仓库打给 `dsh-fish-soul` 的补丁，**不是** DSH 宿主里安装的那些插件；这一页只列补丁。
+
+**验证**：`node patch-fish-soul.mjs --check` 报 P4 共 5 处已打；打开 设置 → 系统 → 个人插件 能看到 P1–P6 六组与逐处状态。
+
+---
+
+## P3 · 热更新后人格卡 + 记忆块掉线（`assets/index-hunks.json` 2 处）
+
+**现象**：插件重载（升级、装别的插件触发 pnpm 重链、宿主重开插件实例）会把旧 ctx 上挂的人格段释放掉，而会话本体还活着 —— `gateway.ensureSession` 看见 live 就直接 `return`，不再走 setup，于是人格卡和「此刻状态 / Top5 记忆」永久消失，动态页每条都变成「记忆没进这轮」。
+
+| 锚点 | 改了什么 |
+| --- | --- |
+| `index-remount-our-session` | `noteInteraction` 里每条消息补挂一次（`gateway.isOurSession(agentId)` 判定，只对自家会话生效） |
+| `index-remount-map` | `sectionsMounted` 从 `Set` 改 `Map`：记的是 ctx 本身而不是 id，宿主换了 ctx 才重挂、同一 ctx 不重复注册 |
+
+无开关（纯行为修正）。**验证**：`--check` 报 P3 两处已打；重载插件后打开动态页，人格卡与记忆块还在。
+
+---
+
+## P2 · douyin-social —— 回评论发不出 / 图文无 BGM（`assets/douyin-hunks.json` 5 处）
+
+| 文件 | 锚点 | 改了什么 |
+| --- | --- | --- |
+| `douyin-social.js` | `douyin-comment-visible` | 评论区状态按可见性判定（折叠态不再误判为已打开） |
+| `douyin-social.js` | `douyin-note-tab` | 作品详情页只走 note/video 直链 + 点右侧「评论(n)」Tab |
+| `douyin-social.js` | `douyin-reply-visible` | 回复只在可见评论条目里找并用真实鼠标点击 |
+| `douyin-social.js` | `douyin-music-trace` | BGM 挑歌先滤掉非歌曲条目（0.15.32：配乐不确认就不发布，不再硬兜底） |
+| `douyin-social.js` | `douyin-social-header` | douyin-social.js 文件头加补丁标记 |
+
+- 无开关，纯行为修正。
+- 0.15.32 起 BGM 挑歌挪到新的 `chooseMusic`：只滤掉非歌曲条目，**配乐不确认就不发布**，不再硬兜底凑一条。
+- 文件头那处只写一行 `FS-` 标记，用来让 `--check` 与 `audit-upstream.mjs` 一眼认出这是打过补丁的副本。
+- **验证**：`--check` 报 P2 五处已打；`lib/douyin-social.js` 首部能看到标记行。
+
+---
+
+## P1 · 借 dsh-meme 的表情库（整文件 `assets/meme-bridge.js` + 脚本内联 13 处）
+
+**改了什么**：新增 `lib/meme-bridge.js`，通过 `ctx.get('dshMeme')` 接上 dsh-meme 的**只读**取图服务（只读不写，不碰对方的数据）；文件已存在且内容一致时跳过（幂等）。这一组**没有 `*-hunks.json`**，另外 13 处接线直接写在 `patch-fish-soul.mjs` 的 `patchMeme()` 里（`stickers.js` 5 处 / `index.js` 4 处 / `gateway.js`、`config-schema.js`、`routes-v07.js`、`client.js` 各 1 处），逐处清单见 [`docs/patches.md`](docs/patches.md#p1--借-dsh-meme-的表情库--only-meme13-处--1-个新文件)。
+
+- **开关**：设置 → 表情包 → 「用 dsh-meme 的表情库」。
+- **上游状态**：🟡 仍需（上游未接入 dsh-meme）。
+- **验证 / 回滚**：`--check` 报 P1 已落地；不想用就关开关，或删掉 `lib/meme-bridge.js` 后重跑补丁。
+
+---
+
 ## 回滚
 
 1. 单组回滚：把 `lib/` 下对应文件从 `C:\Users\Administrator\.dsh\backup\fish-soul-patch-<时间戳>\` 拷回。
@@ -78,3 +164,8 @@ node patch-fish-soul.mjs --only share   # 重跑应 0 改动（幂等）+ 冒烟
 | `da2327b` | 主动私信改走「抖音·某某」会话，DSH 里才看得到 |
 | `83bd79f` | 补的那句话不再瞎编视频内容（递真实作品信息） |
 | `0b3aa0d` | 分享面板判定 / 详情页重试 / 好友行直点分享 |
+| `a20b4c9` / `0b657a4` | P4：系统设置列出已装插件（只读清单）；明确「个人插件」= 本插件补丁 |
+| `02cb07c` | P3：热更新后人格卡 + 记忆块不再掉线（锚点化） |
+| `0dadd6c` | P2：评论区状态按可见性判定，折叠态不再误报已展开 |
+| `8b15209` / `05f4fca` | P2：BGM 改抓推荐列表；0.15.32 适配到 `chooseMusic`（不确认不发布） |
+| `4a1d899` | P1：归档 0.15.31 的 `meme-bridge` 补丁与抖音修复，附兼容体检 |
