@@ -5,6 +5,32 @@
 
 ---
 
+## 表情包设置页：借库开关从 QQ 页搬过来 + 修「永远显示关」的老 bug
+
+**为什么改**：P1 的「借 dsh-meme 的表情库」开关原先挂在 QQ 设置页，可表情包本身的设置（B 站小表情、收藏、导入的图）都在「日常 → 表情包」页，开关落在 QQ 页既难找、也割裂。更实际的问题是那段读的是 `qq.stickers?.meme`——多套了一层 `qq`，真正落盘的是顶层 `stickers.meme`，于是取值恒为 `undefined`，界面永远显示关闭：用户以为没开，其实配置里可能早就开着。此外开着开关时，应当让人知道「表情包怎么挑」这套东西以 dsh-meme 那边为准。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `patch-fish-soul.mjs` · P1 第 13 处 | QQ 设置页那段 Row 整段替换为一行指路注释（`搬到「日常 → 表情包」页了`），不再渲染开关 |
+| `patch-fish-soul.mjs` · 新增第 14 处 | `client.soul.js` 的 `StickerShelf` 里加 `const memeOn = cfg.meme === true;`——改读顶层 `stickers.meme`，上面那个「永远是关」的 bug 随之一并修掉 |
+| `patch-fish-soul.mjs` · 新增第 15 处 | 表情包页 `Group({ title: "表情包" })` 内加借库开关 Row；`memeOn` 为真时多一行「表情包配置看 dsh-meme 设置」，关着时不出现，视觉与原版一致 |
+| `assets/plugins-route.js` | P1 探针同步：原 `client.js` 条的判定串换成新的指路注释，另加 `client.soul.js` 一条 |
+| `docs/patches.md` | P1 清单 13 处 → 15 处，补上 `client.soul.js` 两处与开关新位置 |
+
+**怎么验证**
+
+```powershell
+node patch-fish-soul.mjs --check --root <本机插件>   # 期望：已打过 89、漂移 0、失败 0
+```
+
+重启 DSH 后看「日常 → 表情包」：应出现「借 dsh-meme 的表情库」；开启后下方多一行「表情包配置看 dsh-meme 设置」；QQ 设置页不再有这个开关。此前已实装的「`[表情: 描述]` 出站转真图」（`resolveMemeTags`）不受本次搬移影响，继续生效。
+
+**回滚**：去掉新增的第 14、15 两处锚点替换，把第 13 处恢复成原 Row 串（脚本内保留原文），`client.soul.js` 从备份还原后重跑 `--check`。
+
+---
+
 ## 补丁被「整包重装」冲掉之后：加一道启动前体检
 
 **为什么改**：2026-11-11 凌晨把 0.15.32 换成 0.15.33 时，只把 profile `package.json` 里的版本号改成 `0.15.33`、直接把干净源码铺进 `node_modules`，**没有让 pnpm 重算 `pnpm-lock.yaml`**。之后重开 DSH，启动阶段的依赖安装发现「声明的 0.15.33」与「lock 里的 0.15.32」不一致，就把整个 `dsh-fish-soul` 按 registry tarball 重装了一遍 —— 80 处补丁被整包覆盖，`--check` 从「已打 80」掉到「已打 0」，界面不报错，只是功能静默消失。

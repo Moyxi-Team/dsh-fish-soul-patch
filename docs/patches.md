@@ -20,7 +20,7 @@
 
 每处补丁在运行时按四种判定之一处理：`PATCHED` 打上 / `ALREADY` 跳过 / `UPSTREAM` 上游已原生实现则自动退役 / `DRIFT` 锚点没了停手报错（见 README「用法」）。
 
-## P1 · 借 dsh-meme 的表情库（`--only meme`，13 处 + 1 个新文件）
+## P1 · 借 dsh-meme 的表情库（`--only meme`，15 处 + 1 个新文件）
 
 这一组的改动**不放在 `*-hunks.json` 里**，直接写在 `patch-fish-soul.mjs` 的 `patchMeme()` 内（`replaceOnce` / `replaceFunction`），下面按脚本源码逐处列出。
 
@@ -39,13 +39,15 @@
 | 10 | `index.js` | 提示词里加借库说明 | 锚点替换 |
 | 11 | `config-schema.js` | config-schema 加 meme | 锚点替换 |
 | 12 | `routes-v07.js` | /stickers/config 收 meme | 锚点替换 |
-| 13 | `client.js` | 借 dsh-meme 的表情库 | 锚点替换 |
+| 13 | `client.js` | QQ 设置页的借库开关搬走（只留指路注释） | 锚点替换 |
+| 14 | `client.soul.js` | 表情包页读 `cfg.meme`（修掉 QQ 页读 `qq.stickers?.meme` 永远显示关闭的 bug） | 锚点替换 |
+| 15 | `client.soul.js` | 表情包页加借库开关 + 开着时多一行「表情包配置看 dsh-meme 设置」提示 | 锚点替换 |
 
-涉及文件：`stickers.js` / `gateway.js` / `index.js` / `config-schema.js` / `routes-v07.js` / `client.js`。
+涉及文件：`stickers.js` / `gateway.js` / `index.js` / `config-schema.js` / `routes-v07.js` / `client.js` / `client.soul.js`。
 
 | 项 | 说明 |
 | --- | --- |
-| 开关 | 设置 → 表情包 → 「用 dsh-meme 的表情库」（默认关） |
+| 开关 | 日常 → 表情包 → 「借 dsh-meme 的表情库」（默认关）；开着时下方多一行「表情包配置看 dsh-meme 设置」，关着与原生一致 |
 | 上游状态 | 🟡 仍需（上游未接入 dsh-meme）；上游 lib 下任意 js 出现 `dshMeme` 就在运行时自动退役 |
 | 标记 | 每处改动行尾带 `FS-MEME-BRIDGE-PATCH`，`--check` 与体检靠它认 |
 | 关闭方式 | 关掉开关即可；彻底回滚就删 `lib/meme-bridge.js` 并把 `lib/` 从备份拷回 |
@@ -390,7 +392,7 @@ const isWechat = channelId.startsWith('wechat:')
 
 | 组 | 锚点 / 改动处数（补丁器） | 页面探针条数 | 差异 |
 | --- | --- | --- | --- |
-| P1 | 14 | 5 | 少 9 条（合并成功能项） |
+| P1 | 16 | 6 | 少 10 条（合并成功能项） |
 | P2 | 5 | 4 | 少 1 条（合并成功能项） |
 | P3 | 2 | 2 | 一致 |
 | P4 | 6 | 5 | 少 1 条（合并成功能项） |

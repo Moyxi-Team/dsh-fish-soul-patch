@@ -435,17 +435,147 @@ function patchMeme() {
 		`\t\tif (b.meme !== undefined) s.meme = b.meme === true; // 借 dsh-meme 的图库（只读取图）[${MARK_MEME}]`,
 		'/stickers/config 收 meme', 's.meme = b.meme === true');
 
-	// 10) 设置界面：带说明的开关
+	// 10a) 设置界面：这个开关从 QQ 页搬去「日常 → 表情包」，那边才是表情包设置
+	// 顺带修掉一个 bug：原来读的是 qq.stickers?.meme，而 stickers 是顶层配置，所以永远显示成关着
 	replaceOnce('client.js',
-		'\t\t\t\t\t\tMuted("张/天")) : null,',
-		'\t\t\t\t\t\tMuted("张/天")) : null,\n' +
-		'\t\t\t\t\tform.enabled ? Row({ title: "借 dsh-meme 的表情库",\n' +
+		'\n\t\t\t\t\tform.enabled ? Row({ title: "借 dsh-meme 的表情库",\n' +
 		'\t\t\t\t\t\tdesc: qq.stickers?.meme === true\n' +
 		'\t\t\t\t\t\t\t? "已开：她自己的表情包里没有合适的，就去 dsh-meme 的图库里挑一张（只读取图：不改动它的图库、不占收藏额度；图会复制一份到 fish-soul 自己的缓存目录再发）"\n' +
 		'\t\t\t\t\t\t\t: "她自己的表情包里没有合适的时，去 dsh-meme 的图库挑一张发（只读取图；需要本机装了 dsh-meme 并打开了图库）" },\n' +
 		'\t\t\t\t\t\th(Switch, { label: "借 dsh-meme 的表情库", checked: qq.stickers?.meme === true,\n' +
 		'\t\t\t\t\t\t\tonChange: (v) => run("/stickers/config", { meme: v }, v ? "没有合适的会去 dsh-meme 挑表情" : "只用自己的表情包", "保存失败") })) : null,',
-		'设置页加开关', '借 dsh-meme 的表情库');
+		`\n\t\t\t\t\t// 借 dsh-meme 的表情库这个开关搬到「日常 → 表情包」页了，那边才是表情包设置 [${MARK_MEME}]`,
+		'把开关从 QQ 页搬走', '搬到「日常 → 表情包」页了');
+
+	// 10b) client.soul.js：表情包设置里放开关；开了才多一行「配置看 dsh-meme」，关着跟原版一模一样
+	replaceOnce('client.soul.js',
+		'\t\t\tconst panelOn = cfg.biliPanel === true;',
+		'\t\t\tconst panelOn = cfg.biliPanel === true;\n' +
+		`\t\t\tconst memeOn = cfg.meme === true; // 借 dsh-meme 的图库（开关在表情包设置里，不在 QQ 页）[${MARK_MEME}]`,
+		'表情包页读 meme 状态', 'const memeOn = cfg.meme === true;');
+
+	replaceOnce('client.soul.js',
+		'\t\t\treturn Group({ title: "表情包", aside: items.length ? Tag(String(items.length), "outline") : null },\n',
+		'\t\t\treturn Group({ title: "表情包", aside: items.length ? Tag(String(items.length), "outline") : null },\n' +
+		`\t\t\t\t// 借 dsh-meme 的图库：开关归到表情包设置里（原来在 QQ 页）[${MARK_MEME}]\n` +
+		'\t\t\t\tRow({ title: "借 dsh-meme 的表情库",\n' +
+		'\t\t\t\t\tdesc: memeOn\n' +
+		'\t\t\t\t\t\t? "已开：她自己的表情包里没有合适的，就去 dsh-meme 的图库里挑一张（只读取图：不改动它的图库、不占收藏额度；图会复制一份到 fish-soul 自己的缓存目录再发）"\n' +
+		'\t\t\t\t\t\t: "她自己的表情包里没有合适的时，去 dsh-meme 的图库挑一张发（只读取图；需要本机装了 dsh-meme 并打开了图库）" },\n' +
+		'\t\t\t\t\tmemeOn ? Tag("开着", "outline") : null,\n' +
+		'\t\t\t\t\th(Switch, { label: "借 dsh-meme 的表情库", disabled: saving, checked: memeOn,\n' +
+		'\t\t\t\t\t\tonChange: (v) => saveConfig({ meme: v }, v ? "没有合适的会去 dsh-meme 挑表情" : "只用自己的表情包") })),\n' +
+		'\t\t\t\tmemeOn ? Row({ title: "表情包配置看 dsh-meme 设置", desc: "表情包怎么挑（图库开关、分类、权重这些）以 dsh-meme 那边为准，去 dsh-meme 的设置里改；这里只管她自己的收藏和你手动导入的图" }) : null,\n',
+		'表情包页加借库开关', '表情包配置看 dsh-meme 设置');
+
+	// ───── 11~14：把 dsh-meme 教出来的 [表情: 描述] 也换成真图发出去 ─────
+	// dsh-meme 在 Web 会话里靠它的前端把 [表情: 描述] 配成图；fish-soul 的 IM 出站（QQ / 微信 / 抖音）
+	// 不经过那个前端，方括号原样发过去就是一串文字。这里在出站前按描述挑一张真图，复用 P1 的选图链路
+	// （先自己的表情库，再借 dsh-meme），挑不到就把标记删掉，绝不把它当文字露出去。
+
+	// 11) stickers.js：新增 resolveMemeTags（插在 pickFromMeme 的注释之前，别把它的文档注释顶掉）
+	replaceOnce('stickers.js',
+		'\t/**\n\t * 借 dsh-meme 的只读取图服务挑一张',
+		`\t/**
+\t * 回复里的 [表情: 描述]：dsh-meme 教给模型的写法，Web 会话靠它的前端按描述配图。
+\t * IM 出站（QQ / 微信 / 抖音）不走那个前端，方括号原样发出去就是一串文字 ——
+\t * 这里按描述挑一张（先自己的库，再借 dsh-meme），换成真图片引用；挑不到就把标记删掉。
+\t * [${MARK_MEME}]
+\t */
+\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2 } = {}) {
+\t\tconst src = String(text ?? '');
+\t\tconst hits = [...src.matchAll(/\\[表情\\s*[:：]\\s*([^\\]\\n]{1,80})\\]/g)];
+\t\tif (hits.length === 0) return { text, resolved: [] };
+\t\tlet out = src;
+\t\tconst resolved = [];
+\t\tconst used = [];
+\t\tfor (const [i, m] of hits.entries()) {
+\t\t\tconst whole = m[0];
+\t\t\tconst desc = String(m[1] ?? '').trim();
+\t\t\t// 一次最多换 max 张，多出来的只把标记剥掉，绝不留成文字
+\t\t\tif (i >= max) { out = out.split(whole).join(''); continue; }
+\t\t\tlet r = { ok: false, reason: '没写要什么表情' };
+\t\t\tif (desc !== '') r = await this.pickByFeel(workspacePath, desc, embedder, { model, avoid: used, top: 5 });
+\t\t\tif (r.ok) used.push(r.file);
+\t\t\tconst ref = r.ok ? (r.absolute === true ? imageRef(r.file) : '_stickers/' + r.file) : '';
+\t\t\tresolved.push({ desc, file: r.ok ? r.file : null, fromMeme: r.fromMeme === true, reason: r.ok ? null : (r.reason ?? null) });
+\t\t\tout = out.split(whole).join(r.ok ? '![' + desc.replace(/[[\\]]/g, '') + '](' + ref + ')' : '');
+\t\t}
+\t\treturn { text: out.replace(/[ \\t]+\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim(), resolved };
+\t}
+
+\t/**
+\t * 借 dsh-meme 的只读取图服务挑一张`,
+		'新增 resolveMemeTags（解析 [表情: 描述]）', 'async resolveMemeTags(');
+
+	// 12) gateway.js：出站前（抠正文图之前）把 [表情: 描述] 换成真图片引用
+	replaceOnce('gateway.js',
+		"\t\tlet feelText = raw.replace(/\\s*\\[(不回|沉默)\\]\\s*$/g, '');",
+		[
+			"\t\tlet feelText = raw.replace(/\\s*\\[(不回|沉默)\\]\\s*$/g, '');",
+			`\t\t// [表情: 描述]：QQ / 微信 / 抖音出站不走 dsh-meme 的前端配图，先换成真图片再发 [${MARK_MEME}]`,
+			'\t\tif (/\\[表情\\s*[:：]/.test(feelText)) {',
+			'\t\t\ttry {',
+			"\t\t\t\tconst tagged = await this.stickers?.resolveMemeTags(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel() })",
+			"\t\t\t\t\t?? { text: feelText, resolved: [] };",
+			'\t\t\t\tfeelText = tagged.text;',
+			'\t\t\t\tfor (const one of tagged.resolved) {',
+			"\t\t\t\t\tthis.note(one.file ? 'sent' : 'sticker-skip', {",
+			'\t\t\t\t\t\tchannelId: row.channel_id, title: row.title, text: one.desc,',
+			"\t\t\t\t\t\treason: one.file ? '按描述挑了一张表情包' : '没有像「' + one.desc + '」的表情，这段没发'",
+			'\t\t\t\t\t});',
+			'\t\t\t\t}',
+			'\t\t\t} catch (error) {',
+			"\t\t\t\tthis.log('warn', '[fish-soul] 解析 [表情] 失败：' + String(error instanceof Error ? error.message : error));",
+			'\t\t\t}',
+			'\t\t}'
+		].join('\n'),
+		'出站前解析 [表情: 描述]', '/\\[表情\\s*[:：]/.test(feelText)');
+
+	// 13) 抖音私信也得能带图（这条路径原来只发文字）
+	replaceOnce('gateway.js',
+		'\tasync sendDouyinDm(row, text) {',
+		`\tasync sendDouyinDm(row, text, images = [], convId = '') { // [${MARK_MEME}] 带图 + 会话 ID`,
+		'抖音私信签名加图', 'async sendDouyinDm(row, text, images = [], convId = ');
+	replaceOnce('gateway.js',
+		"\t\tconst parts = String(text ?? '').split(/\\n{2,}/).map((s) => s.trim()).filter((s) => s !== '').map((s) => ({ type: 'text', text: s }));",
+		"\t\tconst parts = String(text ?? '').split(/\\n{2,}/).map((s) => s.trim()).filter((s) => s !== '').map((s) => ({ type: 'text', text: s }));\n" +
+		`\t\tfor (const p of images.slice(0, 2)) parts.push({ type: 'image', path: p }); // [${MARK_MEME}] 表情包跟在文字后面`,
+		'抖音私信拼上图片段', "parts.push({ type: 'image', path: p })");
+	replaceOnce('gateway.js',
+		'\t\t\tconst r = await ch.send(name, parts);',
+		[
+			`\t\t\t// 没确认过会话身份就不传第三参，照原来的发法，绝不因为多传参数发不出去 [${MARK_MEME}]`,
+			`\t\t\tconst r = convId === '' ? await ch.send(name, parts) : await ch.send(name, parts, convId);`
+		].join('\n'),
+		'抖音私信传会话 ID');
+
+	// 14) 抖音分支：把图一起递下去（以前这段只取文字）
+	replaceOnce('gateway.js',
+		"\t\t\tif (dmText === '') { st.douyinSilent = true; return true; }\n\t\t\tconst r = await this.sendDouyinDm(row, dmText);",
+		[
+			`\t\t\t// 只有表情包没文字时也要发出去；会话身份没确认到就照原来的发法 [${MARK_MEME}]`,
+			`\t\t\tconst dmConv = /^0:1:\\d+:\\d+$/.test(String(st?.convId ?? '')) ? String(st.convId) : '';`,
+			`\t\t\tconst dmImgs = [];`,
+			`\t\t\tfor (const img of await this.dmImages(row, 图, st)) {`,
+			`\t\t\t\tif (typeof img?.path === 'string' && img.path !== '' && !dmImgs.includes(img.path)) dmImgs.push(img.path);`,
+			`\t\t\t}`,
+			`\t\t\tif (dmText === '' && dmImgs.length === 0) { st.douyinSilent = true; return true; }`,
+			`\t\t\tconst r = await this.sendDouyinDm(row, dmText, dmImgs, dmConv);`
+		].join('\n'),
+		'抖音分支带上图片');
+
+	// 15) 抖音评论回复：同样先把 [表情: 描述] 换成真图（评论一条最多带 1 张）
+	replaceOnce('douyin-social.js',
+		"\t\tif (out.text.includes('_stickers/@')) {",
+		[
+			`\t\t// [表情: 描述] 换成真图；挑不到就把标记删掉，别当文字发出去 [${MARK_MEME}]`,
+			'\t\tif (/\\[表情\\s*[:：]/.test(out.text)) {',
+			"\t\t\ttry { out.text = (await this.stickers.resolveMemeTags(out.text, this.workspacePath(), this.embedder, { max: 1 }))?.text ?? out.text; } catch { /* 解析失败就当没写表情 */ }",
+			'\t\t}',
+			"\t\tif (out.text.includes('_stickers/@')) {"
+		].join('\n'),
+		'评论回复解析 [表情: 描述]', '/\\[表情\\s*[:：]/.test(out.text)');
 }
 
 // ───────────────────────────── P2 / P3：锚点小块补丁 ─────────────────────────────

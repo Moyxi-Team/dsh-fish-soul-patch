@@ -29,7 +29,8 @@ const PATCH_GROUPS = [
       { t: "stickers：图片引用按绝对路径写 markdown", f: "stickers.js", p: "const imageRef = (path)", u: null },
       { t: "表情包设置里加 meme 开关", f: "stickers.js", p: "meme: v.meme === true", u: null },
       { t: "routes-v07：/stickers/config 收 meme", f: "routes-v07.js", p: "if (b.meme !== undefined) s.meme = b.meme === true;", u: null },
-      { t: "client：表情包设置页加开关", f: "client.js", p: "借 dsh-meme 的表情库", u: null },
+      { t: "client：借库开关已从 QQ 页搬走（只留指路注释）", f: "client.js", p: "这个开关搬到「日常 → 表情包」页了", u: null },
+      { t: "表情包页：读 meme 状态 + 借库开关 + 「配置看 dsh-meme」提示", f: "client.soul.js", p: "表情包配置看 dsh-meme 设置", u: null },
     ]
   },
   {
