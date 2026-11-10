@@ -37,7 +37,7 @@
 | 热更新后人格卡 + 记忆块掉线 | `index-remount-our-session` | `noteInteraction` 里每条消息补挂一次人格段（会话还活着、`ensureSession` 见 live 直接 return 时不再永久掉线） | 🟡 仍需 |
 | `sectionsMounted` 从 Set 改 Map | `index-remount-map` | 记的是 ctx 本身而不是 id，宿主换了 ctx 才重挂、同一 ctx 不重复注册 | 🟡 仍需 |
 | 设置里列出个人插件 | `client-system-plugins-tab` 等 5 处 | 系统设置加「个人插件」页：逐处核对本仓库的补丁（P1–P6 每组几处打了几处、每处是已打 / 上游已接管 / 没打 / 文件不在）。新增 `lib/routes-plugins.js` + `GET /plugins/installed`，纯只读，不装不卸、不联网 | 🟡 仍需（上游无此页） |
-| 主动给抖音互关的人发私信 | `dm-*` 14 处 | 新增 `lib/douyin-proactive.js`（进她自己主页点「**关注**」按钮开关注列表，取名字后面标着「互相关注」的人 / 按她自己的人格卡写一句（递人格卡全文 + 性格锚点，并把最近发过的话一起给她看，要求换角度、别复用说法）/ 发送 / 记账）。发不发、发给谁由自己定：设置页先点「拉互相关注名单」，再勾选要发的那几个人；配额按**一天最多几次** + **同一个人隔几小时**才再发。自走层 15 分钟 tick 里按剩余次数随机发一条；开关在 设置 → 平台 → 抖音 → 主动私信（默认关），另有「现在试一次」按钮 | 🟡 仍需（上游无私信主动发起） |
+| 主动给抖音互关的人发私信 | `dm-*` 19 处 | 新增 `lib/douyin-proactive.js`（进她自己主页点「**关注**」按钮开关注列表，取名字后面标着「互相关注」的人 / 按她自己的人格卡写一句（递人格卡全文 + 性格锚点，并把最近发过的话一起给她看，要求换角度、别复用说法）/ 发送 / 记账）。发不发、发给谁由自己定：设置页先点「拉互相关注名单」，再勾选要发的那几个人；配额按**一天最多几次** + **同一个人隔几小时**才再发。自走层 15 分钟 tick 里按剩余次数随机发一条；开关在 设置 → 平台 → 抖音 → 主动私信（默认关），另有「现在试一次」按钮 | 🟡 仍需（上游无私信主动发起） |
 | 顺手分享的视频**按人挑类型** | `dm-*`（`dm-schema` / `dm-save` / `dm-vars` / `dm-ui` / `dm-http-*`） | 主动私信时顺手分享她自己的作品，现在可以**按类型选**：13 类（搞笑 / 游戏 / 美食 / 宠物 / 旅行 / 音乐舞蹈 / 颜值穿搭 / 剧情影视 / 数码科技 / 情感 / 日常 / 学习 / 运动）。每人可单点类型；没单点的人跟「默认分享哪类」走；都不选 = 不限。挑之前用 `aweme/detail` 补全文案 / 时长 / 点赞（`aweme/post` 会 403，故只在需要时补），按类型命中 → 无命中回落 → 同类里热门优先。支撑端点 `selfProfile` / `userPosts` 打进 `lib/douyin-http.js`，`DouyinSocial` 接上 `http` 才有纯 HTTP 通路（没接就退回浏览器刮） | 🟡 仍需 |
 
 状态取自 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)（对着 npm 最新版自动体检生成，每周更新一次）。带 `douyin-` / `index-` / `client-` / `routes-` 前缀的都是小块锚点：抖音四处看 [`assets/douyin-hunks.json`](assets/douyin-hunks.json)，人格段两处看 [`assets/index-hunks.json`](assets/index-hunks.json)，个人插件页五处看 [`assets/plugins-hunks.json`](assets/plugins-hunks.json)（外加新文件 [`assets/plugins-route.js`](assets/plugins-route.js)），刷到的分享改卡片九处看 [`assets/share-hunks.json`](assets/share-hunks.json)，逐处替换、不再整文件覆盖。
@@ -79,12 +79,14 @@ patch-fish-soul.mjs    补丁器：版本无关、幂等、三态判定、可自
 audit-upstream.mjs     上游体检：对 npm 最新版判断每处补丁还有没有用
 assets/
   douyin-hunks.json    抖音补丁（评论区可见性 / 详情页 Tab / 回复可见 / BGM 留痕 / 文件头标记）的锚点与替换内容
-  dm-hunks.json        主动私信 + 按人挑类型分享视频的 14 处锚点与替换内容
+  dm-hunks.json        主动私信 + 按人挑类型分享视频的 19 处锚点与替换内容
   douyin-proactive.js  主动私信模块（落到插件 lib/douyin-proactive.js）
   index-hunks.json     人格段补挂两处的小块锚点与替换内容
   plugins-hunks.json   个人插件页五处（client.js 3 + routes.js 2）的锚点与替换内容
   plugins-route.js     「个人插件」只读路由模块（新文件，落到插件 lib/routes-plugins.js）
+  share-hunks.json     刷到的视频改发视频卡片的 9 处锚点与替换内容
   meme-bridge.js       dsh-meme 只读取图桥接模块（打进插件 lib/ 用）
+CHANGELOG.md           每轮补丁的改动说明：改了什么 / 开关在哪 / 配额怎么算 / 怎么验证与回滚
 reports/
   upstream-compatibility.md   体检报告（自动生成）
 .github/workflows/
