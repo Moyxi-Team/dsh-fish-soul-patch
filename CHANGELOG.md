@@ -5,6 +5,31 @@
 
 ---
 
+## 平台 → 微信设置页：说清哪些设置要 WechatAgent 侧配、哪些这边配就生效 + 微信表情只发动图（W27–W48）
+
+**为什么改**：主人反馈两件事。① 设置里没有「微信」这一处能管的地方：微信侧的开关、地址、群聊、掉线重连全在 WechatAgent 那边，而人格 / 记忆 / 黑话 / 主动开口却在这边，实际用时根本分不清「我刚改的这个到底生效没有」，改了半天不生效也不知道该去哪儿改。② 希希发的表情包在 DSH 里是动的，一进微信就变成静态图：微信只认 GIF 动图，上游挑表情是「按感觉 / 按描述」挑第一张能用的，挑到 PNG / JPG 就只能当静态图发出去，看起来像「表情坏了」。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `assets/client.wechat.js` · 新文件 | 设置 → 平台 → 「微信」子页。页内把设置分成两组：**这边改就生效**（人格卡 / 别名认人、记忆与存档读写、黑话共桶、主动开口冷却与配额、表情动图两项）；**必须去 WechatAgent 侧改**（微信收发通道、登录态与重连、群聊开关、出站转发地址与端口、图片文件上行、朋友圈等微信独有能力），并注明 soul 侧不保存那部分配置 |
+| `assets/wechat-pane-hunks.json` · W27–W48（22 处） | `config-schema.js` 加 `stickerAnimatedFirst`（默认 **开**）/ `stickerAnimatedStrict`（默认 **关**）；`gateway.js` 加 `wechatStickerPrefs()` 并在两条挑表情的出站路径上透传；`stickers.js` 的 `resolveFeelRefs` / `pickByFeel` / `resolveMemeTags` / `pickFromMeme` 收 `animatedFirst` / `animatedStrict`，动图排前面、严格模式挑不到就不发；`meme-bridge.js` 加 `isGif` / `usable`，要动图时多拉候选、GIF 优先、严格模式不回退，返回 `animated` 标记；`routes.js` 加 `wechatState()` + `POST /channels/wechat-config`，`/channels/state` 回显里带 `wechat`；`client.js` 页签短名 / 子页签 / 轮询 / 渲染接上微信页 |
+| `tools/gen-patch-docs.mjs` | GROUPS 加 P8（`wechat-pane`），`docs/patches.md` 重新生成（90 处锚点） |
+
+**怎么验证**
+
+```powershell
+node patch-fish-soul.mjs --only wechat-pane   # 期望：改了 23 处（含新文件）、失败 0；再跑一次应「已打过 23 处、改了 0 处」
+node patch-fish-soul.mjs --check             # 期望：全部已打过、漂移 0、失败 0
+```
+
+重启 DSH 后：设置 → 平台 下出现「微信」，两组清单可对照着改；打开「先挑动图」后，微信里收到的表情应当是动的（`fish-soul-debug.log` 里挑图结果带 `animated: true`）。想彻底不发静态图，把「挑不到动图就不发」也打开。
+
+**回滚**：从 `~/.dsh/backup/fish-soul-patch-<时间戳>/` 还原 6 个 `lib/*.js`，删掉 `lib/client.wechat.js`，重跑 `--check`。
+
+---
+
 ## 微信「说的比收到的多」：一轮多条助手消息以前被覆盖，只剩最后一条（W26）
 
 **为什么改**：主人在微信上反馈「DSH 里明明有好几条，微信实际收到的少了几条」。查会话记录（`sessions/.../session.v4.jsonl.zstd`）发现 DSH 一轮里 `assistant/message` 会出现不止一条（模型分步输出、续写重试），而上游 `ChatGateway.onSessionEvent` 收的是覆盖赋值 `st.text = text` —— 后一条一进来，前一条已经说出口的正文直接被顶掉。`turn/end` 只拿得到最后一条，于是 `sendReply` 只发了最后一句：微信 / QQ 端看起来就是「少了几条」，DSH 会话里却一条不少。

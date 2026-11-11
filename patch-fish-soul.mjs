@@ -32,7 +32,7 @@
  *   node patch-fish-soul.mjs                       # 自动找 ~/.dsh/profiles/<profile>/node_modules/dsh-fish-soul
  *   node patch-fish-soul.mjs --root <插件目录>      # 指定插件目录（含 package.json 的那层）
  *   node patch-fish-soul.mjs --check               # 只报告状态，不改文件
- *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm / share / wechat）
+ *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm / share / wechat / wechat-pane）
  *   node patch-fish-soul.mjs --json                # 结尾额外打印一段机器可读汇总（CI / audit 用）
  *   node patch-fish-soul.mjs --force               # 忽略「已打过」判断，按文件内容重算（谨慎）
  *   node patch-fish-soul.mjs --smoke               # 额外冒烟：真 import 一次插件入口（改了就会自动跑）
@@ -824,6 +824,51 @@ function patchWechat() {
 	patchHunks({ tag: 'P7 wechat', label: '微信通道认人 + 聊天存档桥接 + 黑话共桶', jsonName: 'wechat-hunks.json' });
 }
 
+// ───────────────────────────── P8：平台 → 微信设置页 ─────────────────────────────
+
+/**
+ * 微信接进来以后，面板「平台」里一直没有微信这一栏，只能在 QQ / B站 / 抖音 之间打转；
+ * 更麻烦的是她发的表情包在 DSH 里是动的、到微信里全变静态图，没人说清楚该去哪儿改。
+ *
+ * 这条补丁做两件事：
+ *  ① 新增 lib/client.wechat.js（整文件落地）：平台 → 微信。页面上把设置项分成两栏 ——
+ *     「去 WechatAgent 改才生效」（登录、收发端口、表情入库、发图、好友/群同步）与
+ *     「在这儿改就生效」（人格记忆、认人白名单、接话、插嘴、挑表情策略）；
+ *  ② 22 处锚点：config-schema 加 stickerAnimatedFirst / stickerAnimatedStrict 两项；
+ *     gateway 出站挑表情时按微信平台透传动图偏好；stickers / meme-bridge 支持「先只在 GIF 里挑」
+ *     与「挑不到动图就不发」；routes 加 wechatState() 与 POST /channels/wechat-config；
+ *     client 加「微」页签与 WechatPane 渲染。见 assets/wechat-pane-hunks.json。
+ *
+ * 为什么要动表情：微信自己发的表情消息（wechat_sticker）只认 GIF —— 静态图发过去一定不动。
+ * soul 这边能控的只有「挑图时挑哪一张」，所以给了「先发动图 / 只发动图 / 不过滤」三档。
+ */
+function patchWechatPane() {
+	log('\n[P8 wechat-pane] 平台 → 微信设置页 + 表情只发动图');
+	const tpl = join(HERE, 'assets', 'client.wechat.js');
+	const target = join(lib, 'client.wechat.js');
+	if (!existsSync(tpl)) {
+		failed += 1;
+		note('P8 wechat-pane', 'DRIFT', '仓库里缺 assets/client.wechat.js，没法落地微信设置页');
+		log('  × 缺 assets/client.wechat.js');
+		return;
+	}
+	const body = readFileSync(tpl, 'utf8');
+	if (existsSync(target) && readFileSync(target, 'utf8') === body) {
+		skipped += 1;
+		note('P8 wechat-pane', 'ALREADY', 'lib/client.wechat.js 已是当前版本');
+		log('  · lib/client.wechat.js 已是最新，跳过');
+	} else if (CHECK) {
+		log('  [check] 会写 lib/client.wechat.js');
+		note('P8 wechat-pane', 'DRIFT', '[check] 待写 lib/client.wechat.js');
+	} else {
+		writeFileSync(target, body, 'utf8');
+		changed += 1;
+		note('P8 wechat-pane', 'PATCHED', '新增 lib/client.wechat.js');
+		log('  ✓ 新增 lib/client.wechat.js');
+	}
+	patchHunks({ tag: 'P8 wechat-pane', label: '平台 → 微信设置页 + 微信表情只发动图', jsonName: 'wechat-pane-hunks.json' });
+}
+
 /**
  * 打完补丁后冒烟：真把插件入口 import 一次。
  * 文本上全是 PATCHED 不等于能加载 —— 比如 schemastery 根本没有 z.record（是 z.dict），
@@ -869,6 +914,7 @@ try {
 	if (ONLY === '' || ONLY === 'dm') patchDm();
 	if (ONLY === '' || ONLY === 'share') patchShare();
 	if (ONLY === '' || ONLY === 'wechat') patchWechat();
+	if (ONLY === '' || ONLY === 'wechat-pane') patchWechatPane();
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;

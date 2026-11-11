@@ -30,6 +30,7 @@ const GROUPS = [
   { tag: 'P5', only: 'dm', label: '抖音 —— 主动给互关好友发私信', json: 'dm-hunks.json', whole: 'douyin-proactive.js' },
   { tag: 'P6', only: 'share', label: '刷到有意思的就发给你 → 视频卡片', json: 'share-hunks.json', whole: null },
   { tag: 'P7', only: 'wechat', label: '微信（WechatAgent）↔ 人格记忆互通', json: 'wechat-hunks.json', whole: null },
+  { tag: 'P8', only: 'wechat-pane', label: '平台 → 微信设置页 + 表情只发动图', json: 'wechat-pane-hunks.json', whole: 'client.wechat.js' },
 ];
 
 const esc = (s) => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ');

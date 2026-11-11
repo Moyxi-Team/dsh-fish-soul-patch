@@ -15,8 +15,9 @@
 | P5 | `dm` | 抖音 —— 主动给互关好友发私信 | 21 | `assets/douyin-proactive.js` → 插件 `lib/` | `assets/dm-hunks.json` |
 | P6 | `share` | 刷到有意思的就发给你 → 视频卡片 | 9 | — | `assets/share-hunks.json` |
 | P7 | `wechat` | 微信（WechatAgent）↔ 人格记忆互通 | 26 | — | `assets/wechat-hunks.json` |
+| P8 | `wechat-pane` | 平台 → 微信设置页 + 表情只发动图 | 22 | `assets/client.wechat.js` → 插件 `lib/` | `assets/wechat-pane-hunks.json` |
 
-合计锚点 **68 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
+合计锚点 **90 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
 
 每处补丁在运行时按四种判定之一处理：`PATCHED` 打上 / `ALREADY` 跳过 / `UPSTREAM` 上游已原生实现则自动退役 / `DRIFT` 锚点没了停手报错（见 README「用法」）。
 
@@ -409,6 +410,108 @@ if (replyIsWechat) {
 
 </details>
 
+## P8 · 平台 → 微信设置页 + 表情只发动图（`--only wechat-pane`，22 处）
+
+另有整文件模块：`assets/client.wechat.js` → 插件 `lib/`（内容变了要同步升脚本里的版本戳，见维护约定）。
+
+| # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |
+| --- | --- | --- | --- | --- |
+| 1 | `W27` | `lib/config-schema.js` | config-schema：微信配置加表情动图两项（先发动图 / 只发动图） | — |
+| 2 | `W28` | `lib/gateway.js` | gateway：新增 wechatStickerPrefs()（读微信表情动图偏好） | — |
+| 3 | `W29` | `lib/gateway.js` | gateway：微信出站按描述挑表情时透传动图偏好 | — |
+| 4 | `W30` | `lib/gateway.js` | gateway：微信出站按感觉挑表情时也透传动图偏好 | — |
+| 5 | `W31` | `lib/stickers.js` | stickers：resolveFeelRefs 收 animatedFirst / animatedStrict | — |
+| 6 | `W32` | `lib/stickers.js` | stickers：resolveFeelRefs 把动图偏好传给 pickByFeel | — |
+| 7 | `W33` | `lib/stickers.js` | stickers：pickByFeel 收 animatedFirst / animatedStrict | — |
+| 8 | `W34` | `lib/stickers.js` | stickers：pickByFeel 动图排前面 + 严格模式挑不到就不发 | — |
+| 9 | `W35` | `lib/stickers.js` | stickers：resolveMemeTags 收 animatedFirst / animatedStrict | — |
+| 10 | `W36` | `lib/stickers.js` | stickers：resolveMemeTags 按描述挑图时带上动图偏好 | — |
+| 11 | `W37` | `lib/stickers.js` | stickers：pickFromMeme 借 dsh-meme 时也先挑 GIF | — |
+| 12 | `W38` | `lib/stickers.js` | stickers：挑图结果带 animated 标记 | — |
+| 13 | `W39` | `lib/meme-bridge.js` | meme-bridge：入参说明补动图两项 | — |
+| 14 | `W40` | `lib/meme-bridge.js` | meme-bridge：加 isGif / usable 判定 | — |
+| 15 | `W41` | `lib/meme-bridge.js` | meme-bridge：要动图时多拉候选，GIF 优先、严格模式不回退 | — |
+| 16 | `W42` | `lib/meme-bridge.js` | meme-bridge：返回 animated 标记 | — |
+| 17 | `W43` | `lib/routes.js` | routes：新增 wechatState()（微信配置回显） | — |
+| 18 | `W44` | `lib/routes.js` | /channels/state 回显里加 wechat | — |
+| 19 | `W45` | `lib/routes.js` | routes：新增 POST /channels/wechat-config（只存 soul 侧微信设置） | — |
+| 20 | `W46` | `lib/client.js` | client：页签短名与子页签加「微信」 | — |
+| 21 | `W47` | `lib/client.js` | client：微信子页签也走 channels 轮询 | — |
+| 22 | `W48` | `lib/client.js` | client：微信子页签渲染 WechatPane | — |
+
+<details><summary>锚点原文（marker）</summary>
+
+```text
+# W27
+stickerAnimatedStrict: z.boolean().default(false), // 挑不到动图就不发这张（宁可没有也不发静态）
+
+# W28
+/** 微信表情偏好：微信只认 GIF 动图，静态图发过去一定不动（平台 → 微信 → 表情）[FS-WECHAT-PANE] */
+
+# W29
+const tagged = await this.stickers?.resolveMemeTags(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel(), ...stickerPrefs })
+
+# W30
+const r = await this.stickers?.resolveFeelRefs(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel(), ...stickerPrefs }) ?? { text: feelText, resolved: [] };
+
+# W31
+async resolveFeelRefs(text, workspacePath, embedder, { model = '', animatedFirst = false, animatedStrict = false } = {}) {
+
+# W32
+const r = await this.pickByFeel(workspacePath, one.feel, embedder, { model, top: 5, animatedFirst, animatedStrict });
+
+# W33
+async pickByFeel(workspacePath, feel, embedder, { model = '', avoid = [], top = 5, animatedFirst = false, animatedStrict = false } = {}) {
+
+# W34
+const ordered = wantAnim ? [...ranked].sort((a, b) => (isGif(b.file) ? 1 : 0) - (isGif(a.file) ? 1 : 0)) : ranked;
+
+# W35
+async resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2, animatedFirst = false, animatedStrict = false } = {}) {
+
+# W36
+resolved.push({ desc, file: r.ok ? r.file : null, fromMeme: r.fromMeme === true, animated: r.animated === true, reason: r.ok ? null : (r.reason ?? null) });
+
+# W37
+async pickFromMeme(feel, avoid = [], { animatedFirst = false, animatedStrict = false } = {}) {
+
+# W38
+animated: r.animated === true,
+
+# W39
+* @returns {Promise<{ok: boolean, path?: string, sourcePath?: string, tag?: string, caption?: string, packName?: string, label?: string, animated?: boolean, reason?: string}>}
+
+# W40
+const isGif = (p) => extname(String(p ?? '')).toLowerCase() === '.gif';
+
+# W41
+? (memes.find((m) => usable(m) && isGif(m.path)) ?? (animatedStrict === true ? undefined : memes.find(usable)))
+
+# W42
+animated: isGif(hit.path),
+
+# W43
+const list = (v) => (Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : []);
+
+# W44
+wechat: wechatState(),
+
+# W45
+const list = (v, fallback) => (v === undefined ? (Array.isArray(fallback) ? fallback : []) : (Array.isArray(v) ? v : []).map((x) => String(x).trim()).filter(Boolean));
+
+# W46
+const TAB_KEYS = { memory: "忆", character: "角", daily: "常", channels: "台", models: "模", system: "统", guide: "引", retrieval: "索", persona: "人", life: "自", inspector: "忆", activity: "动", behavior: "习", qq: "Q", bili: "B", douyin: "抖", wechat: "微", version: "版" };
+
+# W47
+const fn = subtab === "retrieval" ? loadRetrieval : subtab === "qq" || subtab === "bili" || subtab === "douyin" || subtab === "wechat" ? loadChannels : null;
+
+# W48
+: subtab === "wechat" ? h(ChunkTab, { file: "client.wechat.js", pick: (m) => m.WechatPane, failText: "微信页加载失败", data: channels, refresh: loadChannels, notify })
+
+```
+
+</details>
+
 ## 设置里「个人插件」页显示几处（探针口径）
 
 设置 → 系统 → 个人插件 那一页读的是 `assets/plugins-route.js` 里内联的 `PATCH_GROUPS`（探针：靠一段「只有打过才出现」的代码判断在不在），**按功能合并**，条数与上面的锚点数不是一一对应。核对时别拿两边的数字硬对。
@@ -422,6 +525,7 @@ if (replyIsWechat) {
 | P5 | 22 | 11 | 少 11 条（合并成功能项） |
 | P6 | 9 | 10 | 多 1 条（一处拆成多项） |
 | P7 | 26 | 23 | 少 3 条（合并成功能项） |
+| P8 | 23 | — | 页面未覆盖该组 |
 
 页面上某一组显示「已打 N / M」，N 是按探针数出来的；锚点数以本文件为准。探针漏了某处时，页面会少报，但补丁器 `--check` 仍然会管到那一处。
 
