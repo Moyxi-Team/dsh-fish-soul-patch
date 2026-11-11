@@ -298,7 +298,10 @@ const rows = [
 	auditNewFile(dir, 'P5 dm', 'dm-proactive-file', '主动私信实现（整文件 douyin-proactive.js）', 'douyin-proactive.js', 'FS-DOUYIN-DM-PATCH'),
 	...auditHunks(dir, 'share-hunks.json', 'P6 share'),
 	...auditHunks(dir, 'wechat-hunks.json', 'P7 wechat'),
-	...auditHunks(dir, 'wechat-pane-hunks.json', 'P8 wechat-pane')
+	...auditHunks(dir, 'wechat-pane-hunks.json', 'P8 wechat-pane'),
+	...auditHunks(dir, 'wechat-transport-hunks.json', 'P9 wechat-transport'),
+	auditNewFile(dir, 'P9 wechat-transport', 'wechat-inbound-file', '微信入站服务（整文件 wechat-inbound.js）', 'wechat-inbound.js', '微信入站口（本机回环）'),
+	auditNewFile(dir, 'P9 wechat-transport', 'wechat-channel-file', '微信出站通道（整文件 channels/wechat.js）', 'channels/wechat.js', '微信通道适配器（本机回环）')
 ];
 
 const retired = rows.filter((r) => r.status === 'RETIRED').length;

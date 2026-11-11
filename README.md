@@ -28,7 +28,7 @@
 
 ## 补丁清单
 
-逐处清单见 [`docs/patches.md`](docs/patches.md)（P1–P8 全部 **92 处锚点 + P1 的 22 处内联改动 + 4 个整文件模块**，逐条写清改哪个文件、改了什么、上游接管怎么判）；本表只到组这一层。清单由 `node tools/gen-patch-docs.mjs` 从代码生成，不手写。
+逐处清单见 [`docs/patches.md`](docs/patches.md)（P1–P9 全部 **112 处锚点 + P1 的 22 处内联改动 + 6 个整文件模块**，逐条写清改哪个文件、改了什么、上游接管怎么判）；本表只到组这一层。清单由 `node tools/gen-patch-docs.mjs` 从代码生成，不手写。
 
 | 组 | `--only` | 补丁 | 锚点名 | 改了上游哪里 | 上游状态 |
 | --- | --- | --- | --- | --- | --- |
@@ -46,8 +46,9 @@
 | P6 | `share` | 刷到的视频发卡片（两条路径分工） | `share-*` 9 处 | 原来「刷到有意思的就发给你」只是把链接甩过去；现在改成**发视频卡片**：`life.queueShare` 除了链接还带上 `videoId`，`deliverOne` 优先交给抖音分享面板把那条视频的卡片发到「抖音·主人」会话，卡片不通才退回发链接。**两条路径分开**：① 刷到有意思的就发给你 = 就发**刚刷到的这一条**，不按类型搜（`FS-SHARE-ONLY-BROWSED`）；② 主动私信时顺手分享 = 从设置里**你自己选的那几类**里随机挑**一个**类型去搜（`FS-DM-SHARE-ONE-TYPE`，挑不到就不发，不回落「不限」）。两条都不发她自己发的作品（`FS-DM-SHARE-OTHERS`）。一天几条仍看原「分享」配额 | 🟡 仍需 |
 | P7 | `wechat` | 微信（WechatAgent）↔ 人格记忆互通 | `wechat-*` 26 处 | 把人格 / 记忆接到微信侧：① 聊天存档按通道归一化（`wechat:private` / `wechat:group`），外部桥接可 `append` 写入、`recent` 读取；② 新增 `person_wechat_alias` 表做「微信 id → canonical_id」认人，`person` 表结构不动，老库启动自动补建表与唯一索引；③ `gateway-util` 认出微信平台、中文名与群聊口径；④ `gateway` 不把微信私聊 / 群并进 QQ 会话（两侧通道各自独立，只共享人格与记忆）；⑤ `index` 入站、群 id、重启重建会话都走别名表认人（兼容 `wechat-private:` 老写法，不再当 QQ 号查）；⑥ `life` 的主动开口冷却 / 配额把微信算独立平台；⑦ `slang` 让同一个人的微信私聊与 QQ 私聊共用黑话 / 表达桶（读写都走共桶，取不到回退原通道键）；⑧ `soul-memory` 的记忆卡片 / 联系人清单按通道种类归类时认得出微信（`wechat-private` / `wechat-group`，不再记成 `qq-private`）。微信侧宿主是 WechatAgent，本组只提供通道、认人与存档读写接口，不主动发消息 | 🟡 仍需（上游无微信通道） |
 | P8 | `wechat-pane` | 平台 → 微信设置页（哪些要 WechatAgent 侧配、哪些在这边配就生效）+ 微信只发动图表情 | `wechat-pane` 22 处 + 新文件 `client.wechat.js` | 在 设置 → 平台 下新增「微信」子页（`lib/client.wechat.js`，由 `routes.js` 的 `wechatState()` / `POST /channels/wechat-config` 回显与保存），页内把设置分成两组清单：**① 在 soul 平台这边改就生效**（人格卡与别名认人、记忆 / 存档读写、黑话共桶、主动开口冷却与配额、表情动图两项）；**② 必须去 WechatAgent 侧改才生效**（微信收发通道本身、登录态与掉线重连、群聊开关、出站转发地址 / 端口、图片与文件上行、朋友圈等微信独有能力）——soul 侧只提供通道与人格，改 WechatAgent 的配置这边不会替你保存。同时修「希希发的表情在 DSH 里是动的、到微信就变静态图」：微信只认 GIF，配 `stickerAnimatedFirst`（先挑动图，默认开）/ `stickerAnimatedStrict`（挑不到动图就不发，默认关），`gateway` 的 `wechatStickerPrefs()` 把两项透传给 `stickers` 的 `resolveFeelRefs` / `pickByFeel` / `resolveMemeTags` / `pickFromMeme`，`meme-bridge` 借 dsh-meme 时也按 `.gif` 优先、要动图时多拉候选，挑图结果带 `animated` 标记 | 🟡 仍需（上游无平台-微信页、无动图优先） |
+| P9 | `wechat-transport` | 微信运输层：出站通道 + 入站口 + 网关挂载 | `wechat-transport-*` 20 处 + 新文件 `wechat-inbound.js` / `channels/wechat.js` | 上游对微信**零原生支持**（`gateway.js` 里 `wechat` 出现 0 次），P7/P8 只做了认人、存档与设置页，消息真正进出还得有运输层。本组补两件事：**① 入站**——新增 `lib/wechat-inbound.js`，本机回环 HTTP（默认 11233）收 WechatAgent 侧 `social-bridge` POST 过来的微信消息，鉴权 + 拆包后交给 `gateway.onWechatMessage`，走和 QQ 完全相同的判定 / 会话 / 记忆链路；**② 出站**——新增 `lib/channels/wechat.js`，把 `ChatGateway` 的出站动作（OneBot 段）转成 HTTP 交给 bridge，由 WechatAgent 用它自己那套链路（表情选图 / 回执 / 节流）真正发出去。`gateway.js` 14 处：构造参数收 `wechat`、`this.wechat`、`channelFor()`（Outbox 按 `channel_id` 选通道）、`allSessions` 带上微信会话、`chatTitle` 显示「微信·昵称（主人）」/「微信群·群名」、`onWechatMessage` + `wechatToMessage`、`decide` 的主人活跃 / 好友白名单 / 记忆标题三处、`handleCommand` 两处 + `sendReply` 改走 `channelFor`；`index.js` 6 处：引入两模块、`wechatCfg()`、建实例、把通道注入 `ChatGateway`、启动入站服务并在卸载时清理 | 🟡 仍需（上游无微信运输层） |
 
-状态取自 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)（对着 npm 最新版自动体检生成，每周更新一次）。带 `douyin-` / `index-` / `client-` / `routes-` 前缀的都是小块锚点：抖音五处看 [`assets/douyin-hunks.json`](assets/douyin-hunks.json)，人格段两处看 [`assets/index-hunks.json`](assets/index-hunks.json)，个人插件页五处看 [`assets/plugins-hunks.json`](assets/plugins-hunks.json)（外加新文件 [`assets/plugins-route.js`](assets/plugins-route.js)），刷到的分享改卡片九处看 [`assets/share-hunks.json`](assets/share-hunks.json)，微信互通二十二处看 [`assets/wechat-hunks.json`](assets/wechat-hunks.json)，平台 → 微信设置页二十二处看 [`assets/wechat-pane-hunks.json`](assets/wechat-pane-hunks.json)（外加新文件 [`assets/client.wechat.js`](assets/client.wechat.js)），逐处替换、不再整文件覆盖。每一处的 id / 目标文件 / 改了什么 / 锚点原文，见 [`docs/patches.md`](docs/patches.md)（`tools/gen-patch-docs.mjs` 从上述 JSON 生成，不手写）。
+状态取自 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)（对着 npm 最新版自动体检生成，每周更新一次）。带 `douyin-` / `index-` / `client-` / `routes-` 前缀的都是小块锚点：抖音五处看 [`assets/douyin-hunks.json`](assets/douyin-hunks.json)，人格段两处看 [`assets/index-hunks.json`](assets/index-hunks.json)，个人插件页五处看 [`assets/plugins-hunks.json`](assets/plugins-hunks.json)（外加新文件 [`assets/plugins-route.js`](assets/plugins-route.js)），刷到的分享改卡片九处看 [`assets/share-hunks.json`](assets/share-hunks.json)，微信互通二十二处看 [`assets/wechat-hunks.json`](assets/wechat-hunks.json)，平台 → 微信设置页二十二处看 [`assets/wechat-pane-hunks.json`](assets/wechat-pane-hunks.json)（外加新文件 [`assets/client.wechat.js`](assets/client.wechat.js)），微信运输层二十处看 [`assets/wechat-transport-hunks.json`](assets/wechat-transport-hunks.json)（外加新文件 [`assets/wechat-inbound.js`](assets/wechat-inbound.js) / [`assets/channels.wechat.js`](assets/channels.wechat.js)），逐处替换、不再整文件覆盖。每一处的 id / 目标文件 / 改了什么 / 锚点原文，见 [`docs/patches.md`](docs/patches.md)（`tools/gen-patch-docs.mjs` 从上述 JSON 生成，不手写）。
 
 ## 用法
 
@@ -55,7 +56,7 @@
 node patch-fish-soul.mjs                    # 自动找 ~/.dsh/profiles/*/node_modules/dsh-fish-soul
 node patch-fish-soul.mjs --root <插件目录>   # 指定插件目录（含 package.json 的那层）
 node patch-fish-soul.mjs --check            # 只报告状态，不改文件
-node patch-fish-soul.mjs --only meme        # 只跑一组（meme / douyin / remount / plugins / dm / share / wechat）
+node patch-fish-soul.mjs --only meme        # 只跑一组（meme / douyin / remount / plugins / dm / share / wechat / wechat-pane / wechat-transport）
 node patch-fish-soul.mjs --json             # 结尾多打一段机器可读汇总（CI / 体检用）
 node patch-fish-soul.mjs --force            # 忽略「已打过」判断按内容重算（谨慎）
 node tools/verify-install.mjs               # 体检：三处版本是否一致 + 补丁是否还在（防被整包重装冲掉）

@@ -1,4 +1,4 @@
-# 补丁逐处清单（P1–P8）
+# 补丁逐处清单（P1–P9）
 
 > **本文件由 `tools/gen-patch-docs.mjs` 根据 `assets/*-hunks.json` 生成，请勿手改。**
 > 锚点增删后跑 `node tools/gen-patch-docs.mjs` 重生成；`--check` 可校验是否与 JSON 一致。
@@ -16,8 +16,9 @@
 | P6 | `share` | 刷到有意思的就发给你 → 视频卡片 | 9 | — | `assets/share-hunks.json` |
 | P7 | `wechat` | 微信（WechatAgent）↔ 人格记忆互通 | 26 | — | `assets/wechat-hunks.json` |
 | P8 | `wechat-pane` | 平台 → 微信设置页 + 表情只发动图 | 22 | `assets/client.wechat.js` → 插件 `lib/` | `assets/wechat-pane-hunks.json` |
+| P9 | `wechat-transport` | 微信运输层 —— 出站通道 / 入站口 / 网关挂载 | 20 | `assets/wechat-inbound.js` → 插件 `lib/`<br>`assets/channels/wechat.js` → 插件 `lib/` | `assets/wechat-transport-hunks.json` |
 
-合计锚点 **92 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
+合计锚点 **112 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
 
 每处补丁在运行时按四种判定之一处理：`PATCHED` 打上 / `ALREADY` 跳过 / `UPSTREAM` 上游已原生实现则自动退役 / `DRIFT` 锚点没了停手报错（见 README「用法」）。
 
@@ -523,6 +524,251 @@ const fn = subtab === "retrieval" ? loadRetrieval : subtab === "qq" || subtab ==
 
 </details>
 
+## P9 · 微信运输层 —— 出站通道 / 入站口 / 网关挂载（`--only wechat-transport`，20 处）
+
+另有整文件模块：`assets/wechat-inbound.js` / `assets/channels/wechat.js` → 插件 `lib/`（内容变了要同步升脚本里的版本戳，见维护约定）。
+
+| # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |
+| --- | --- | --- | --- | --- |
+| 1 | `wechat-transport-gateway-01` | `lib/gateway.js` | ChatGateway 构造参数加 wechat 通道 | — |
+| 2 | `wechat-transport-gateway-02` | `lib/gateway.js` | this.wechat 存下微信通道 | — |
+| 3 | `wechat-transport-gateway-03` | `lib/gateway.js` | Outbox 选通道：声明 self 并按 channel_id 取通道 | — |
+| 4 | `wechat-transport-gateway-04` | `lib/gateway.js` | Outbox 通道 shim：connected / send 走 channelFor | — |
+| 5 | `wechat-transport-gateway-05` | `lib/gateway.js` | allSessions 带上微信会话 | — |
+| 6 | `wechat-transport-gateway-06` | `lib/gateway.js` | wechatConfig / channelFor / isMasterOf / trackMasterActivity 四个微信方法 | — |
+| 7 | `wechat-transport-gateway-07` | `lib/gateway.js` | chatTitle 微信分支（微信·昵称（主人） / 微信群·群名） | — |
+| 8 | `wechat-transport-gateway-08` | `lib/gateway.js` | onWechatMessage + wechatToMessage 微信入站方法 | — |
+| 9 | `wechat-transport-gateway-09` | `lib/gateway.js` | decide：主人活跃时间改走 trackMasterActivity | — |
+| 10 | `wechat-transport-gateway-10` | `lib/gateway.js` | decide：好友判定微信走白名单 | — |
+| 11 | `wechat-transport-gateway-11` | `lib/gateway.js` | decide：memorize 标题带微信前缀 | — |
+| 12 | `wechat-transport-gateway-12` | `lib/gateway.js` | handleCommand：回复（第一处）走 channelFor | — |
+| 13 | `wechat-transport-gateway-13` | `lib/gateway.js` | handleCommand：回复（第二处）走 channelFor | — |
+| 14 | `wechat-transport-gateway-14` | `lib/gateway.js` | 出站 sendReply 走 channelFor（微信必须） | — |
+| 15 | `wechat-transport-index-01` | `lib/index.js` | index 引入 WechatChannel / WechatInboundServer | — |
+| 16 | `wechat-transport-index-02` | `lib/index.js` | index 加 wechatCfg() | — |
+| 17 | `wechat-transport-index-03` | `lib/index.js` | index 加 wechatChannel / wechatInbound 变量 | — |
+| 18 | `wechat-transport-index-04` | `lib/index.js` | index 建 WechatChannel 实例 | — |
+| 19 | `wechat-transport-index-05` | `lib/index.js` | index 把 wechat 通道注入 ChatGateway 参数 | — |
+| 20 | `wechat-transport-index-06` | `lib/index.js` | index 启动微信通道 + 入站服务 + 卸载清理 | — |
+
+<details><summary>锚点原文（marker）</summary>
+
+```text
+# wechat-transport-gateway-01
+constructor({ ctx, db, clock, getConfig, log, channel, wechat = null, bili = null, browser = null, douyin = null, douyinBrowser = null, canvasConvert = null, soul, voice = null, stickers = null, slang = null, agentSections = null, groupAdmin = null, embedder = null, embeddingCfg = null }) {
+
+# wechat-transport-gateway-02
+this.channel = channel;
+		/** v1.x：微信通道（出站打给 WechatAgent 的 social-bridge；入站见 wechat-inbound.js）[FS-WECHAT-TRANSPORT] */
+		this.wechat = wechat;
+		this.bili = bili;
+
+# wechat-transport-gateway-03
+/** v0.11.1：QQ 没发出去的回复排队重发（落在 soul.db，重启也不丢） */
+		// [FS-WECHAT-TRANSPORT] 重发也要按 channel_id 选通道：微信的回复不能被当成 QQ 重发
+		const self = this;
+		this.outbox = new Outbox({
+
+# wechat-transport-gateway-04
+db, log: this.log,
+			channel: {
+				get connected() { return self.channel?.connected === true || self.wechat?.connected === true; },
+				send: (channelId, segs, convId) => self.channelFor(channelId).send(channelId, segs, convId)
+			},
+
+# wechat-transport-gateway-05
+return [...listChatSessions(this.db, 'qq'), ...listChatSessions(this.db, 'bili'), ...listChatSessions(this.db, 'douyin'), ...listChatSessions(this.db, 'wechat')];
+
+# wechat-transport-gateway-06
+interject: interjectConfig(q.interject)
+		};
+	}
+
+	/** 微信的运行配置：结构与 qqConfig 对齐，判定 / 分批 / 接话那套逻辑两边共用。[FS-WECHAT-TRANSPORT] */
+	wechatConfig() {
+		const w = this.getConfig().wechat ?? {};
+		const list = (v) => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : []);
+		return {
+			enabled: w.enabled === true,
+			masterUserIds: list(w.masterUserIds),
+			privateAllowList: list(w.privateAllowList),
+			groupAllowList: list(w.groupAllowList),
+			allGroups: w.allGroups !== false,
+			followUpCount: Number.isFinite(Number(w.followUpCount)) ? Number(w.followUpCount) : 6,
+			followUpSeconds: Number.isFinite(Number(w.followUpSeconds)) ? Number(w.followUpSeconds) : 180,
+			followUpSmart: w.followUpSmart === true,
+			batchMs: Number.isFinite(Number(w.batchMs)) ? Number(w.batchMs) : 800,
+			replyWindowMinutes: Number.isFinite(Number(w.replyWindowMinutes)) ? Number(w.replyWindowMinutes) : 30,
+			callNames: list(w.callNames),
+			interject: interjectConfig(w.interject)
+		};
+	}
+
+	/** channel_id → 该走哪个通道发 / 问：微信走 WechatChannel，其余走 SnowLuma。[FS-WECHAT-TRANSPORT] */
+	channelFor(channelId) {
+		if (platformOf(channelId) === 'wechat') {
+			if (this.wechat === null) throw new Error('微信通道没起来');
+			return this.wechat;
+		}
+		return this.channel;
+	}
+
+	/** 这条消息是不是主人发的（QQ 比 QQ 号，微信比白名单里的主人 id）。 */
+	isMasterOf(m) {
+		if (platformOf(m?.channelId) === 'wechat') return this.wechatConfig().masterUserIds.includes(String(m.userId ?? ''));
+		return m?.userId === this.masterQq();
+	}
+
+	/** 主人最近一次跟她说话的时间（QQ 主人号 + 微信主人）。 */
+	trackMasterActivity(m) {
+		if (!this.isMasterOf(m)) return;
+		const at = Number(m.timeMs);
+		if (Number.isFinite(at) && at > 0) this.masterActiveAt = Math.max(this.masterActiveAt, at);
+	}
+
+# wechat-transport-gateway-07
+async chatTitle(chat) {
+		// [FS-WECHAT-TRANSPORT] 微信会话标题：微信·<昵称>（主人）/ 微信群·<群名>
+		if (platformOf(chat.channelId) === 'wechat') {
+			const isGroup = chat.chatType === 'group';
+			const name = chat.title || chat.targetId;
+			const master = !isGroup && this.wechatConfig().masterUserIds.includes(String(chat.targetId ?? ''));
+			return `${isGroup ? '微信群' : '微信'}·${sanitizeName(name, chat.targetId)}${master ? '（主人）' : ''}`;
+		}
+		if (platformOf(chat.channelId) === 'douyin') {
+
+# wechat-transport-gateway-08
+/**
+	 * 微信入站（来自 wechat-inbound.js，由 WechatAgent 的 social-bridge 转发）。[FS-WECHAT-TRANSPORT]
+	 * 判定 / 会话 / 记忆 / 发言全部复用 decide 那套，与 QQ 唯一的区别是通道和认人口径。
+	 */
+	async onWechatMessage(payload) {
+		if (this.stopped) return;
+		const cfg = this.wechatConfig();
+		if (!cfg.enabled) return;
+		const m = this.wechatToMessage(payload);
+		if (m === null) return;
+		if (m.messageId !== '' && !this.markSeen(`${m.channelId}#${m.messageId}`)) return;
+		this.advanceCursor(m.channelId, m.timeMs, m.messageId);
+		this.recentSent?.delete(m.channelId);
+		if (m.chatType === 'group' && !this.groupAllowed(m.groupId, cfg)) return;
+		if (m.chatType === 'group') {
+			this.slang?.observe(m.channelId, m.nickname || m.userId, m.text);
+			this.heatTracker().observe(m.channelId, m.userId);
+		} else if (this.wechat?.isFriend(m.userId) === true) {
+			this.slang?.observe(m.channelId, m.nickname || m.userId, m.text);
+		}
+		const person = this.soul.resolvePerson(m);
+		await this.decide(m, person, cfg);
+	}
+
+	/** 微信原始 payload → 与 normalizeMessageEvent 同形的消息对象。 */
+	wechatToMessage(payload) {
+		const kind = String(payload?.chatType ?? payload?.kind ?? 'private').toLowerCase() === 'group' ? 'group' : 'private';
+		const userId = String(payload?.senderId ?? payload?.userId ?? '').trim();
+		const targetId = String(payload?.targetId ?? payload?.conversationId ?? (kind === 'private' ? userId : '')).trim();
+		if (userId === '' || targetId === '') return null;
+		const text = String(payload?.text ?? '');
+		const images = Array.isArray(payload?.images) ? payload.images.map((x) => ({ url: String(x?.url ?? ''), file: String(x?.file ?? x?.path ?? '') })).filter((x) => x.url !== '' || x.file !== '') : [];
+		const self = String(this.wechat?.selfId ?? '');
+		const timeMs = Number.isFinite(Number(payload?.timeMs)) && Number(payload.timeMs) > 0 ? Number(payload.timeMs) : Date.now();
+		return {
+			channel: 'wechat',
+			chatType: kind,
+			channelId: kind === 'group' ? `wechat:group:${targetId}` : `wechat:private:${targetId}`,
+			targetId,
+			groupId: kind === 'group' ? targetId : null,
+			userId,
+			nickname: String(payload?.senderName ?? payload?.nickname ?? ''),
+			// 微信没有"好友/临时会话"的区分，白名单由通道 isFriend 判断，这里一律标 friend 让判定走「回」
+			subType: kind === 'private' ? 'friend' : '',
+			messageId: String(payload?.messageId ?? ''),
+			mentioned: kind === 'private' ? true : payload?.mentioned === true,
+			replyId: '',
+			text: text.trim() === '' && images.length > 0 ? '【图片】' : text,
+			images,
+			links: [],
+			records: [],
+			forwards: [],
+			files: [],
+			timeMs,
+			...(self !== '' ? { selfId: self } : {})
+		};
+	}
+
+	/** QQ 入站消息（真消息和戳一戳共用）：回 / 只记 / 不理 / 插话。 */
+
+# wechat-transport-gateway-09
+this.trackMasterActivity(m); // [FS-WECHAT-TRANSPORT] QQ 主人号 + 微信主人，一并记
+		if (!stale && this.isMasterOf(m) && await this.handleCommand(m)) return; // [FS-WECHAT-TRANSPORT]
+
+# wechat-transport-gateway-10
+// [FS-WECHAT-TRANSPORT] 微信没有"好友/临时会话"之分，一律看白名单（名单外的微信私聊只记不回）
+			const friend = platformOf(m.channelId) === 'wechat'
+				? this.channelFor(m.channelId).isFriend(m.userId)
+				: (m.subType === 'friend' || this.channelFor(m.channelId).isFriend(m.userId) || this.isMasterOf(m));
+
+# wechat-transport-gateway-11
+this.note(paused && reason === '这个聊天暂停着' ? 'paused' : 'memorize', { channelId: m.channelId, who, text: m.text, reason, title: m.chatType === 'private' ? `${platformOf(m.channelId) === 'wechat' ? '微信' : 'QQ'}·${sanitizeName(who, m.userId)}` : '' });
+
+# wechat-transport-gateway-12
+try { await this.channelFor(m.channelId).send(m.channelId, [{ type: 'text', data: { text } }]); } catch { /* 发不出去也算生效 */ }
+
+# wechat-transport-gateway-13
+this.note('command', { channelId: m.channelId, who: m.nickname || '主人', text: m.text, reason: resume ? '恢复' : '暂停' });
+		try { await this.channelFor(m.channelId).send(m.channelId, [{ type: 'text', data: { text } }]); } catch { /* 发不出去也算生效 */ }
+		return true;
+
+# wechat-transport-gateway-14
+const id = await this.channelFor(row.channel_id).send(row.channel_id, segs, convId); // [FS-WECHAT-TRANSPORT]
+
+# wechat-transport-index-01
+import { DouyinHttp } from './douyin-http.js';
+import { WechatChannel } from './channels/wechat.js'; // [FS-WECHAT-TRANSPORT]
+import { WechatInboundServer } from './wechat-inbound.js'; // [FS-WECHAT-TRANSPORT]
+import { fishSoulConfigSchema } from './config-schema.js';
+
+# wechat-transport-index-02
+const qqCfg = () => currentConfig.qq ?? {};
+	/** 微信通道配置（见 fish-soul-config.json 的 wechat 段）[FS-WECHAT-TRANSPORT] */
+	const wechatCfg = () => currentConfig.wechat ?? {};
+	/** @type {ChatGateway|null} */
+
+# wechat-transport-index-03
+let groupAdmin = null;
+	/** @type {WechatChannel|null} */
+	let wechatChannel = null;
+	/** @type {WechatInboundServer|null} */
+	let wechatInbound = null;
+	const channel = new SnowLumaChannel({
+
+# wechat-transport-index-04
+// [FS-WECHAT-TRANSPORT] 微信出站通道：入站由 wechat-inbound.js 的 HTTP 服务喂给 gateway
+	wechatChannel = new WechatChannel({ getConfig: wechatCfg, log });
+	gateway = new ChatGateway({
+
+# wechat-transport-index-05
+ctx, db, clock, getConfig, log, channel, wechat: wechatChannel, bili, browser, douyin, douyinBrowser, canvasConvert, voice, stickers, slang,
+
+# wechat-transport-index-06
+ctx.effect(() => () => channel.stop(), 'dsh-fish-soul: qq channel');
+	// [FS-WECHAT-TRANSPORT] 微信：social-bridge 把消息 POST 进来（只有 wechat.enabled 才起，端口只绑回环）
+	if (wechatCfg().enabled === true) {
+		wechatChannel.start();
+		wechatInbound = new WechatInboundServer({
+			getConfig: wechatCfg,
+			log,
+			onMessage: (payload) => gateway.onWechatMessage(payload)
+		});
+		wechatInbound.start();
+	}
+	ctx.effect(() => () => { wechatInbound?.stop(); wechatChannel?.stop(); }, 'dsh-fish-soul: wechat channel');
+	if (biliCfg().enabled === true) bili.start();
+
+```
+
+</details>
+
 ## 设置里「个人插件」页显示几处（探针口径）
 
 设置 → 系统 → 个人插件 那一页读的是 `assets/plugins-route.js` 里内联的 `PATCH_GROUPS`（探针：靠一段「只有打过才出现」的代码判断在不在），**按功能合并**，条数与上面的锚点数不是一一对应。核对时别拿两边的数字硬对。
@@ -537,6 +783,7 @@ const fn = subtab === "retrieval" ? loadRetrieval : subtab === "qq" || subtab ==
 | P6 | 9 | 10 | 多 1 条（一处拆成多项） |
 | P7 | 26 | 23 | 少 3 条（合并成功能项） |
 | P8 | 23 | 22 | 少 1 条（合并成功能项） |
+| P9 | 22 | — | 页面未覆盖该组 |
 
 页面上某一组显示「已打 N / M」，N 是按探针数出来的；锚点数以本文件为准。探针漏了某处时，页面会少报，但补丁器 `--check` 仍然会管到那一处。
 

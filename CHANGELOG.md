@@ -5,6 +5,49 @@
 
 ---
 
+## 新增 P9：微信运输层入库（入站口 + 出站通道 + 网关挂载）
+
+**为什么改**：0.15.36 的适配只恢复了「修改型」补丁，微信真正收发消息要用的运输层从来没进过仓库——`assets/` 里没有 `wechat-inbound.js`、`channels/wechat.js`，`wechat-hunks.json` 里也搜不到 `onWechatMessage` / `this.wechat` / `11233`。后果是重装或重打补丁之后，微信那侧虽然配置还在（`wechatagent.json` 的 `brain=fish-soul`、`bridge-config.json` 的 `inboundUrl=http://127.0.0.1:11233/...`），但 11233 / 11234 两个端口没人监听，微信消息直接掉回 WechatAgent 的「未分组」会话，希希不接话。这次把三件套补齐并纳入体检。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `assets/wechat-inbound.js`（新增） | 入站口整文件：本机回环 HTTP（默认 `127.0.0.1:11233`）收 WechatAgent 侧 `social-bridge` POST 过来的微信消息，token 鉴权 → 拆事件（私聊 / 群聊 / 自己发的）→ 交给 `gateway.onWechatMessage`，之后完全复用 QQ 那条判定 / 会话 / 记忆链路 |
+| `assets/channels.wechat.js`（新增） | 出站通道整文件：`WechatChannel` 实现 `ChatGateway` 要的通道接口（`connected` / `send`），把 OneBot 风格的出站段转成 HTTP 交给 bridge，由 WechatAgent 用它自己那套链路（表情选图、回执、节流）真正发出去 |
+| `assets/wechat-transport-hunks.json`（新增，20 处） | `gateway.js` 14 处：构造参数收 `wechat`、`this.wechat`、`wechatConfig()` / `channelFor()` / `isMasterOf()` / `trackMasterActivity()`、Outbox 选通道与 shim、`allSessions` 带上微信会话、`chatTitle` 微信分支、`onWechatMessage` + `wechatToMessage`、`decide` 三处（主人活跃 / 好友白名单 / 记忆标题）、`handleCommand` 两处 + `sendReply` 走 `channelFor`；`index.js` 6 处：引入两模块、`wechatCfg()`、建实例、注入 `ChatGateway`、启动通道与入站服务 + 卸载清理 |
+| `patch-fish-soul.mjs` | 注册 `patchWechatTransport()`（`--only wechat-transport`），整文件走「已存在但与资产不一致就先备份再覆盖」的幂等写法 |
+| `audit-upstream.mjs` | `rows` 加 P9：20 处锚点走 `auditHunks`，两个新文件走 `auditNewFile`（这两个文件**有意不加 `FS-` 标记**，否则产物与现装字节不一致；marker 用文件自带文案「微信入站口（本机回环）」「微信通道适配器（本机回环）」） |
+| `tools/gen-patch-docs.mjs` | `GROUPS` 加 P9，`whole` 支持数组（一组挂两个新文件） |
+| `README.md`、`AGENTS.md`、`docs/patches.md` | 组表补 P9、`--only` 列表补 `wechat-transport`、处数 92 → 112 锚点 / 4 → 6 个整文件；AGENTS 的体检基线改成「117 - P6 已接管 9 = 仍需 108」 |
+
+**怎么验证**（实跑结果，不是估的）
+
+```powershell
+# 1) 上游裸包（npm 解包，gateway 1514 行 / index 1229 行 / 无 wechat 文件）从零打
+node patch-fish-soul.mjs --root <裸包>
+# 结果：改了 126 处，漂移 0，失败 0，冒烟 import 通过
+
+# 2) 打完再 check 一次（幂等）
+node patch-fish-soul.mjs --root <裸包> --check
+# 结果：改了 0 处，已打过 126 处，漂移 0，失败 0
+
+# 3) 与现装插件逐文件对比（确认仓库产物 = 线上一份）
+# gateway.js / index.js：sha256 全一致
+# wechat-inbound.js / channels/wechat.js：内容逐字节一致，仅换行不同（现装那两个文件是当初手工写的 CRLF，
+# 仓库按 .gitattributes 的 eol=lf 以 LF 入库；Node 加载无差异）
+
+# 4) 体检
+node audit-upstream.mjs --brief
+# 结果：仍需 108 / 可退役 9 / 漂移 0
+```
+
+**重启之后要确认的**：重启 DSH 后 `11233`（入站）与 `11234`（出站回执）两个端口在监听，微信侧发一条消息应落在「微信·嘉新（主人）」会话里、由希希接话；若仍掉回「未分组」，先看 `bridge-config.json` 的 `fishSoul.inboundUrl` 与 `wechatagent.json` 的 `wechat.brain` 是否被重装冲掉。
+
+**回滚**：删掉 `lib/wechat-inbound.js`、`lib/channels/wechat.js`，再 `node patch-fish-soul.mjs --only wechat-transport --check` 确认无残留锚点；或直接用打补丁前自动备份的整份 `lib/`（`~/.dsh/backup/fish-soul-patch-<时间戳>`）覆盖回去。
+
+---
+
 ## 适配上游 0.15.36：五处锚点重指、P6 整组退役、P8 补进体检（0.15.33 → 0.15.36）
 
 **为什么改**：上游 0.15.36 动了五处——① 抖音私信自己会发卡片了（`sendReply` 里 `sendDouyin(row, text, images, convId)` 原生带图带会话 ID）；② 人格卡告警、③ 统一日志、④ 分平台限额（`platformOf` 从两档改三档，把 `douyin` 单列）；⑤ 抖音原生卡片分享（life.js 的 `share.intent.` 一套）。其中 ①⑤ 直接把我们两段补丁吸收掉了，④ 把 P7 的一处锚点整行改写，P8 还有 13 处锚点本来就是「前序补丁写进去的代码」，体检脚本一直把它们当漂移误报。这次一次性把锚点按 0.15.36 重指、把上游接管的拆掉，并让体检脚本能认出「链上前序」与「整文件新增」。

@@ -2,7 +2,7 @@
 /**
  * gen-patch-docs.mjs —— 由 assets/*-hunks.json 生成 docs/patches.md（逐处清单）
  *
- * 为什么要有这脚本：README 只到「组」这一层（P1–P8 每组改了哪块），
+ * 为什么要有这脚本：README 只到「组」这一层（P1–P9 每组改了哪块），
  * CHANGELOG 只记每轮改了什么。40 处锚点逐处是什么、在哪、上游接管怎么判，
  * 靠手写必然和 JSON 漂移 —— 所以这里按 JSON 生成，锚点增删后重跑即可。
  *
@@ -31,6 +31,7 @@ const GROUPS = [
   { tag: 'P6', only: 'share', label: '刷到有意思的就发给你 → 视频卡片', json: 'share-hunks.json', whole: null },
   { tag: 'P7', only: 'wechat', label: '微信（WechatAgent）↔ 人格记忆互通', json: 'wechat-hunks.json', whole: null },
   { tag: 'P8', only: 'wechat-pane', label: '平台 → 微信设置页 + 表情只发动图', json: 'wechat-pane-hunks.json', whole: 'client.wechat.js' },
+  { tag: 'P9', only: 'wechat-transport', label: '微信运输层 —— 出站通道 / 入站口 / 网关挂载', json: 'wechat-transport-hunks.json', whole: ['wechat-inbound.js', 'channels/wechat.js'] },
 ];
 
 const esc = (s) => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ');
@@ -98,7 +99,7 @@ for (const g of GROUPS) {
 const L = [];
 const w = (s = '') => L.push(s);
 
-w('# 补丁逐处清单（P1–P8）');
+w('# 补丁逐处清单（P1–P9）');
 w();
 w('> **本文件由 `tools/gen-patch-docs.mjs` 根据 `assets/*-hunks.json` 生成，请勿手改。**');
 w('> 锚点增删后跑 `node tools/gen-patch-docs.mjs` 重生成；`--check` 可校验是否与 JSON 一致。');
@@ -111,7 +112,7 @@ w('| 组 | `--only` 名 | 用途 | 锚点处数 | 整文件模块 | 数据文件
 w('| --- | --- | --- | --- | --- | --- |');
 for (const g of GROUPS) {
   const n = g.json ? data[g.json].length : null;
-  const wholeCell = g.whole ? `\`assets/${g.whole}\` → 插件 \`lib/\`` : '—';
+  const wholeCell = g.whole ? [].concat(g.whole).map((x) => `\`assets/${x}\` → 插件 \`lib/\``).join('<br>') : '—';
   w(`| ${g.tag} | \`${g.only}\` | ${esc(g.label)} | ${n ?? '—'} | ${wholeCell} | ${g.json ? `\`assets/${g.json}\`` : '—'} |`);
 }
 w();
@@ -147,7 +148,7 @@ for (const g of GROUPS) {
   const arr = data[g.json];
   w(`## ${g.tag} · ${esc(g.label)}（\`--only ${g.only}\`，${arr.length} 处）`);
   w();
-  if (g.whole) w(`另有整文件模块：\`assets/${g.whole}\` → 插件 \`lib/\`（内容变了要同步升脚本里的版本戳，见维护约定）。\n`);
+  if (g.whole) w(`另有整文件模块：${[].concat(g.whole).map((x) => `\`assets/${x}\``).join(' / ')} → 插件 \`lib/\`（内容变了要同步升脚本里的版本戳，见维护约定）。\n`);
   w('| # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |');
   w('| --- | --- | --- | --- | --- |');
   arr.forEach((h, i) => {
@@ -176,7 +177,7 @@ const p1c = parseP1().length + 1;
 w('| 组 | 锚点 / 改动处数（补丁器） | 页面探针条数 | 差异 |');
 w('| --- | --- | --- | --- |');
 for (const g of GROUPS) {
-  const n = g.json ? data[g.json].length + (g.whole ? 1 : 0) : p1c;
+  const n = g.json ? data[g.json].length + (g.whole ? [].concat(g.whole).length : 0) : p1c;
   const pb = probes[g.tag];
   const diff = pb == null ? '页面未覆盖该组' : (pb === n ? '一致' : (pb < n ? `少 ${n - pb} 条（合并成功能项）` : `多 ${pb - n} 条（一处拆成多项）`));
   w(`| ${g.tag} | ${n} | ${pb ?? '—'} | ${diff} |`);

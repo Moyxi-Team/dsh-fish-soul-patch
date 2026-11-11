@@ -24,6 +24,10 @@
  *                     主动私信）：新增 lib/douyin-proactive.js（抓互关名单 / 挑人 / 写话 / 发送 / 记账），
  *                     再打 12 处锚点（douyin-social 2、index 2、config-platforms 1、routes-douyin 3、
  *                     client.douyin 4），见 assets/dm-hunks.json。
+ *   P9 wechat-transport：微信的「运输层」——新增 lib/wechat-inbound.js（入站口，social-bridge 把消息
+ *                     POST 进来）与 lib/channels/wechat.js（出站通道，打回 WechatAgent），再打 20 处锚点
+ *                     （gateway.js 14、index.js 6）：构造参数 / 方法 / 判定 / 出站全部按 channel_id 选通道。
+ *                     见 assets/wechat-transport-hunks.json。P7 只管「认人 + 记忆」，消息怎么进出靠这一组。
  *
  * 为什么会丢：node_modules 下的第三方插件被 pnpm 整体重写，升级 / 重装就没了。
  * 改之前把原文件备份到 ~/.dsh/backup/。
@@ -32,7 +36,7 @@
  *   node patch-fish-soul.mjs                       # 自动找 ~/.dsh/profiles/<profile>/node_modules/dsh-fish-soul
  *   node patch-fish-soul.mjs --root <插件目录>      # 指定插件目录（含 package.json 的那层）
  *   node patch-fish-soul.mjs --check               # 只报告状态，不改文件
- *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm / share / wechat / wechat-pane）
+ *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm / share / wechat / wechat-pane / wechat-transport）
  *   node patch-fish-soul.mjs --json                # 结尾额外打印一段机器可读汇总（CI / audit 用）
  *   node patch-fish-soul.mjs --force               # 忽略「已打过」判断，按文件内容重算（谨慎）
  *   node patch-fish-soul.mjs --smoke               # 额外冒烟：真 import 一次插件入口（改了就会自动跑）
@@ -891,6 +895,73 @@ function patchWechatPane() {
 	patchHunks({ tag: 'P8 wechat-pane', label: '平台 → 微信设置页 + 微信表情只发动图', jsonName: 'wechat-pane-hunks.json' });
 }
 
+// ───────────────────────── P9：微信运输层（消息怎么进出） ─────────────────────────
+
+/**
+ * P7 只解决「她在微信里怎么认出这个人、记忆怎么跟 QQ 合并」，但消息本身怎么进出微信通道
+ * （WechatAgent → fish-soul → 回复 → WechatAgent）一行都没有，于是升级后会出现：
+ * 配置项全在（wechat.enabled / inboundPort / bridge-config 都对）、端口 11233/11234 不监听、
+ * 微信掉回 WechatAgent 的「未分组」会话，由 WechatAgent 原生引擎而不是 fish-soul 回答。
+ *
+ * 这条补丁补两件事：
+ *  ① 新增两个整文件（幂等覆盖，内容不一致先备份再重写）：
+ *     · lib/wechat-inbound.js —— 入站口，本地 HTTP 服务（只绑回环，默认 11233），
+ *       WechatAgent 的 social-bridge 把消息 POST 到 /fish-soul/wechat/inbound；
+ *     · lib/channels/wechat.js —— 出站通道，把回复打回 social-bridge 的 11234，
+ *       由它翻译成微信动作，同时给 gateway 提供 isFriend / isMaster 等口径。
+ *  ② 20 处锚点（gateway 14、index 6）：gateway 的构造参数、this.wechat、Outbox 重发选通道、
+ *     allSessions、chatTitle、onWechatMessage / wechatToMessage、decide 里主人与好友判定、
+ *     handleCommand 回复、出站 sendReply 全部改成按 channel_id 走 channelFor；index 里引入、
+ *     建通道、注入 gateway、起入站服务并在卸载时清理。见 assets/wechat-transport-hunks.json。
+ *
+ * 上游对微信是零原生支持（gateway.js 里 wechat 出现 0 次），所以这一组没有 upstreamFixed，
+ * 不会自动退役。
+ */
+const TRANSPORT_FILES = [
+	{ asset: 'wechat-inbound.js', rel: 'wechat-inbound.js' },
+	{ asset: 'channels.wechat.js', rel: 'channels/wechat.js' }
+];
+
+function patchWechatTransport() {
+	log('\n[P9 wechat-transport] 微信运输层（出站通道 + 入站口 + 网关挂载）');
+	for (const f of TRANSPORT_FILES) {
+		const tpl = join(HERE, 'assets', f.asset);
+		const target = join(lib, ...f.rel.split('/'));
+		const existed = existsSync(target);
+		if (!existsSync(tpl)) {
+			failed += 1;
+			note('P9 wechat-transport', 'DRIFT', `仓库里缺 assets/${f.asset}，没法落地 lib/${f.rel}`);
+			log(`  × 缺 assets/${f.asset}`);
+			continue;
+		}
+		const body = readFileSync(tpl, 'utf8');
+		if (existed && readFileSync(target, 'utf8') === body) {
+			skipped += 1;
+			note('P9 wechat-transport', 'ALREADY', `lib/${f.rel} 已是当前版本`);
+			log(`  · lib/${f.rel} 已是最新，跳过`);
+			continue;
+		}
+		if (CHECK) {
+			log(`  [check] 会${existed ? '重写' : '新增'} lib/${f.rel}`);
+			note('P9 wechat-transport', 'DRIFT', `[check] 待${existed ? '重写' : '新增'} lib/${f.rel}`);
+			continue;
+		}
+		// 已经存在但内容不同：先备份再覆盖。不能因为「文件在」就当打过（历史踩坑：旧标记让整文件资产被跳过）
+		if (existed) {
+			const bak = join(backupDir, f.rel);
+			mkdirSync(dirname(bak), { recursive: true });
+			copyFileSync(target, bak);
+			log(`  · 旧 lib/${f.rel} 已备份到 ${bak}`);
+		}
+		mkdirSync(dirname(target), { recursive: true });
+		writeFileSync(target, body, 'utf8');
+		changed += 1;
+		note('P9 wechat-transport', 'PATCHED', `${existed ? '重写' : '新增'} lib/${f.rel}`);
+		log(`  ✓ ${existed ? '重写' : '新增'} lib/${f.rel}`);
+	}
+	patchHunks({ tag: 'P9 wechat-transport', label: '微信运输层 —— 出站通道 / 入站口 / 网关挂载', jsonName: 'wechat-transport-hunks.json' });
+}
+
 /**
  * 打完补丁后冒烟：真把插件入口 import 一次。
  * 文本上全是 PATCHED 不等于能加载 —— 比如 schemastery 根本没有 z.record（是 z.dict），
@@ -937,6 +1008,7 @@ try {
 	if (ONLY === '' || ONLY === 'share') patchShare();
 	if (ONLY === '' || ONLY === 'wechat') patchWechat();
 	if (ONLY === '' || ONLY === 'wechat-pane') patchWechatPane();
+	if (ONLY === '' || ONLY === 'wechat-transport') patchWechatTransport();
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;
