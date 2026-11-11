@@ -14,11 +14,19 @@
 		"id": "index-remount-map",
 		"title": "sectionsMounted 从 Set 改 Map（换 ctx 才重挂，同一 ctx 不重复注册）",
 		"file": "lib/index.js",
-		"marker": "const sectionsMounted = new Map();",
-		"old": "\tconst sectionsMounted = new Set();\n\tfunction mountSectionsFor(agent) {\n\t\tconst id = String(agent?.id ?? '');\n\t\tif (id === '' || sectionsMounted.has(id) || agent?.ctx === undefined) return;\n\t\tsectionsMounted.add(id);",
-		"new": "\t// ctx 会被宿主换掉（插件重载），只用 id 记住「挂过」会让新 ctx 永远补不上，所以记的是 ctx 本身。 [FS-REMOUNT-PATCH]\n\tconst sectionsMounted = new Map();\n\tfunction mountSectionsFor(agent) {\n\t\tconst id = String(agent?.id ?? '');\n\t\tif (id === '' || agent?.ctx === undefined || sectionsMounted.get(id) === agent.ctx) return;\n\t\tsectionsMounted.set(id, agent.ctx);",
+		"marker": "\tconst sectionsMounted = new Map();",
+		"old": "\t/** 已经补挂过人格段的 agent id（inbox 每条消息都会来，别重复注册）。 */\n\tconst sectionsMounted = new Set();\n\t/** 拿不到 `agent.ctx` 的告警节流（agent id → 上次喊的时间）。 */\n\tlet missingCtxAt = null;\n\tfunction mountSectionsFor(agent) {\n\t\tconst id = String(agent?.id ?? '');\n\t\tif (id === '' || sectionsMounted.has(id)) return;",
+		"new": "\t/** 已经补挂过人格段的 agent id → 挂的那个 ctx（ctx 换过要重挂，同一 ctx 不重复注册）。 [FS-REMOUNT-PATCH] */\n\tconst sectionsMounted = new Map();\n\t/** 拿不到 `agent.ctx` 的告警节流（agent id → 上次喊的时间）。 */\n\tlet missingCtxAt = null;\n\tfunction mountSectionsFor(agent) {\n\t\tconst id = String(agent?.id ?? '');\n\t\t// ctx 会被宿主换掉（插件重载），只按 id 记「挂过」会让新 ctx 永远补不上，所以比的是 ctx 本身。\n\t\tif (id === '' || (agent?.ctx !== undefined && sectionsMounted.get(id) === agent.ctx)) return;",
 		"upstreamFixed": {
 			"present": "sectionsMounted.get(id) === agent.ctx"
 		}
+	},
+	{
+		"id": "index-remount-set",
+		"file": "lib/index.js",
+		"title": "sectionsMounted 换成 Map 后，登记改成 set(id, ctx)（原来 Set 的 add 在 Map 上会 TypeError）",
+		"marker": "\t\tsectionsMounted.set(id, agent.ctx);",
+		"old": "\t\tsectionsMounted.add(id);",
+		"new": "\t\tsectionsMounted.set(id, agent.ctx);"
 	}
 ]

@@ -5,6 +5,48 @@
 
 ---
 
+## 适配上游 0.15.36：五处锚点重指、P6 整组退役、P8 补进体检（0.15.33 → 0.15.36）
+
+**为什么改**：上游 0.15.36 动了五处——① 抖音私信自己会发卡片了（`sendReply` 里 `sendDouyin(row, text, images, convId)` 原生带图带会话 ID）；② 人格卡告警、③ 统一日志、④ 分平台限额（`platformOf` 从两档改三档，把 `douyin` 单列）；⑤ 抖音原生卡片分享（life.js 的 `share.intent.` 一套）。其中 ①⑤ 直接把我们两段补丁吸收掉了，④ 把 P7 的一处锚点整行改写，P8 还有 13 处锚点本来就是「前序补丁写进去的代码」，体检脚本一直把它们当漂移误报。这次一次性把锚点按 0.15.36 重指、把上游接管的拆掉，并让体检脚本能认出「链上前序」与「整文件新增」。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `assets/dm-hunks.json` · P5（22 处） | `gw-dm-session-methods / send / reply / silent` 四处锚点按 0.15.36 的 `sendReply` 重写（`convId` 在 1580 行、`forceDouyin` 1586、`row` 1587）；**删掉自建的 `sendDouyinDm`**，改走上游原生 `sendDouyin(row, text, images, convId)`；投递结果记到 `st.douyinSent`；新增 `gw-dm-session-quiet`（只发表情的那一轮静默处理） |
+| `assets/share-hunks.json` · P6（9 处） | 上游已在 life.js 用 `share.intent.` + `douyinShareTarget` 自己做「刷到视频 → 抖音原生卡片私信」→ **整组退役**：9 处都写上 `upstreamFixed.present` + `upstreamFixedIn: lib/life.js`，`patch-fish-soul.mjs` 运行时直接跳过，不再维护、也不跟版本 |
+| `assets/wechat-hunks.json` · P7（26 处） | `W14` 锚点改成 0.15.36 的三档 `platformOf` 单行（保留 `douyin` 分支）再插 `wechat` 分支，配额按平台分开算；`W23` 补 `dependsOn: W25/W26`（它的锚点本来就是那两处写进去的微信出站段，不该单独判漂移） |
+| `assets/wechat-pane-hunks.json` · P8（22 处） | 13 处补 `dependsOn`：`W29` 挂 `W25`（微信出站段）、`W32–W38` 挂 `meme-bridge`（锚点在 P1 改造过的 `stickers.js` 里）、`W39–W42` 挂 `meme-bridge`（整个 `meme-bridge.js` 由 P1 新增）、`W46` 挂前序页签（`TAB_KEYS` 里 qq / bili / douyin 是补丁加的） |
+| `patch-fish-soul.mjs` | 三段「上游已实现」运行时退役：QQ 页那块 dsh-meme 开关、抖音私信带图 / 带会话 ID 5 处、P6 整组；抖音私信改走上游 `sendDouyin`，`sendDouyinDm` 引用清零 |
+| `assets/plugins-route.js` | `PATCH_GROUPS` 补上 **P8 组（22 项）**——之前设置页只显示 P1–P7，P8 的补丁在页面上看不见；`P6` 整组标 `upstream`（显示「上游已接管」而不是「没打」）；`P5` 补 `triggerDouyinProactive`；`P1` 开关项加 `absent` 判定；`P2 / P3 / P5` 多项判定串改成实装代码原样 |
+| `audit-upstream.mjs` | 补上 P8（`wechat-pane-hunks.json`）——之前只跑 P1–P7，P8 的 22 处从来没跟上游对过表；文件级判定加一条：上游没有 `lib/meme-bridge.js` 这类「补丁新增的整文件」且该条有 `dependsOn` 时，判「跟着前序补丁走」，不再算漂移 |
+| `docs/patches.md`、`README.md` | 重生成（92 处锚点 + P1 的 22 处内联 + 4 个整文件模块），标题补 P8，README 里 P5 21→22、P7 22→26、总数 86→92 一并校正 |
+| `reports/upstream-compatibility.md` | 对 0.15.36 重生成：**86 处仍需、9 处可退役、漂移 0** |
+
+**怎么验证**（都是实跑过的，不是估的）
+
+```powershell
+# 1) 干净 0.15.36 副本上从零打（不是 --check，链式补丁才会生效）
+npm pack dsh-fish-soul@0.15.36 --pack-destination .	emp
+node patch-fish-soul.mjs --root .	emp36-clean
+# 期望：改了 104 处 / 已打过 0 处 / 上游已实现·自动退役 3 段 / 漂移 0 / 失败 0
+
+# 2) 对上游体检（含 P8）
+node audit-upstream.mjs --version 0.15.36
+# 期望：P1–P8 全部漂移 0；P6 显示「整组可退役」，其余「继续用」
+
+# 3) 设置页探针（打到 0.15.36 副本上跑）
+# 期望：total 84 done 73 retired 11 todo 0；P7 23/23、P8 22/22
+node tools/gen-patch-docs.mjs --check
+# 期望：✓ docs/patches.md 与 JSON 一致（92 处锚点）
+```
+
+**没动的地方（省得后来人重复排查）**：P1 那 5 处「排在 P5 前面、用到后面才打进去的函数」的旧疑点，这次在 0.15.36 干净副本上实打是漂移 0、失败 0 —— 那是体检脚本静态看锚点的误报，不是顺序问题，所以没去调顺序；P2 与本次升级无关，一处没动。
+
+**怎么回滚**：`git revert` 这一次提交即可（只动 `assets/*-hunks.json`、`patch-fish-soul.mjs`、`assets/plugins-route.js`、`audit-upstream.mjs`、文档与报告，不碰上游源码）。回滚后本机已打的补丁不用管——`node patch-fish-soul.mjs --check` 会按旧锚点报漂移，按报错那几处手动回退或重装 0.15.33 再打。
+
+---
+
 ## 平台 → 微信设置页：说清哪些设置要 WechatAgent 侧配、哪些这边配就生效 + 微信表情只发动图（W27–W48）
 
 **为什么改**：主人反馈两件事。① 设置里没有「微信」这一处能管的地方：微信侧的开关、地址、群聊、掉线重连全在 WechatAgent 那边，而人格 / 记忆 / 黑话 / 主动开口却在这边，实际用时根本分不清「我刚改的这个到底生效没有」，改了半天不生效也不知道该去哪儿改。② 希希发的表情包在 DSH 里是动的，一进微信就变成静态图：微信只认 GIF 动图，上游挑表情是「按感觉 / 按描述」挑第一张能用的，挑到 PNG / JPG 就只能当静态图发出去，看起来像「表情坏了」。

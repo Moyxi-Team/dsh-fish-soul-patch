@@ -442,7 +442,12 @@ function patchMeme() {
 
 	// 10a) 设置界面：这个开关从 QQ 页搬去「日常 → 表情包」，那边才是表情包设置
 	// 顺带修掉一个 bug：原来读的是 qq.stickers?.meme，而 stickers 是顶层配置，所以永远显示成关着
-	replaceOnce('client.js',
+	// 新装的上游 client.js 本来就没有这个开关（它只存在于我们以前打过的机器上）——那就没什么可搬的
+	if (!read('client.js').includes('借 dsh-meme 的表情库')) {
+		log('  ↷ client.js：QQ 页那个「借 dsh-meme 的表情库」开关不在了（新装本来就没有）→ 这处退役');
+		note('meme-qq-switch-move', 'UPSTREAM', '把开关从 QQ 页搬走');
+		retired += 1;
+	} else replaceOnce('client.js',
 		'\n\t\t\t\t\tform.enabled ? Row({ title: "借 dsh-meme 的表情库",\n' +
 		'\t\t\t\t\t\tdesc: qq.stickers?.meme === true\n' +
 		'\t\t\t\t\t\t\t? "已开：她自己的表情包里没有合适的，就去 dsh-meme 的图库里挑一张（只读取图：不改动它的图库、不占收藏额度；图会复制一份到 fish-soul 自己的缓存目录再发）"\n' +
@@ -537,6 +542,12 @@ function patchMeme() {
 		].join('\n'),
 		'出站前解析 [表情: 描述]', '/\\[表情\\s*[:：]/.test(feelText)');
 
+	// 抖音私信带图 / 带会话 ID：上游 0.15.36 自己做了（sendDouyin 收 images + convId），这 4 处整组退役
+	if (read('gateway.js').includes('this.sendDouyin(row, dmText, images, convId)')) {
+		log('  ↷ gateway.js：抖音私信带图 / 带会话 ID —— 上游已原生支持 → 这 4 处退役');
+		note('meme-douyin-dm', 'UPSTREAM', '抖音私信带图 / 带会话 ID');
+		retired += 1;
+	} else {
 	// 13) 抖音私信也得能带图（这条路径原来只发文字）
 	replaceOnce('gateway.js',
 		'\tasync sendDouyinDm(row, text) {',
@@ -569,6 +580,7 @@ function patchMeme() {
 			`\t\t\tconst r = await this.sendDouyinDm(row, dmText, dmImgs, dmConv);`
 		].join('\n'),
 		'抖音分支带上图片');
+	}
 
 	// 15) 抖音评论回复：同样先把 [表情: 描述] 换成真图（评论一条最多带 1 张）
 	replaceOnce('douyin-social.js',
@@ -798,6 +810,16 @@ function patchDm() {
  */
 function patchShare() {
 	log('\n[P6 share] 抖音 —— 刷到的视频发卡片（不是发链接）');
+	// 0.15.36 上游自己把这件事做完了：life.queueShare 先算 douyinVideoIds(url)、把作品 ID 和感受落进
+	// kv share.intent.<pendingId>，交付时 gateway 的 douyinShareTarget + deliverDouyinShare 发原生卡片。
+	// 与 P6 是同一套做法（连「不经过模型」这条都一致），所以整组退役，一处都不改。
+	const life = read('life.js');
+	if (life.includes('share.intent.${id}') && life.includes('douyinVideoIds(url)')) {
+		log('  ↷ 上游已原生实现「刷到视频 → 抖音原生卡片私信」→ P6 整组退役，不用再维护');
+		note('share-card', 'UPSTREAM', '刷到有意思的就发给你 → 视频卡片');
+		retired += 1;
+		return;
+	}
 	patchHunks({ tag: 'P6 share', label: '刷到有意思的就发给你 → 视频卡片', jsonName: 'share-hunks.json' });
 }
 

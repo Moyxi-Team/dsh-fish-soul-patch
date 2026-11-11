@@ -1,4 +1,4 @@
-# 补丁逐处清单（P1–P7）
+# 补丁逐处清单（P1–P8）
 
 > **本文件由 `tools/gen-patch-docs.mjs` 根据 `assets/*-hunks.json` 生成，请勿手改。**
 > 锚点增删后跑 `node tools/gen-patch-docs.mjs` 重生成；`--check` 可校验是否与 JSON 一致。
@@ -10,14 +10,14 @@
 | --- | --- | --- | --- | --- | --- |
 | P1 | `meme` | 借 dsh-meme 的表情库 | — | `assets/meme-bridge.js` → 插件 `lib/` | — |
 | P2 | `douyin` | douyin-social —— 回评论发不出 / 图文无 BGM | 5 | — | `assets/douyin-hunks.json` |
-| P3 | `remount` | index —— 热更新后人格卡 + 记忆块掉线 | 2 | — | `assets/index-hunks.json` |
+| P3 | `remount` | index —— 热更新后人格卡 + 记忆块掉线 | 3 | — | `assets/index-hunks.json` |
 | P4 | `plugins` | 设置 → 系统 → 已装插件 | 5 | `assets/plugins-route.js` → 插件 `lib/` | `assets/plugins-hunks.json` |
-| P5 | `dm` | 抖音 —— 主动给互关好友发私信 | 21 | `assets/douyin-proactive.js` → 插件 `lib/` | `assets/dm-hunks.json` |
+| P5 | `dm` | 抖音 —— 主动给互关好友发私信 | 22 | `assets/douyin-proactive.js` → 插件 `lib/` | `assets/dm-hunks.json` |
 | P6 | `share` | 刷到有意思的就发给你 → 视频卡片 | 9 | — | `assets/share-hunks.json` |
 | P7 | `wechat` | 微信（WechatAgent）↔ 人格记忆互通 | 26 | — | `assets/wechat-hunks.json` |
 | P8 | `wechat-pane` | 平台 → 微信设置页 + 表情只发动图 | 22 | `assets/client.wechat.js` → 插件 `lib/` | `assets/wechat-pane-hunks.json` |
 
-合计锚点 **90 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
+合计锚点 **92 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
 
 每处补丁在运行时按四种判定之一处理：`PATCHED` 打上 / `ALREADY` 跳过 / `UPSTREAM` 上游已原生实现则自动退役 / `DRIFT` 锚点没了停手报错（见 README「用法」）。
 
@@ -39,12 +39,12 @@
 | 9 | `index.js` | 把 meme 桥交给 StickerBox | 锚点替换 |
 | 10 | `index.js` | 提示词里加借库说明 | 锚点替换 |
 | 11 | `config-schema.js` | config-schema 加 meme | 锚点替换 |
-| 12 | `routes-v07.js` | /stickers/config 收 meme | 锚点替换 |
+| 12 | `routes-v07.js` | 把开关从 QQ 页搬走 | 锚点替换 |
 | 13 | `client.js` | 搬到「日常 → 表情包」页了 | 锚点替换 |
 | 14 | `client.soul.js` | 表情包页读 meme 状态 | 锚点替换 |
 | 15 | `client.soul.js` | 表情包配置看 dsh-meme 设置 | 锚点替换 |
 | 16 | `stickers.js` | 没写要什么表情 | 锚点替换 |
-| 17 | `gateway.js` | /\\[表情\\s*[:：]/.test(feelText) | 锚点替换 |
+| 17 | `gateway.js` | 抖音私信带图 / 带会话 ID | 锚点替换 |
 | 18 | `gateway.js` | 抖音私信签名加图 | 锚点替换 |
 | 19 | `gateway.js` | 抖音私信拼上图片段 | 锚点替换 |
 | 20 | `gateway.js` | 抖音私信传会话 ID | 锚点替换 |
@@ -92,12 +92,13 @@ FS-DOUYIN-SOCIAL-PATCH
 
 </details>
 
-## P3 · index —— 热更新后人格卡 + 记忆块掉线（`--only remount`，2 处）
+## P3 · index —— 热更新后人格卡 + 记忆块掉线（`--only remount`，3 处）
 
 | # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |
 | --- | --- | --- | --- | --- |
 | 1 | `index-remount-our-session` | `lib/index.js` | 自家会话每条消息补挂人格段（热更新后人格卡 + 记忆块不再掉线） | `gateway?.isOurSession(agentId) === true) mountSectionsFor` |
 | 2 | `index-remount-map` | `lib/index.js` | sectionsMounted 从 Set 改 Map（换 ctx 才重挂，同一 ctx 不重复注册） | `sectionsMounted.get(id) === agent.ctx` |
+| 3 | `index-remount-set` | `lib/index.js` | sectionsMounted 换成 Map 后，登记改成 set(id, ctx)（原来 Set 的 add 在 Map 上会 TypeError） | — |
 
 <details><summary>锚点原文（marker）</summary>
 
@@ -107,6 +108,9 @@ if (gateway?.isOurSession(agentId) === true) mountSectionsFor(payload?.agent);
 
 # index-remount-map
 const sectionsMounted = new Map();
+
+# index-remount-set
+sectionsMounted.set(id, agent.ctx);
 
 ```
 
@@ -128,7 +132,7 @@ const sectionsMounted = new Map();
 
 ```text
 # client-system-plugins-tab
-["plugins", "已装插件"]
+["plugins", "个人插件"]
 
 # client-installed-plugins-pane
 function InstalledPlugins()
@@ -140,13 +144,13 @@ subtab === "plugins" ? h(Boundary, { name: "已装插件" }
 import { handlePluginsRoute } from './routes-plugins.js';
 
 # routes-mount-plugins
-handlePluginsRoute({ method, path, req, send, sameOrigin })
+if (await handlePluginsRoute({ method, path, req, send, sameOrigin })) return;
 
 ```
 
 </details>
 
-## P5 · 抖音 —— 主动给互关好友发私信（`--only dm`，21 处）
+## P5 · 抖音 —— 主动给互关好友发私信（`--only dm`，22 处）
 
 另有整文件模块：`assets/douyin-proactive.js` → 插件 `lib/`（内容变了要同步升脚本里的版本戳，见维护约定）。
 
@@ -167,12 +171,13 @@ handlePluginsRoute({ method, path, req, send, sameOrigin })
 | 13 | `dm-http-client` | `lib/douyin-http.js` | 纯 HTTP 客户端补 selfProfile / collection / userPosts（分享视频按类型挑作品要用） | `__never_by_upstream_dm_http_client__` |
 | 14 | `dm-http-social` | `lib/douyin-social.js` | DouyinSocial 接纯 HTTP 客户端（分享视频按类型挑作品） | `__never_by_upstream_dm_http_social__` |
 | 15 | `dm-http-index` | `lib/index.js` | 实例化 DouyinSocial 时传入 douyinHttp | `__never_by_upstream_dm_http_index__` |
-| 16 | `gw-dm-session-methods` | `lib/gateway.js` | gateway：加 triggerDouyinProactive / sendDouyinDm（主动私信走会话） | — |
+| 16 | `gw-dm-session-methods` | `lib/gateway.js` | gateway：加 triggerDouyinProactive（主动私信走会话，发送交给上游 sendDouyin） | — |
 | 17 | `gw-dm-session-reply` | `lib/gateway.js` | sendReply：主动私信那一轮允许回抖音（forceDouyin） | — |
 | 18 | `gw-dm-session-silent` | `lib/gateway.js` | sendReply：她这轮不说话时回置 douyinSilent | — |
-| 19 | `gw-dm-session-send` | `lib/gateway.js` | sendReply：抖音单独一条、只发文字（sendDouyinDm） | — |
-| 20 | `dm-session-social-field` | `lib/douyin-social.js` | DouyinSocial 记住 sayViaSession（没接上就退回插件自己发） | — |
-| 21 | `dm-session-wire` | `lib/index.js` | index.js 把 gateway.triggerDouyinProactive 接到 DouyinSocial.sayViaSession | — |
+| 19 | `gw-dm-session-quiet` | `lib/gateway.js` | sendReply：她只发了表情没说话时，主动私信那轮记成静默 | — |
+| 20 | `gw-dm-session-send` | `lib/gateway.js` | sendReply：抖音分支把「发出去没」记到 st（主动私信要判断） | — |
+| 21 | `dm-session-social-field` | `lib/douyin-social.js` | DouyinSocial 记住 sayViaSession（没接上就退回插件自己发） | — |
+| 22 | `dm-session-wire` | `lib/index.js` | index.js 把 gateway.triggerDouyinProactive 接到 DouyinSocial.sayViaSession | — |
 
 <details><summary>锚点原文（marker）</summary>
 
@@ -226,13 +231,19 @@ this.http = http ?? null
 [FS-DM-SESSION]
 
 # gw-dm-session-reply
-[FS-DM-SESSION]
+const forceDouyin = platformOf(st?.channelId)
 
 # gw-dm-session-silent
 douyinOutbound
 
+# gw-dm-session-quiet
+if (st.douyinOutbound === true) st.douyinSilent = true;
+			return true;
+		}
+		const platform
+
 # gw-dm-session-send
-[FS-DM-SESSION]
+st.douyinSent = ok && delivered === true
 
 # dm-session-social-field
 this.sayViaSession = typeof sayViaSession
@@ -248,15 +259,15 @@ sayViaSession: (name, hint) =>
 
 | # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |
 | --- | --- | --- | --- | --- |
-| 1 | `share-social-import` | `lib/douyin-social.js` | douyin-social.js：引入 shareBrowsedVideo（刷到的视频也发卡片） | — |
-| 2 | `share-social-method` | `lib/douyin-social.js` | douyin-social.js：加 dmShareBrowsed（把刷到的视频用卡片发给主人） | — |
-| 3 | `share-index-target` | `lib/index.js` | index.js：抖音刷到的分享改发抖音私信卡片（douyinShareTarget + douyinShareCard） | — |
-| 4 | `share-life-dep` | `lib/life.js` | life.js：LifeEngine 接 douyinShareCard（发视频卡片） | — |
-| 5 | `share-life-queuesig` | `lib/life.js` | life.js：queueShare 收下 videoId（刷到的那条视频） | — |
-| 6 | `share-life-reason` | `lib/life.js` | life.js：抖音刷到的分享存成卡片信息（不再存「链接 + 感受」那句） | — |
-| 7 | `share-life-parse` | `lib/life.js` | life.js：加 parseShareCard（认 reason 里存的卡片信息，顺手拼出退回用的链接文案） | — |
-| 8 | `share-life-deliver` | `lib/life.js` | life.js：deliverOne 先发视频卡片，卡片不通才退回发链接（QQ） | — |
-| 9 | `share-browse-videoid` | `lib/douyin-browse.js` | douyin-browse.js：把刷到的那条视频的 id 一起交上去（发卡片要用） | — |
+| 1 | `share-social-import` | `lib/douyin-social.js` | douyin-social.js：引入 shareBrowsedVideo（刷到的视频也发卡片） | `share.intent.` |
+| 2 | `share-social-method` | `lib/douyin-social.js` | douyin-social.js：加 dmShareBrowsed（把刷到的视频用卡片发给主人） | `share.intent.` |
+| 3 | `share-index-target` | `lib/index.js` | index.js：抖音刷到的分享改发抖音私信卡片（douyinShareTarget + douyinShareCard） | `share.intent.` |
+| 4 | `share-life-dep` | `lib/life.js` | life.js：LifeEngine 接 douyinShareCard（发视频卡片） | `share.intent.` |
+| 5 | `share-life-queuesig` | `lib/life.js` | life.js：queueShare 收下 videoId（刷到的那条视频） | `share.intent.` |
+| 6 | `share-life-reason` | `lib/life.js` | life.js：抖音刷到的分享存成卡片信息（不再存「链接 + 感受」那句） | `share.intent.` |
+| 7 | `share-life-parse` | `lib/life.js` | life.js：加 parseShareCard（认 reason 里存的卡片信息，顺手拼出退回用的链接文案） | `share.intent.` |
+| 8 | `share-life-deliver` | `lib/life.js` | life.js：deliverOne 先发视频卡片，卡片不通才退回发链接（QQ） | `share.intent.` |
+| 9 | `share-browse-videoid` | `lib/douyin-browse.js` | douyin-browse.js：把刷到的那条视频的 id 一起交上去（发卡片要用） | `share.intent.` |
 
 <details><summary>锚点原文（marker）</summary>
 
@@ -366,7 +377,7 @@ const personId = platform === 'wechat' ? wechatIdOfChannel(row.channel_id) : id;
 if (platformOf(m?.channelId) === 'wechat') {
 
 # W14
-s.startsWith('wechat-group:')) return 'wechat';
+if (s.startsWith('wechat:') || s.startsWith('wechat-private:') || s.startsWith('wechat-group:')) return 'wechat';
 
 # W15
 if(path === '/chat-archive/recent' && method === 'GET') {
@@ -416,7 +427,7 @@ if (replyIsWechat) {
 
 | # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |
 | --- | --- | --- | --- | --- |
-| 1 | `W27` | `lib/config-schema.js` | config-schema：微信配置加表情动图两项（先发动图 / 只发动图） | — |
+| 1 | `W27` | `lib/config-schema.js` | config-schema：新增 wechat 配置块（含表情动图两项） | — |
 | 2 | `W28` | `lib/gateway.js` | gateway：新增 wechatStickerPrefs()（读微信表情动图偏好） | — |
 | 3 | `W29` | `lib/gateway.js` | gateway：微信出站按描述挑表情时透传动图偏好 | — |
 | 4 | `W30` | `lib/gateway.js` | gateway：微信出站按感觉挑表情时也透传动图偏好 | — |
@@ -520,12 +531,12 @@ const fn = subtab === "retrieval" ? loadRetrieval : subtab === "qq" || subtab ==
 | --- | --- | --- | --- |
 | P1 | 23 | 6 | 少 17 条（合并成功能项） |
 | P2 | 5 | 4 | 少 1 条（合并成功能项） |
-| P3 | 2 | 2 | 一致 |
+| P3 | 3 | 2 | 少 1 条（合并成功能项） |
 | P4 | 6 | 5 | 少 1 条（合并成功能项） |
-| P5 | 22 | 11 | 少 11 条（合并成功能项） |
+| P5 | 23 | 12 | 少 11 条（合并成功能项） |
 | P6 | 9 | 10 | 多 1 条（一处拆成多项） |
 | P7 | 26 | 23 | 少 3 条（合并成功能项） |
-| P8 | 23 | — | 页面未覆盖该组 |
+| P8 | 23 | 22 | 少 1 条（合并成功能项） |
 
 页面上某一组显示「已打 N / M」，N 是按探针数出来的；锚点数以本文件为准。探针漏了某处时，页面会少报，但补丁器 `--check` 仍然会管到那一处。
 

@@ -3,7 +3,7 @@
 		"id": "client-system-plugins-tab",
 		"title": "系统设置多一个「个人插件」子页",
 		"file": "lib/client.js",
-		"marker": "[\"plugins\", \"已装插件\"]",
+		"marker": "[\"plugins\", \"个人插件\"]",
 		"old": "\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"version\", \"版本更新\"]]]",
 		"new": "\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"plugins\", \"个人插件\"], [\"version\", \"版本更新\"]]]",
 		"upstreamFixed": {
@@ -50,9 +50,9 @@
 		"id": "routes-mount-plugins",
 		"title": "路由分派里挂上 /plugins/*",
 		"file": "lib/routes.js",
-		"marker": "handlePluginsRoute({ method, path, req, send, sameOrigin })",
-		"old": "\t\t\t\tif (await handleUpdateRoute({ method, path, req, send, readBody, sameOrigin, deps })) return;",
-		"new": "\t\t\t\tif (await handleUpdateRoute({ method, path, req, send, readBody, sameOrigin, deps })) return;\n\t\t\t\t// ── 已装插件：只读清单（设置 → 系统 → 已装插件） [FS-PLUGINS-PANEL-PATCH] ──\n\t\t\t\tif (await handlePluginsRoute({ method, path, req, send, sameOrigin })) return;",
+		"marker": "if (await handlePluginsRoute({ method, path, req, send, sameOrigin })) return;",
+		"old": "\t\t\t\tif (await handleUpdateRoute({ method, path, req, send, readBody: readBodyLogged, sameOrigin, deps })) return;",
+		"new": "\t\t\t\tif (await handleUpdateRoute({ method, path, req, send, readBody: readBodyLogged, sameOrigin, deps })) return;\n\t\t\t\t// ── 个人插件：只读清单（设置 → 系统 → 个人插件） [FS-PLUGINS-PANEL-PATCH] ──\n\t\t\t\tif (await handlePluginsRoute({ method, path, req, send, sameOrigin })) return;",
 		"upstreamFixed": {
 			"present": "handlePluginsRoute({ method, path, req, send, sameOrigin })"
 		}

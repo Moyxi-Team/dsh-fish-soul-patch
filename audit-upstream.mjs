@@ -128,7 +128,12 @@ function auditHunks(dir, jsonName, group = jsonName) {
 	const rowsOut = hunks.map((h) => {
 		const rel = libRel(h.file);
 		const p = join(dir, 'lib', rel);
-		if (!existsSync(p)) return { group, id: h.id, title: h.title, status: 'DRIFT', detail: `上游没有 lib/${rel}` };
+		if (!existsSync(p)) {
+			// 整个文件本身就是前序补丁新增的（如 P1 加的 meme-bridge.js）：上游当然没有，不能判漂移
+			if (Array.isArray(h.dependsOn) && h.dependsOn.length > 0)
+				return { group, id: h.id, title: h.title, status: 'NEEDED', detail: `上游没有 lib/${rel}（整个文件由前序补丁 ${h.dependsOn.join('、')} 新增），跟着前序补丁走` };
+			return { group, id: h.id, title: h.title, status: 'DRIFT', detail: `上游没有 lib/${rel}` };
+		}
 		const text = readFileSync(p, 'utf8');
 		const fixRel = libRel(h.upstreamFixedIn ?? h.file);
 		const fixPath = join(dir, 'lib', fixRel);
@@ -292,7 +297,8 @@ const rows = [
 	...auditHunks(dir, 'dm-hunks.json', 'P5 dm'),
 	auditNewFile(dir, 'P5 dm', 'dm-proactive-file', '主动私信实现（整文件 douyin-proactive.js）', 'douyin-proactive.js', 'FS-DOUYIN-DM-PATCH'),
 	...auditHunks(dir, 'share-hunks.json', 'P6 share'),
-	...auditHunks(dir, 'wechat-hunks.json', 'P7 wechat')
+	...auditHunks(dir, 'wechat-hunks.json', 'P7 wechat'),
+	...auditHunks(dir, 'wechat-pane-hunks.json', 'P8 wechat-pane')
 ];
 
 const retired = rows.filter((r) => r.status === 'RETIRED').length;

@@ -9,7 +9,11 @@
 		"dependsOn": [
 			"dm-social-import"
 		],
-		"note": "锚点原样是前序 P5 补丁写入的那段（上游本没有），按依赖判在位，不按上游源码判漂移"
+		"note": "锚点原样是前序 P5 补丁写入的那段（上游本没有），按依赖判在位，不按上游源码判漂移；上游 0.15.36 在 life.js 用 share.intent + douyinShareTarget 自己做了整套，本组整组退役",
+		"upstreamFixed": {
+			"present": "share.intent."
+		},
+		"upstreamFixedIn": "lib/life.js"
 	},
 	{
 		"id": "share-social-method",
@@ -21,7 +25,11 @@
 		"dependsOn": [
 			"dm-social-methods"
 		],
-		"note": "锚点原样是前序 P5 补丁写入的那段（上游本没有），按依赖判在位，不按上游源码判漂移"
+		"note": "锚点原样是前序 P5 补丁写入的那段（上游本没有），按依赖判在位，不按上游源码判漂移；上游 0.15.36 在 life.js 用 share.intent + douyinShareTarget 自己做了整套，本组整组退役",
+		"upstreamFixed": {
+			"present": "share.intent."
+		},
+		"upstreamFixedIn": "lib/life.js"
 	},
 	{
 		"id": "share-index-target",
@@ -29,7 +37,12 @@
 		"file": "lib/index.js",
 		"marker": "[FS-SHARE-CARD] 刷到的分享改发抖音私信卡片",
 		"old": "\t\tdouyinShareTarget: () => '', // 目标只按昵称可找，身份未验证时走 QQ",
-		"new": "\t\t// [FS-SHARE-CARD] 刷到的分享改发抖音私信卡片：以前这里返回 ''，于是「刷到有意思的就发给你」\n\t\t// 一律走 QQ、还只是条链接。现在发到抖音私信给主人（昵称没填 / 抖音没开就照样退回 QQ）。\n\t\tdouyinShareTarget: () => {\n\t\t\ttry {\n\t\t\t\tconst c = douyinCfg();\n\t\t\t\tif (c.enabled !== true) return '';\n\t\t\t\tconst name = String(c.masterName ?? '').trim();\n\t\t\t\treturn name === '' ? '' : `douyin:${name}`;\n\t\t\t} catch { return ''; }\n\t\t},\n\t\t// 卡片本身交给 DouyinSocial（抖音浏览器在它手里）；这版没有这个方法就返回 ok:false，life.js 退回发 QQ\n\t\tdouyinShareCard: (card) => (typeof douyinSocial.dmShareBrowsed === 'function'\n\t\t\t? douyinSocial.dmShareBrowsed(card)\n\t\t\t: Promise.resolve({ ok: false, error: '这版 douyin-social 不支持分享卡片' })),"
+		"new": "\t\t// [FS-SHARE-CARD] 刷到的分享改发抖音私信卡片：以前这里返回 ''，于是「刷到有意思的就发给你」\n\t\t// 一律走 QQ、还只是条链接。现在发到抖音私信给主人（昵称没填 / 抖音没开就照样退回 QQ）。\n\t\tdouyinShareTarget: () => {\n\t\t\ttry {\n\t\t\t\tconst c = douyinCfg();\n\t\t\t\tif (c.enabled !== true) return '';\n\t\t\t\tconst name = String(c.masterName ?? '').trim();\n\t\t\t\treturn name === '' ? '' : `douyin:${name}`;\n\t\t\t} catch { return ''; }\n\t\t},\n\t\t// 卡片本身交给 DouyinSocial（抖音浏览器在它手里）；这版没有这个方法就返回 ok:false，life.js 退回发 QQ\n\t\tdouyinShareCard: (card) => (typeof douyinSocial.dmShareBrowsed === 'function'\n\t\t\t? douyinSocial.dmShareBrowsed(card)\n\t\t\t: Promise.resolve({ ok: false, error: '这版 douyin-social 不支持分享卡片' })),",
+		"upstreamFixed": {
+			"present": "share.intent."
+		},
+		"upstreamFixedIn": "lib/life.js",
+		"note": "；上游 0.15.36 在 life.js 用 share.intent + douyinShareTarget 自己做了整套，本组整组退役"
 	},
 	{
 		"id": "share-life-dep",
@@ -37,7 +50,12 @@
 		"file": "lib/life.js",
 		"marker": "this.douyinShareCard =",
 		"old": "\t\tthis.douyinShareTarget = douyinShareTarget ?? (() => ''); // 抖音刷到的分享发到抖音私信（主人）；'' = 发不了，走 QQ",
-		"new": "\t\tthis.douyinShareTarget = douyinShareTarget ?? (() => ''); // 抖音刷到的分享发到抖音私信（主人）；'' = 发不了，走 QQ\n\t\t// [FS-SHARE-CARD] 刷到的分享走视频卡片：真正发卡片要开抖音浏览器点分享面板，交给上层（index.js 转 DouyinSocial）\n\t\tthis.douyinShareCard = typeof opts.douyinShareCard === 'function' ? opts.douyinShareCard : null;"
+		"new": "\t\tthis.douyinShareTarget = douyinShareTarget ?? (() => ''); // 抖音刷到的分享发到抖音私信（主人）；'' = 发不了，走 QQ\n\t\t// [FS-SHARE-CARD] 刷到的分享走视频卡片：真正发卡片要开抖音浏览器点分享面板，交给上层（index.js 转 DouyinSocial）\n\t\tthis.douyinShareCard = typeof opts.douyinShareCard === 'function' ? opts.douyinShareCard : null;",
+		"upstreamFixed": {
+			"present": "share.intent."
+		},
+		"upstreamFixedIn": "lib/life.js",
+		"note": "；上游 0.15.36 在 life.js 用 share.intent + douyinShareTarget 自己做了整套，本组整组退役"
 	},
 	{
 		"id": "share-life-queuesig",
@@ -45,7 +63,12 @@
 		"file": "lib/life.js",
 		"marker": "queueShare({ platform, title, author, url, impression, videoId })",
 		"old": "\tqueueShare({ platform, title, author, url, impression }) {",
-		"new": "\tqueueShare({ platform, title, author, url, impression, videoId }) {"
+		"new": "\tqueueShare({ platform, title, author, url, impression, videoId }) {",
+		"upstreamFixed": {
+			"present": "share.intent."
+		},
+		"upstreamFixedIn": "lib/life.js",
+		"note": "；上游 0.15.36 在 life.js 用 share.intent + douyinShareTarget 自己做了整套，本组整组退役"
 	},
 	{
 		"id": "share-life-reason",
@@ -53,7 +76,12 @@
 		"file": "lib/life.js",
 		"marker": "SHARE_CARD_TAG]${JSON.stringify",
 		"old": "\t\tconst clean = (x, n) => String(x ?? '').replace(/\\s+/g, ' ').trim().slice(0, n);\n\t\tconst reason = `你刚在${platform}刷到一个视频《${clean(title, 60) || '没写标题'}》${author ? `（${clean(author, 20)}）` : ''}，链接 ${url} 。` +\n\t\t\t`你看完觉得：${clean(impression, 120)}。很想发给对方看看：把链接原样发出去，再用一两句话说说你为什么想给 ta 看（像随手转给朋友，别写成推荐语、别复述标题）`;",
-		"new": "\t\tconst clean = (x, n) => String(x ?? '').replace(/\\s+/g, ' ').trim().slice(0, n);\n\t\t// [FS-SHARE-CARD] 抖音刷到的分享改成「视频卡片 + 一句话」：这里只把这条视频的信息塞进 reason，\n\t\t// 真正的卡片在 deliverOne 里发（发卡片要开浏览器点分享面板，不能在这个同步函数里做）。\n\t\tconst hasCard = target.startsWith('douyin:') && typeof this.douyinShareCard === 'function' && /^\\d{8,}$/.test(String(videoId ?? ''));\n\t\tconst reason = hasCard\n\t\t\t? `${SHARE_CARD_TAG}${JSON.stringify({\n\t\t\t\tvideoId: String(videoId),\n\t\t\t\ttitle: clean(title, 60),\n\t\t\t\tdesc: clean(title, 120),\n\t\t\t\tauthor: clean(author, 20),\n\t\t\t\timpression: clean(impression, 120),\n\t\t\t\tplatform: String(platform ?? '抖音')\n\t\t\t})}`\n\t\t\t: `你刚在${platform}刷到一个视频《${clean(title, 60) || '没写标题'}》${author ? `（${clean(author, 20)}）` : ''}，链接 ${url} 。` +\n\t\t\t\t`你看完觉得：${clean(impression, 120)}。很想发给对方看看：把链接原样发出去，再用一两句话说说你为什么想给 ta 看（像随手转给朋友，别写成推荐语、别复述标题）`;"
+		"new": "\t\tconst clean = (x, n) => String(x ?? '').replace(/\\s+/g, ' ').trim().slice(0, n);\n\t\t// [FS-SHARE-CARD] 抖音刷到的分享改成「视频卡片 + 一句话」：这里只把这条视频的信息塞进 reason，\n\t\t// 真正的卡片在 deliverOne 里发（发卡片要开浏览器点分享面板，不能在这个同步函数里做）。\n\t\tconst hasCard = target.startsWith('douyin:') && typeof this.douyinShareCard === 'function' && /^\\d{8,}$/.test(String(videoId ?? ''));\n\t\tconst reason = hasCard\n\t\t\t? `${SHARE_CARD_TAG}${JSON.stringify({\n\t\t\t\tvideoId: String(videoId),\n\t\t\t\ttitle: clean(title, 60),\n\t\t\t\tdesc: clean(title, 120),\n\t\t\t\tauthor: clean(author, 20),\n\t\t\t\timpression: clean(impression, 120),\n\t\t\t\tplatform: String(platform ?? '抖音')\n\t\t\t})}`\n\t\t\t: `你刚在${platform}刷到一个视频《${clean(title, 60) || '没写标题'}》${author ? `（${clean(author, 20)}）` : ''}，链接 ${url} 。` +\n\t\t\t\t`你看完觉得：${clean(impression, 120)}。很想发给对方看看：把链接原样发出去，再用一两句话说说你为什么想给 ta 看（像随手转给朋友，别写成推荐语、别复述标题）`;",
+		"upstreamFixed": {
+			"present": "share.intent."
+		},
+		"upstreamFixedIn": "lib/life.js",
+		"note": "；上游 0.15.36 在 life.js 用 share.intent + douyinShareTarget 自己做了整套，本组整组退役"
 	},
 	{
 		"id": "share-life-parse",
@@ -61,7 +89,12 @@
 		"file": "lib/life.js",
 		"marker": "function parseShareCard(",
 		"old": "/** 她自己起意的待办（占每日主动配额） */\nconst BOT_ORIGINS = new Set(['dream', 'share']);",
-		"new": "/** 她自己起意的待办（占每日主动配额） */\nconst BOT_ORIGINS = new Set(['dream', 'share']);\n\n/** [FS-SHARE-CARD] queueShare 把「刷到的那条视频」存在 pending.reason 里的前缀（要发视频卡片的那条）。 */\nconst SHARE_CARD_TAG = '[FS-SHARE-CARD]';\n\n/**\n * [FS-SHARE-CARD] 解析 queueShare 存下的卡片信息；不是卡片（老格式 / 别的来源）返回 null。\n * fallback 是卡片这条路不通时退回去发的文字（链接 + 感受），和改造前的老路一样。\n */\nfunction parseShareCard(reason) {\n\tconst s = String(reason ?? '');\n\tif (!s.startsWith(SHARE_CARD_TAG)) return null;\n\ttry {\n\t\tconst o = JSON.parse(s.slice(SHARE_CARD_TAG.length));\n\t\tconst videoId = String(o?.videoId ?? '');\n\t\tif (!/^\\d{8,}$/.test(videoId)) return null;\n\t\tconst title = String(o?.title ?? '').slice(0, 60);\n\t\tconst impression = String(o?.impression ?? '').slice(0, 120);\n\t\tconst platform = String(o?.platform ?? '抖音').slice(0, 10);\n\t\tconst url = `https://www.douyin.com/video/${videoId}`;\n\t\treturn {\n\t\t\tvideoId,\n\t\t\ttitle,\n\t\t\tdesc: String(o?.desc ?? '').slice(0, 120),\n\t\t\timpression,\n\t\t\tauthor: String(o?.author ?? '').slice(0, 20),\n\t\t\tfallback: `你刚在${platform}刷到一个视频《${title || '没写标题'}》${o?.author ? `（${String(o.author).slice(0, 20)}）` : ''}，链接 ${url} 。` +\n\t\t\t\t(impression !== '' ? `你看完觉得：${impression}。` : '') +\n\t\t\t\t'很想发给对方看看：把链接原样发出去，再用一两句话说说你为什么想给 ta 看（像随手转给朋友，别写成推荐语、别复述标题）'\n\t\t};\n\t} catch { return null; }\n}"
+		"new": "/** 她自己起意的待办（占每日主动配额） */\nconst BOT_ORIGINS = new Set(['dream', 'share']);\n\n/** [FS-SHARE-CARD] queueShare 把「刷到的那条视频」存在 pending.reason 里的前缀（要发视频卡片的那条）。 */\nconst SHARE_CARD_TAG = '[FS-SHARE-CARD]';\n\n/**\n * [FS-SHARE-CARD] 解析 queueShare 存下的卡片信息；不是卡片（老格式 / 别的来源）返回 null。\n * fallback 是卡片这条路不通时退回去发的文字（链接 + 感受），和改造前的老路一样。\n */\nfunction parseShareCard(reason) {\n\tconst s = String(reason ?? '');\n\tif (!s.startsWith(SHARE_CARD_TAG)) return null;\n\ttry {\n\t\tconst o = JSON.parse(s.slice(SHARE_CARD_TAG.length));\n\t\tconst videoId = String(o?.videoId ?? '');\n\t\tif (!/^\\d{8,}$/.test(videoId)) return null;\n\t\tconst title = String(o?.title ?? '').slice(0, 60);\n\t\tconst impression = String(o?.impression ?? '').slice(0, 120);\n\t\tconst platform = String(o?.platform ?? '抖音').slice(0, 10);\n\t\tconst url = `https://www.douyin.com/video/${videoId}`;\n\t\treturn {\n\t\t\tvideoId,\n\t\t\ttitle,\n\t\t\tdesc: String(o?.desc ?? '').slice(0, 120),\n\t\t\timpression,\n\t\t\tauthor: String(o?.author ?? '').slice(0, 20),\n\t\t\tfallback: `你刚在${platform}刷到一个视频《${title || '没写标题'}》${o?.author ? `（${String(o.author).slice(0, 20)}）` : ''}，链接 ${url} 。` +\n\t\t\t\t(impression !== '' ? `你看完觉得：${impression}。` : '') +\n\t\t\t\t'很想发给对方看看：把链接原样发出去，再用一两句话说说你为什么想给 ta 看（像随手转给朋友，别写成推荐语、别复述标题）'\n\t\t};\n\t} catch { return null; }\n}",
+		"upstreamFixed": {
+			"present": "share.intent."
+		},
+		"upstreamFixedIn": "lib/life.js",
+		"note": "；上游 0.15.36 在 life.js 用 share.intent + douyinShareTarget 自己做了整套，本组整组退役"
 	},
 	{
 		"id": "share-life-deliver",
@@ -69,7 +102,12 @@
 		"file": "lib/life.js",
 		"marker": "[FS-SHARE-CARD] 刷到的分享先发视频卡片",
 		"old": "\tasync deliverOne(d, nowVirtual) {\n\t\tconst botInitiated = BOT_ORIGINS.has(d.origin ?? 'user');\n\t\tconst platform = platformOf(d.channel_id);\n\t\tconst meta = { origin: d.origin === 'share' ? 'share' : botInitiated ? 'dream' : 'user' };\n\t\t// 无论成败都计物理冷却，防止加速模式连发封号\n\t\tthis.lastProactiveReal.set(platform, Date.now());\n\t\tlet ok = false;\n\t\ttry {\n\t\t\tok = (await this.deliver(d.channel_id, d.reason, meta)) === true;\n\t\t} catch (error) {\n\t\t\tthis.log('error', `[fish-soul] 主动开口失败（${d.channel_id}）：${String(error instanceof Error ? error.message : error)}`);\n\t\t}\n\t\tthis.lastProactiveReal.set(platform, Date.now());",
-		"new": "\tasync deliverOne(d, nowVirtual) {\n\t\tconst botInitiated = BOT_ORIGINS.has(d.origin ?? 'user');\n\t\t// [FS-SHARE-CARD] 刷到的分享先发视频卡片（不是链接）。卡片这条路不通（浏览器没开 / 没登录 /\n\t\t// 分享面板没弹出来）就退回老路：把链接发到 QQ 主人私聊，别让这条分享烂在库里。\n\t\t// 同一条只试两次卡片，两次都不行就老实发链接，免得每条分享都白开一遍浏览器。\n\t\tlet row = d;\n\t\tconst card = d.origin === 'share' && this.douyinShareCard !== null ? parseShareCard(d.reason) : null;\n\t\tif (card !== null && Number(d.attempts ?? 0) < 2) {\n\t\t\tthis.lastProactiveReal.set('douyin', Date.now());\n\t\t\tconst r = await this.douyinShareCard(card)\n\t\t\t\t.catch((error) => ({ ok: false, error: String(error instanceof Error ? error.message : error) }));\n\t\t\tthis.lastProactiveReal.set('douyin', Date.now());\n\t\t\tif (r?.ok === true) {\n\t\t\t\tthis.db.prepare(\"UPDATE pending SET status = 'done' WHERE id = ?\").run(d.id);\n\t\t\t\tthis.db.prepare(`\n\t\t\t\t\tUPDATE day SET proactive_count = proactive_count + 1, last_proactive_at = ?\n\t\t\t\t\tWHERE character_id = 'feiyu' AND date = ?\n\t\t\t\t`).run(nowVirtual, this.clock.getRoleDateParts().dateStr);\n\t\t\t\tthis.log('info', `[fish-soul] 刷到的视频已用卡片分享给 ${d.channel_id}` +\n\t\t\t\t\t(r?.text ? `，还补了一句：${String(r.text).slice(0, 20)}` : '（这次没补话）'));\n\t\t\t\treturn true;\n\t\t\t}\n\t\t\tthis.log('warn', `[fish-soul] 抖音视频卡片没发成（${d.channel_id}）：${r?.error ?? '未知'}`);\n\t\t\tconst qq = this.masterChannel(this.getConfig().proactive ?? {});\n\t\t\tif (qq !== '') row = { ...d, channel_id: qq, reason: card.fallback };\n\t\t\telse row = null; // 连 QQ 主人私聊都没设：只能算这次没发出去，走下面的退避重试\n\t\t}\n\t\tconst platform = platformOf(row?.channel_id ?? d.channel_id);\n\t\tconst meta = { origin: d.origin === 'share' ? 'share' : botInitiated ? 'dream' : 'user' };\n\t\t// 无论成败都计物理冷却，防止加速模式连发封号\n\t\tthis.lastProactiveReal.set(platform, Date.now());\n\t\tlet ok = false;\n\t\tif (row !== null) {\n\t\t\ttry {\n\t\t\t\tok = (await this.deliver(row.channel_id, row.reason, meta)) === true;\n\t\t\t} catch (error) {\n\t\t\t\tthis.log('error', `[fish-soul] 主动开口失败（${row.channel_id}）：${String(error instanceof Error ? error.message : error)}`);\n\t\t\t}\n\t\t}\n\t\tthis.lastProactiveReal.set(platform, Date.now());"
+		"new": "\tasync deliverOne(d, nowVirtual) {\n\t\tconst botInitiated = BOT_ORIGINS.has(d.origin ?? 'user');\n\t\t// [FS-SHARE-CARD] 刷到的分享先发视频卡片（不是链接）。卡片这条路不通（浏览器没开 / 没登录 /\n\t\t// 分享面板没弹出来）就退回老路：把链接发到 QQ 主人私聊，别让这条分享烂在库里。\n\t\t// 同一条只试两次卡片，两次都不行就老实发链接，免得每条分享都白开一遍浏览器。\n\t\tlet row = d;\n\t\tconst card = d.origin === 'share' && this.douyinShareCard !== null ? parseShareCard(d.reason) : null;\n\t\tif (card !== null && Number(d.attempts ?? 0) < 2) {\n\t\t\tthis.lastProactiveReal.set('douyin', Date.now());\n\t\t\tconst r = await this.douyinShareCard(card)\n\t\t\t\t.catch((error) => ({ ok: false, error: String(error instanceof Error ? error.message : error) }));\n\t\t\tthis.lastProactiveReal.set('douyin', Date.now());\n\t\t\tif (r?.ok === true) {\n\t\t\t\tthis.db.prepare(\"UPDATE pending SET status = 'done' WHERE id = ?\").run(d.id);\n\t\t\t\tthis.db.prepare(`\n\t\t\t\t\tUPDATE day SET proactive_count = proactive_count + 1, last_proactive_at = ?\n\t\t\t\t\tWHERE character_id = 'feiyu' AND date = ?\n\t\t\t\t`).run(nowVirtual, this.clock.getRoleDateParts().dateStr);\n\t\t\t\tthis.log('info', `[fish-soul] 刷到的视频已用卡片分享给 ${d.channel_id}` +\n\t\t\t\t\t(r?.text ? `，还补了一句：${String(r.text).slice(0, 20)}` : '（这次没补话）'));\n\t\t\t\treturn true;\n\t\t\t}\n\t\t\tthis.log('warn', `[fish-soul] 抖音视频卡片没发成（${d.channel_id}）：${r?.error ?? '未知'}`);\n\t\t\tconst qq = this.masterChannel(this.getConfig().proactive ?? {});\n\t\t\tif (qq !== '') row = { ...d, channel_id: qq, reason: card.fallback };\n\t\t\telse row = null; // 连 QQ 主人私聊都没设：只能算这次没发出去，走下面的退避重试\n\t\t}\n\t\tconst platform = platformOf(row?.channel_id ?? d.channel_id);\n\t\tconst meta = { origin: d.origin === 'share' ? 'share' : botInitiated ? 'dream' : 'user' };\n\t\t// 无论成败都计物理冷却，防止加速模式连发封号\n\t\tthis.lastProactiveReal.set(platform, Date.now());\n\t\tlet ok = false;\n\t\tif (row !== null) {\n\t\t\ttry {\n\t\t\t\tok = (await this.deliver(row.channel_id, row.reason, meta)) === true;\n\t\t\t} catch (error) {\n\t\t\t\tthis.log('error', `[fish-soul] 主动开口失败（${row.channel_id}）：${String(error instanceof Error ? error.message : error)}`);\n\t\t\t}\n\t\t}\n\t\tthis.lastProactiveReal.set(platform, Date.now());",
+		"upstreamFixed": {
+			"present": "share.intent."
+		},
+		"upstreamFixedIn": "lib/life.js",
+		"note": "；上游 0.15.36 在 life.js 用 share.intent + douyinShareTarget 自己做了整套，本组整组退役"
 	},
 	{
 		"id": "share-browse-videoid",
@@ -77,6 +115,11 @@
 		"file": "lib/douyin-browse.js",
 		"marker": "afterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, videoId: w.id }))",
 		"old": "\t\t\tafterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author }));",
-		"new": "\t\t\t// [FS-SHARE-CARD] 带上这条视频的 id：刷到想分享的要用「分享 → 私信」发卡片，光有标题发不了\n\t\t\tafterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, videoId: w.id }));"
+		"new": "\t\t\t// [FS-SHARE-CARD] 带上这条视频的 id：刷到想分享的要用「分享 → 私信」发卡片，光有标题发不了\n\t\t\tafterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, videoId: w.id }));",
+		"upstreamFixed": {
+			"present": "share.intent."
+		},
+		"upstreamFixedIn": "lib/life.js",
+		"note": "；上游 0.15.36 在 life.js 用 share.intent + douyinShareTarget 自己做了整套，本组整组退役"
 	}
 ]

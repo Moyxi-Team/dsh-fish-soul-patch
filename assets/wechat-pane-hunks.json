@@ -1,178 +1,230 @@
 [
-  {
-    "id": "W27",
-    "file": "lib/config-schema.js",
-    "title": "config-schema：微信配置加表情动图两项（先发动图 / 只发动图）",
-    "marker": "\t\t\tstickerAnimatedStrict: z.boolean().default(false), // 挑不到动图就不发这张（宁可没有也不发静态）",
-    "old": "\t\t\treplyWindowMinutes: z.number().default(10),\n\t\t\tcallNames: z.array(z.string()).default([]),\n\t\t\tinterject: z.object({\n\t\t\t\tenabled: z.boolean().default(false),",
-    "new": "\t\t\treplyWindowMinutes: z.number().default(10),\n\t\t\tcallNames: z.array(z.string()).default([]),\n\t\t\t// 表情：微信只认 GIF 动图（静态图发过去一定不动）[FS-WECHAT-PANE]\n\t\t\tstickerAnimatedFirst: z.boolean().default(true), // 出站挑表情时先只在动图里挑\n\t\t\tstickerAnimatedStrict: z.boolean().default(false), // 挑不到动图就不发这张（宁可没有也不发静态）\n\t\t\tinterject: z.object({\n\t\t\t\tenabled: z.boolean().default(false),"
-  },
-  {
-    "id": "W28",
-    "file": "lib/gateway.js",
-    "title": "gateway：新增 wechatStickerPrefs()（读微信表情动图偏好）",
-    "marker": "\t/** 微信表情偏好：微信只认 GIF 动图，静态图发过去一定不动（平台 → 微信 → 表情）[FS-WECHAT-PANE] */",
-    "old": "\t\t\tcallNames: list(w.callNames),\n\t\t\tinterject: interjectConfig(w.interject)\n\t\t};\n\t}",
-    "new": "\t\t\tcallNames: list(w.callNames),\n\t\t\tinterject: interjectConfig(w.interject)\n\t\t};\n\t}\n\n\t/** 微信表情偏好：微信只认 GIF 动图，静态图发过去一定不动（平台 → 微信 → 表情）[FS-WECHAT-PANE] */\n\twechatStickerPrefs() {\n\t\tconst w = this.getConfig().wechat ?? {};\n\t\treturn {\n\t\t\tanimatedFirst: w.stickerAnimatedFirst !== false,\n\t\t\tanimatedStrict: w.stickerAnimatedStrict === true\n\t\t};\n\t}"
-  },
-  {
-    "id": "W29",
-    "file": "lib/gateway.js",
-    "title": "gateway：微信出站按描述挑表情时透传动图偏好",
-    "marker": "\t\t\t\tconst tagged = await this.stickers?.resolveMemeTags(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel(), ...stickerPrefs })",
-    "old": "\t\t// 嵌入模型没配 / 库里没标签 / 算失败，都原样往下走（`@xxx` 那份会被丢掉，不会漏进她的话）。\n\t\tlet feelText = raw.replace(/\\s*\\[(不回|沉默)\\]\\s*$/g, '');\n\t\t// [表情: 描述]：QQ / 微信 / 抖音出站不走 dsh-meme 的前端配图，先换成真图片再发 [FS-MEME-BRIDGE-PATCH]\n\t\tif (/\\[表情\\s*[:：]/.test(feelText)) {\n\t\t\ttry {\n\t\t\t\tconst tagged = await this.stickers?.resolveMemeTags(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel() })\n\t\t\t\t\t?? { text: feelText, resolved: [] };\n\t\t\t\tfeelText = tagged.text;",
-    "new": "\t\t// 嵌入模型没配 / 库里没标签 / 算失败，都原样往下走（`@xxx` 那份会被丢掉，不会漏进她的话）。\n\t\tlet feelText = raw.replace(/\\s*\\[(不回|沉默)\\]\\s*$/g, '');\n\t\t// 微信只认 GIF 动图：这一轮挑表情时先只在 .gif 里挑（平台 → 微信 → 表情）[FS-WECHAT-PANE]\n\t\tconst stickerPrefs = platformOf(row.channel_id) === 'wechat' ? this.wechatStickerPrefs() : {};\n\t\t// [表情: 描述]：QQ / 微信 / 抖音出站不走 dsh-meme 的前端配图，先换成真图片再发 [FS-MEME-BRIDGE-PATCH]\n\t\tif (/\\[表情\\s*[:：]/.test(feelText)) {\n\t\t\ttry {\n\t\t\t\tconst tagged = await this.stickers?.resolveMemeTags(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel(), ...stickerPrefs })\n\t\t\t\t\t?? { text: feelText, resolved: [] };\n\t\t\t\tfeelText = tagged.text;"
-  },
-  {
-    "id": "W30",
-    "file": "lib/gateway.js",
-    "title": "gateway：微信出站按感觉挑表情时也透传动图偏好",
-    "marker": "\t\t\t\tconst r = await this.stickers?.resolveFeelRefs(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel(), ...stickerPrefs }) ?? { text: feelText, resolved: [] };",
-    "old": "\t\tif (feelText.includes('_stickers/@') || feelText.includes('_stickers\\\\@')) {\n\t\t\ttry {\n\t\t\t\tconst r = await this.stickers?.resolveFeelRefs(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel() }) ?? { text: feelText, resolved: [] };\n\t\t\t\tfeelText = r.text;\n\t\t\t\tfor (const one of r.resolved) {",
-    "new": "\t\tif (feelText.includes('_stickers/@') || feelText.includes('_stickers\\\\@')) {\n\t\t\ttry {\n\t\t\t\tconst r = await this.stickers?.resolveFeelRefs(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel(), ...stickerPrefs }) ?? { text: feelText, resolved: [] };\n\t\t\t\tfeelText = r.text;\n\t\t\t\tfor (const one of r.resolved) {"
-  },
-  {
-    "id": "W31",
-    "file": "lib/stickers.js",
-    "title": "stickers：resolveFeelRefs 收 animatedFirst / animatedStrict",
-    "marker": "\tasync resolveFeelRefs(text, workspacePath, embedder, { model = '', animatedFirst = false, animatedStrict = false } = {}) {",
-    "old": "\t * @returns {Promise<{text: string, resolved: Array<{feel: string, file: string|null}>}>}\n\t */\n\tasync resolveFeelRefs(text, workspacePath, embedder, { model = '' } = {}) {\n\t\tconst parsed = parseFeelRefs(text);\n\t\tif (parsed.feels.length === 0) return { text: parsed.text, resolved: [] };",
-    "new": "\t * @returns {Promise<{text: string, resolved: Array<{feel: string, file: string|null}>}>}\n\t */\n\tasync resolveFeelRefs(text, workspacePath, embedder, { model = '', animatedFirst = false, animatedStrict = false } = {}) {\n\t\tconst parsed = parseFeelRefs(text);\n\t\tif (parsed.feels.length === 0) return { text: parsed.text, resolved: [] };"
-  },
-  {
-    "id": "W32",
-    "file": "lib/stickers.js",
-    "title": "stickers：resolveFeelRefs 把动图偏好传给 pickByFeel",
-    "marker": "\t\t\tconst r = await this.pickByFeel(workspacePath, one.feel, embedder, { model, top: 5, animatedFirst, animatedStrict });",
-    "old": "\t\tconst resolved = [];\n\t\tfor (const one of parsed.feels.slice(0, 2)) {\n\t\t\tconst r = await this.pickByFeel(workspacePath, one.feel, embedder, { model, top: 5 });\n\t\t\t// 借 dsh-meme 挑到的是磁盘绝对路径（已经在 fish-soul 自己的缓存目录里），自己的表情仍是 _stickers/ 文件名 [FS-MEME-BRIDGE-PATCH]\n\t\t\tconst ref = r.ok ? (r.absolute === true ? imageRef(r.file) : `_stickers/${r.file}`) : '';",
-    "new": "\t\tconst resolved = [];\n\t\tfor (const one of parsed.feels.slice(0, 2)) {\n\t\t\tconst r = await this.pickByFeel(workspacePath, one.feel, embedder, { model, top: 5, animatedFirst, animatedStrict });\n\t\t\t// 借 dsh-meme 挑到的是磁盘绝对路径（已经在 fish-soul 自己的缓存目录里），自己的表情仍是 _stickers/ 文件名 [FS-MEME-BRIDGE-PATCH]\n\t\t\tconst ref = r.ok ? (r.absolute === true ? imageRef(r.file) : `_stickers/${r.file}`) : '';"
-  },
-  {
-    "id": "W33",
-    "file": "lib/stickers.js",
-    "title": "stickers：pickByFeel 收 animatedFirst / animatedStrict",
-    "marker": "\tasync pickByFeel(workspacePath, feel, embedder, { model = '', avoid = [], top = 5, animatedFirst = false, animatedStrict = false } = {}) {",
-    "old": "\t * @returns {Promise<{ok: boolean, file?: string, reason?: string, candidates?: string[]}>}\n\t */\n\tasync pickByFeel(workspacePath, feel, embedder, { model = '', avoid = [], top = 5 } = {}) {\n\t\tconst want = String(feel ?? '').trim();\n\t\tif (want === '') return { ok: false, reason: '没说要什么感觉' };\n\t\t// 先在自己的表情包里按标签向量找；没有 / 算不出来，才去借 dsh-meme 的图库 [FS-MEME-BRIDGE-PATCH]\n\t\tlet localReason = '';",
-    "new": "\t * @returns {Promise<{ok: boolean, file?: string, reason?: string, candidates?: string[]}>}\n\t */\n\tasync pickByFeel(workspacePath, feel, embedder, { model = '', avoid = [], top = 5, animatedFirst = false, animatedStrict = false } = {}) {\n\t\tconst want = String(feel ?? '').trim();\n\t\tif (want === '') return { ok: false, reason: '没说要什么感觉' };\n\t\t// 微信只认 GIF 动图：要动图时先挑 .gif，挑不到才退回静态（strict 时干脆不发） [FS-WECHAT-PANE]\n\t\tconst isGif = (f) => /\\.gif$/i.test(String(f ?? ''));\n\t\tconst wantAnim = animatedFirst === true || animatedStrict === true;\n\t\t// 先在自己的表情包里按标签向量找；没有 / 算不出来，才去借 dsh-meme 的图库 [FS-MEME-BRIDGE-PATCH]\n\t\tlet localReason = '';"
-  },
-  {
-    "id": "W34",
-    "file": "lib/stickers.js",
-    "title": "stickers：pickByFeel 动图排前面 + 严格模式挑不到就不发",
-    "marker": "\t\t\t\t\tconst ordered = wantAnim ? [...ranked].sort((a, b) => (isGif(b.file) ? 1 : 0) - (isGif(a.file) ? 1 : 0)) : ranked;",
-    "old": "\t\t\t\t\tconst q = new Float32Array(normalizeToBlob(r.vectors[0]).buffer.slice(0));\n\t\t\t\t\tconst ranked = rankByFeel({ vec: q, pool, top: Math.max(top, 1) });\n\t\t\t\t\tconst fresh = ranked.filter((x) => !avoid.includes(x.file));\n\t\t\t\t\tconst pick = (fresh.length > 0 ? fresh : ranked)[0];\n\t\t\t\t\tif (!pick) localReason = '没找到像的';\n\t\t\t\t\telse return { ok: true, file: pick.file, candidates: ranked.map((x) => x.file) };\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\tconst borrowed = await this.pickFromMeme(want, avoid);\n\t\tif (borrowed.ok) return borrowed;\n\t\treturn { ok: false, reason: localReason || borrowed.reason || '没找到像的', memeReason: borrowed.reason };",
-    "new": "\t\t\t\t\tconst q = new Float32Array(normalizeToBlob(r.vectors[0]).buffer.slice(0));\n\t\t\t\t\tconst ranked = rankByFeel({ vec: q, pool, top: Math.max(top, 1) });\n\t\t\t\t\t// 要动图就把 GIF 排前面（自己的收藏里静态图更多）\n\t\t\t\t\tconst ordered = wantAnim ? [...ranked].sort((a, b) => (isGif(b.file) ? 1 : 0) - (isGif(a.file) ? 1 : 0)) : ranked;\n\t\t\t\t\tconst fresh = ordered.filter((x) => !avoid.includes(x.file));\n\t\t\t\t\tconst pick = (fresh.length > 0 ? fresh : ordered)[0];\n\t\t\t\t\tif (!pick) localReason = '没找到像的';\n\t\t\t\t\telse if (wantAnim && animatedStrict === true && !isGif(pick.file)) localReason = '自己收藏的表情里没有对得上的动图';\n\t\t\t\t\telse return { ok: true, file: pick.file, animated: isGif(pick.file), candidates: ordered.map((x) => x.file) };\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\tconst borrowed = await this.pickFromMeme(want, avoid, { animatedFirst, animatedStrict });\n\t\tif (borrowed.ok) return borrowed;\n\t\treturn { ok: false, reason: localReason || borrowed.reason || '没找到像的', memeReason: borrowed.reason };"
-  },
-  {
-    "id": "W35",
-    "file": "lib/stickers.js",
-    "title": "stickers：resolveMemeTags 收 animatedFirst / animatedStrict",
-    "marker": "\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2, animatedFirst = false, animatedStrict = false } = {}) {",
-    "old": "\t * [FS-MEME-BRIDGE-PATCH]\n\t */\n\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2 } = {}) {\n\t\tconst src = String(text ?? '');\n\t\tconst hits = [...src.matchAll(/\\[表情\\s*[:：]\\s*([^\\]\\n]{1,80})\\]/g)];",
-    "new": "\t * [FS-MEME-BRIDGE-PATCH]\n\t */\n\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2, animatedFirst = false, animatedStrict = false } = {}) {\n\t\tconst src = String(text ?? '');\n\t\tconst hits = [...src.matchAll(/\\[表情\\s*[:：]\\s*([^\\]\\n]{1,80})\\]/g)];"
-  },
-  {
-    "id": "W36",
-    "file": "lib/stickers.js",
-    "title": "stickers：resolveMemeTags 按描述挑图时带上动图偏好",
-    "marker": "\t\t\tresolved.push({ desc, file: r.ok ? r.file : null, fromMeme: r.fromMeme === true, animated: r.animated === true, reason: r.ok ? null : (r.reason ?? null) });",
-    "old": "\t\t\tif (i >= max) { out = out.split(whole).join(''); continue; }\n\t\t\tlet r = { ok: false, reason: '没写要什么表情' };\n\t\t\tif (desc !== '') r = await this.pickByFeel(workspacePath, desc, embedder, { model, avoid: used, top: 5 });\n\t\t\tif (r.ok) used.push(r.file);\n\t\t\tconst ref = r.ok ? (r.absolute === true ? imageRef(r.file) : '_stickers/' + r.file) : '';\n\t\t\tresolved.push({ desc, file: r.ok ? r.file : null, fromMeme: r.fromMeme === true, reason: r.ok ? null : (r.reason ?? null) });\n\t\t\tout = out.split(whole).join(r.ok ? '![' + desc.replace(/[[\\]]/g, '') + '](' + ref + ')' : '');\n\t\t}",
-    "new": "\t\t\tif (i >= max) { out = out.split(whole).join(''); continue; }\n\t\t\tlet r = { ok: false, reason: '没写要什么表情' };\n\t\t\tif (desc !== '') r = await this.pickByFeel(workspacePath, desc, embedder, { model, avoid: used, top: 5, animatedFirst, animatedStrict });\n\t\t\tif (r.ok) used.push(r.file);\n\t\t\tconst ref = r.ok ? (r.absolute === true ? imageRef(r.file) : '_stickers/' + r.file) : '';\n\t\t\tresolved.push({ desc, file: r.ok ? r.file : null, fromMeme: r.fromMeme === true, animated: r.animated === true, reason: r.ok ? null : (r.reason ?? null) });\n\t\t\tout = out.split(whole).join(r.ok ? '![' + desc.replace(/[[\\]]/g, '') + '](' + ref + ')' : '');\n\t\t}"
-  },
-  {
-    "id": "W37",
-    "file": "lib/stickers.js",
-    "title": "stickers：pickFromMeme 借 dsh-meme 时也先挑 GIF",
-    "marker": "\tasync pickFromMeme(feel, avoid = [], { animatedFirst = false, animatedStrict = false } = {}) {",
-    "old": "\t * @returns {Promise<{ok: boolean, file?: string, absolute?: boolean, fromMeme?: boolean, label?: string, reason?: string}>}\n\t */\n\tasync pickFromMeme(feel, avoid = []) {\n\t\tconst cfg = this.getConfig();\n\t\tif (cfg.meme !== true) return { ok: false, reason: '没开「借 dsh-meme 的表情库」' };\n\t\tif (!this.meme || typeof this.meme.pick !== 'function') return { ok: false, reason: '没找到 dsh-meme 的取图服务' };\n\t\ttry {\n\t\t\tconst r = await this.meme.pick({ feel, avoid });\n\t\t\tif (!r?.ok) return { ok: false, reason: r?.reason ?? 'dsh-meme 那边没挑到' };\n\t\t\treturn {",
-    "new": "\t * @returns {Promise<{ok: boolean, file?: string, absolute?: boolean, fromMeme?: boolean, label?: string, reason?: string}>}\n\t */\n\tasync pickFromMeme(feel, avoid = [], { animatedFirst = false, animatedStrict = false } = {}) {\n\t\tconst cfg = this.getConfig();\n\t\tif (cfg.meme !== true) return { ok: false, reason: '没开「借 dsh-meme 的表情库」' };\n\t\tif (!this.meme || typeof this.meme.pick !== 'function') return { ok: false, reason: '没找到 dsh-meme 的取图服务' };\n\t\ttry {\n\t\t\tconst r = await this.meme.pick({ feel, avoid, animatedFirst, animatedStrict });\n\t\t\tif (!r?.ok) return { ok: false, reason: r?.reason ?? 'dsh-meme 那边没挑到' };\n\t\t\treturn {"
-  },
-  {
-    "id": "W38",
-    "file": "lib/stickers.js",
-    "title": "stickers：挑图结果带 animated 标记",
-    "marker": "\t\t\t\tanimated: r.animated === true,",
-    "old": "\t\t\t\tabsolute: true,\n\t\t\t\tfromMeme: true,\n\t\t\t\tlabel: r.label ?? r.caption ?? r.tag ?? '',\n\t\t\t\tcaption: r.caption ?? '',",
-    "new": "\t\t\t\tabsolute: true,\n\t\t\t\tfromMeme: true,\n\t\t\t\tanimated: r.animated === true,\n\t\t\t\tlabel: r.label ?? r.caption ?? r.tag ?? '',\n\t\t\t\tcaption: r.caption ?? '',"
-  },
-  {
-    "id": "W39",
-    "file": "lib/meme-bridge.js",
-    "title": "meme-bridge：入参说明补动图两项",
-    "marker": "\t * @returns {Promise<{ok: boolean, path?: string, sourcePath?: string, tag?: string, caption?: string, packName?: string, label?: string, animated?: boolean, reason?: string}>}",
-    "old": "\t * 按感觉挑一张：先按「感觉词 + 情绪桶」搜，再按情绪桶随机，最后只按关键词搜。\n\t * 只读图库；返回的 path 是 fish-soul 自己缓存目录里的副本（可以直接发）。\n\t * @param {{feel?: string, avoid?: string[]}} [opts]\n\t * @returns {Promise<{ok: boolean, path?: string, sourcePath?: string, tag?: string, caption?: string, packName?: string, label?: string, reason?: string}>}\n\t */\n\tasync function pick({ feel = '', avoid = [] } = {}) {\n\t\tconst want = String(feel ?? '').trim();\n\t\tif (want === '') return { ok: false, reason: '没说要什么感觉' };",
-    "new": "\t * 按感觉挑一张：先按「感觉词 + 情绪桶」搜，再按情绪桶随机，最后只按关键词搜。\n\t * 只读图库；返回的 path 是 fish-soul 自己缓存目录里的副本（可以直接发）。\n\t * @param {{feel?: string, avoid?: string[], animatedFirst?: boolean, animatedStrict?: boolean}} [opts]\n\t *   animatedFirst / animatedStrict：微信只认 GIF 动图，静态图发过去一定不动。\n\t *   first = 先只在 .gif 里挑，挑不到再退回普通图；strict = 只在 .gif 里挑，挑不到就报没找到。\n\t * @returns {Promise<{ok: boolean, path?: string, sourcePath?: string, tag?: string, caption?: string, packName?: string, label?: string, animated?: boolean, reason?: string}>}\n\t */\n\tasync function pick({ feel = '', avoid = [], animatedFirst = false, animatedStrict = false } = {}) {\n\t\tconst want = String(feel ?? '').trim();\n\t\tif (want === '') return { ok: false, reason: '没说要什么感觉' };"
-  },
-  {
-    "id": "W40",
-    "file": "lib/meme-bridge.js",
-    "title": "meme-bridge：加 isGif / usable 判定",
-    "marker": "\t\tconst isGif = (p) => extname(String(p ?? '')).toLowerCase() === '.gif';",
-    "old": "\t\tconst skip = new Set((Array.isArray(avoid) ? avoid : []).map((x) => String(x)));\n\t\tconst tried = new Set();\n\t\tfor (const q of [{ query: want, tag }, { query: '', tag }, { query: want, tag: '' }]) {\n\t\t\tconst query = String(q.query ?? '');",
-    "new": "\t\tconst skip = new Set((Array.isArray(avoid) ? avoid : []).map((x) => String(x)));\n\t\tconst tried = new Set();\n\t\tconst isGif = (p) => extname(String(p ?? '')).toLowerCase() === '.gif';\n\t\tconst usable = (m) => {\n\t\t\tconst p = String(m?.path ?? '');\n\t\t\tif (p === '' || !existsSync(p) || skip.has(p)) return false;\n\t\t\tconst ext = extname(p).toLowerCase();\n\t\t\tif (!IMAGE_EXT.has(ext)) return false;\n\t\t\treturn ext !== '.webp' || canConvertWebp() === true;\n\t\t};\n\t\tconst wantAnim = animatedFirst === true || animatedStrict === true;\n\t\tfor (const q of [{ query: want, tag }, { query: '', tag }, { query: want, tag: '' }]) {\n\t\t\tconst query = String(q.query ?? '');"
-  },
-  {
-    "id": "W41",
-    "file": "lib/meme-bridge.js",
-    "title": "meme-bridge：要动图时多拉候选，GIF 优先、严格模式不回退",
-    "marker": "\t\t\t\t? (memes.find((m) => usable(m) && isGif(m.path)) ?? (animatedStrict === true ? undefined : memes.find(usable)))",
-    "old": "\t\t\ttried.add(key);\n\t\t\tlet memes = [];\n\t\t\ttry { memes = svc.search({ query, tag: mood, limit: 12 })?.memes ?? []; } catch { memes = []; }\n\t\t\tconst hit = memes.find((m) => {\n\t\t\t\tconst p = String(m?.path ?? '');\n\t\t\t\tif (p === '' || !existsSync(p) || skip.has(p)) return false;\n\t\t\t\tconst ext = extname(p).toLowerCase();\n\t\t\t\tif (!IMAGE_EXT.has(ext)) return false;\n\t\t\t\treturn ext !== '.webp' || canConvertWebp() === true;\n\t\t\t});\n\t\t\tif (!hit) continue;\n\t\t\tconst cached = cacheCopy(hit.path);",
-    "new": "\t\t\ttried.add(key);\n\t\t\tlet memes = [];\n\t\t\t// 要动图就多拉一点，图库里 GIF 占比低，12 条很容易全被静态图占满\n\t\t\ttry { memes = svc.search({ query, tag: mood, limit: wantAnim ? 40 : 12 })?.memes ?? []; } catch { memes = []; }\n\t\t\tconst hit = wantAnim\n\t\t\t\t? (memes.find((m) => usable(m) && isGif(m.path)) ?? (animatedStrict === true ? undefined : memes.find(usable)))\n\t\t\t\t: memes.find(usable);\n\t\t\tif (!hit) continue;\n\t\t\tconst cached = cacheCopy(hit.path);"
-  },
-  {
-    "id": "W42",
-    "file": "lib/meme-bridge.js",
-    "title": "meme-bridge：返回 animated 标记",
-    "marker": "\t\t\t\tanimated: isGif(hit.path),",
-    "old": "\t\t\t\tpath: cached,\n\t\t\t\tsourcePath: hit.path,\n\t\t\t\ttag: String(hit.tag ?? mood ?? ''),\n\t\t\t\tcaption,",
-    "new": "\t\t\t\tpath: cached,\n\t\t\t\tsourcePath: hit.path,\n\t\t\t\tanimated: isGif(hit.path),\n\t\t\t\ttag: String(hit.tag ?? mood ?? ''),\n\t\t\t\tcaption,"
-  },
-  {
-    "id": "W43",
-    "file": "lib/routes.js",
-    "title": "routes：新增 wechatState()（微信配置回显）",
-    "marker": "\t\tconst list = (v) => (Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : []);",
-    "old": "\t/** 进行中的 B站扫码（密钥只留在服务端） */\n\tlet qr = null;\n\tconst biliState = () => {\n\t\tconst b = getConfig().bili ?? {};",
-    "new": "\t/** 进行中的 B站扫码（密钥只留在服务端） */\n\tlet qr = null;\n\t/**\n\t * 平台 → 微信的状态（[FS-WECHAT-PANE]）。\n\t * 微信的收发本身就是 WechatAgent 的 social-bridge 在干，这边只回显 soul 侧存着的那份配置，\n\t * 面板上「哪些在这儿改就生效、哪些得去 WechatAgent 改」就是照这份数据 + 静态清单渲染的。\n\t */\n\tconst wechatState = () => {\n\t\tconst w = getConfig().wechat ?? {};\n\t\tconst list = (v) => (Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : []);\n\t\treturn {\n\t\t\tenabled: w.enabled === true,\n\t\t\tbridgeUrl: w.bridgeUrl ?? 'http://127.0.0.1:11234/fish-soul/outbound',\n\t\t\thasBridgeToken: Boolean(w.bridgeToken),\n\t\t\tbridgeTokenMasked: maskKey(w.bridgeToken ?? ''),\n\t\t\tinboundPort: w.inboundPort ?? 11233,\n\t\t\tinboundPath: w.inboundPath ?? '/fish-soul/wechat/inbound',\n\t\t\thasInboundToken: Boolean(w.inboundToken),\n\t\t\tselfId: String(w.selfId ?? ''),\n\t\t\tmasterUserIds: list(w.masterUserIds),\n\t\t\tprivateAllowList: list(w.privateAllowList),\n\t\t\tgroupAllowList: list(w.groupAllowList),\n\t\t\tallGroups: w.allGroups === true,\n\t\t\tfollowUpCount: w.followUpCount ?? 3,\n\t\t\tfollowUpSeconds: w.followUpSeconds ?? 120,\n\t\t\tfollowUpSmart: w.followUpSmart === true,\n\t\t\tbatchMs: w.batchMs ?? 800,\n\t\t\treplyWindowMinutes: w.replyWindowMinutes ?? 10,\n\t\t\tcallNames: list(w.callNames),\n\t\t\t// 微信只认 GIF 动图（静态图发过去一定不动），这两个开关是 soul 这边唯一能救表情的地方\n\t\t\tstickerAnimatedFirst: w.stickerAnimatedFirst !== false,\n\t\t\tstickerAnimatedStrict: w.stickerAnimatedStrict === true,\n\t\t\tinterject: interjectConfig(w.interject),\n\t\t\t// 通道是否在线由 WechatAgent 的 bridge 决定，这边只知道配置里开没开\n\t\t\tbridge: gateway?.wechat?.connected === true\n\t\t};\n\t};\n\tconst biliState = () => {\n\t\tconst b = getConfig().bili ?? {};"
-  },
-  {
-    "id": "W44",
-    "file": "lib/routes.js",
-    "title": "/channels/state 回显里加 wechat",
-    "marker": "\t\t\t\t\t\twechat: wechatState(),",
-    "old": "\t\t\t\t\t\tbili: biliState(),\n\t\t\t\t\t\tdouyin: douyinState(deps),\n\t\t\t\t\t\tsessions: {\n\t\t\t\t\t\t\tworkspacePath: current,",
-    "new": "\t\t\t\t\t\tbili: biliState(),\n\t\t\t\t\t\tdouyin: douyinState(deps),\n\t\t\t\t\t\twechat: wechatState(),\n\t\t\t\t\t\tsessions: {\n\t\t\t\t\t\t\tworkspacePath: current,"
-  },
-  {
-    "id": "W45",
-    "file": "lib/routes.js",
-    "title": "routes：新增 POST /channels/wechat-config（只存 soul 侧微信设置）",
-    "marker": "\t\t\t\t\tconst list = (v, fallback) => (v === undefined ? (Array.isArray(fallback) ? fallback : []) : (Array.isArray(v) ? v : []).map((x) => String(x).trim()).filter(Boolean));",
-    "old": "\t\t\t\t\tif (connectionChanged) channel?.restart();\n\t\t\t\t\treturn send(200, { ok: true, reconnecting: connectionChanged });\n\t\t\t\t}\n",
-    "new": "\t\t\t\t\tif (connectionChanged) channel?.restart();\n\t\t\t\t\treturn send(200, { ok: true, reconnecting: connectionChanged });\n\t\t\t\t}\n\n\t\t\t\t// ── 契约 15：微信设置（[FS-WECHAT-PANE]）──\n\t\t\t\t// 只存 soul 侧那部分：认人白名单、接话、分批、插嘴、叫名字、表情动图偏好。\n\t\t\t\t// 微信登录 / 收发端口 / 表情入库格式这些归 WechatAgent 的 social-bridge 管，这边存了也不生效，所以面板只做只读说明。\n\t\t\t\tif (method === 'POST' && path === '/channels/wechat-config') {\n\t\t\t\t\tif (!sameOrigin(req)) return send(403, { ok: false, error: 'forbidden' });\n\t\t\t\t\tconst body = JSON.parse(await readBody(req) || '{}');\n\t\t\t\t\tconst cur = getConfig().wechat ?? {};\n\t\t\t\t\tconst list = (v, fallback) => (v === undefined ? (Array.isArray(fallback) ? fallback : []) : (Array.isArray(v) ? v : []).map((x) => String(x).trim()).filter(Boolean));\n\t\t\t\t\tconst clampInt = (v, fb, min, max) => Math.min(max, Math.max(min, Math.floor(Number(v ?? fb)) || 0));\n\t\t\t\t\tconst portOf = (v, fb) => {\n\t\t\t\t\t\tconst n = Math.floor(Number(v ?? fb));\n\t\t\t\t\t\treturn Number.isFinite(n) && n >= 1 && n <= 65535 ? n : fb;\n\t\t\t\t\t};\n\t\t\t\t\tconst bridgeUrl = String(body.bridgeUrl ?? cur.bridgeUrl ?? '').trim();\n\t\t\t\t\tif (bridgeUrl !== '' && !/^https?:\\/\\/\\S+$/.test(bridgeUrl)) return send(200, { ok: false, error: 'bridge 地址要写成 http://127.0.0.1:11234/fish-soul/outbound 这种' });\n\t\t\t\t\tconst inboundPath = String(body.inboundPath ?? cur.inboundPath ?? '/fish-soul/wechat/inbound').trim();\n\t\t\t\t\tif (inboundPath !== '' && !/^\\/\\S*$/.test(inboundPath)) return send(200, { ok: false, error: '入站路径要以 / 开头' });\n\t\t\t\t\tconst next = {\n\t\t\t\t\t\t...cur,\n\t\t\t\t\t\t// 先摊开旧配置再逐项覆盖：面板上不给改的字段（收发 token、selfId、以后新加的项）不会因一次保存被抹掉\n\t\t\t\t\t\tenabled: body.enabled === undefined ? cur.enabled === true : body.enabled === true,\n\t\t\t\t\t\tbridgeUrl,\n\t\t\t\t\t\t...(typeof body.bridgeToken === 'string' && body.bridgeToken.trim() !== '' ? { bridgeToken: body.bridgeToken.trim() } : {}),\n\t\t\t\t\t\t...(body.clearBridgeToken === true ? { bridgeToken: '' } : {}),\n\t\t\t\t\t\tinboundPort: portOf(body.inboundPort, cur.inboundPort ?? 11233),\n\t\t\t\t\t\tinboundPath,\n\t\t\t\t\t\t...(typeof body.inboundToken === 'string' && body.inboundToken.trim() !== '' ? { inboundToken: body.inboundToken.trim() } : {}),\n\t\t\t\t\t\t...(body.clearInboundToken === true ? { inboundToken: '' } : {}),\n\t\t\t\t\t\tmasterUserIds: list(body.masterUserIds, cur.masterUserIds).slice(0, 20),\n\t\t\t\t\t\tprivateAllowList: list(body.privateAllowList, cur.privateAllowList).slice(0, 200),\n\t\t\t\t\t\tgroupAllowList: list(body.groupAllowList, cur.groupAllowList).slice(0, 200),\n\t\t\t\t\t\tallGroups: body.allGroups === undefined ? cur.allGroups === true : body.allGroups === true,\n\t\t\t\t\t\tfollowUpCount: clampInt(body.followUpCount, cur.followUpCount ?? 3, 0, 20),\n\t\t\t\t\t\tfollowUpSeconds: clampInt(body.followUpSeconds, cur.followUpSeconds ?? 120, 0, 1800),\n\t\t\t\t\t\tfollowUpSmart: body.followUpSmart === undefined ? cur.followUpSmart === true : body.followUpSmart === true,\n\t\t\t\t\t\tbatchMs: clampInt(body.batchMs, cur.batchMs ?? 800, 0, 15000),\n\t\t\t\t\t\treplyWindowMinutes: clampInt(body.replyWindowMinutes, cur.replyWindowMinutes ?? 10, 0, 1440),\n\t\t\t\t\t\tcallNames: list(body.callNames, cur.callNames).slice(0, 10),\n\t\t\t\t\t\t// 表情：微信只认 GIF，默认「先挑动图」，严格模式挑不到就不发（宁可没表情也不发张不动的）\n\t\t\t\t\t\tstickerAnimatedFirst: body.stickerAnimatedFirst === undefined ? cur.stickerAnimatedFirst !== false : body.stickerAnimatedFirst === true,\n\t\t\t\t\t\tstickerAnimatedStrict: body.stickerAnimatedStrict === undefined ? cur.stickerAnimatedStrict === true : body.stickerAnimatedStrict === true,\n\t\t\t\t\t\tinterject: interjectConfig(body.interject === undefined ? cur.interject : { ...(cur.interject ?? {}), ...body.interject })\n\t\t\t\t\t};\n\t\t\t\t\tsaveConfig({ wechat: next });\n\t\t\t\t\treturn send(200, { ok: true });\n\t\t\t\t}\n"
-  },
-  {
-    "id": "W46",
-    "file": "lib/client.js",
-    "title": "client：页签短名与子页签加「微信」",
-    "marker": "\t\tconst TAB_KEYS = { memory: \"忆\", character: \"角\", daily: \"常\", channels: \"台\", models: \"模\", system: \"统\", guide: \"引\", retrieval: \"索\", persona: \"人\", life: \"自\", inspector: \"忆\", activity: \"动\", behavior: \"习\", qq: \"Q\", bili: \"B\", douyin: \"抖\", wechat: \"微\", version: \"版\" };",
-    "old": "\n\t\t// ── 面板根组件：页签 + 数据装载 + 轮询 ──\n\t\tconst TAB_KEYS = { memory: \"忆\", character: \"角\", daily: \"常\", channels: \"台\", models: \"模\", system: \"统\", guide: \"引\", retrieval: \"索\", persona: \"人\", life: \"自\", inspector: \"忆\", activity: \"动\", behavior: \"习\", qq: \"Q\", bili: \"B\", douyin: \"抖\", version: \"版\" };\n\t\tconst TABS = [\n\t\t\t[\"memory\", \"记忆\", [[\"retrieval\", \"检索设置\"], [\"people\", \"人物与关系\"], [\"memories\", \"记忆内容\"], [\"recall-test\", \"检索测试\"], [\"weekly\", \"周记\"], [\"archives\", \"记忆存档\"], [\"backups\", \"导入与备份\"]]],\n\t\t\t[\"character\", \"角色\", [[\"persona\", \"人格卡\"], [\"templates\", \"人格模板\"], [\"growth\", \"成长\"], [\"worldinfo\", \"世界书\"], [\"habits\", \"说话习惯\"], [\"groups\", \"群设定\"], [\"chat-models\", \"聊天模型\"]]],\n\t\t\t[\"daily\", \"日常\", [[\"life\", \"主动开口\"], [\"activity\", \"最近动态\"], [\"diary\", \"日记\"], [\"stickers\", \"表情包\"], [\"slang\", \"学到的说法\"]]],\n\t\t\t[\"channels\", \"平台\", [[\"qq\", \"QQ\"], [\"bili\", \"B站\"], [\"douyin\", \"抖音\"]]],\n\t\t\t[\"models\", \"模型\", [[\"models\", \"功能模型\"], [\"usage\", \"用量与价格\"], [\"web\", \"联网搜索\"], [\"voice\", \"语音\"]]],\n\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"plugins\", \"个人插件\"], [\"version\", \"版本更新\"]]]",
-    "new": "\n\t\t// ── 面板根组件：页签 + 数据装载 + 轮询 ──\n\t\tconst TAB_KEYS = { memory: \"忆\", character: \"角\", daily: \"常\", channels: \"台\", models: \"模\", system: \"统\", guide: \"引\", retrieval: \"索\", persona: \"人\", life: \"自\", inspector: \"忆\", activity: \"动\", behavior: \"习\", qq: \"Q\", bili: \"B\", douyin: \"抖\", wechat: \"微\", version: \"版\" };\n\t\tconst TABS = [\n\t\t\t[\"memory\", \"记忆\", [[\"retrieval\", \"检索设置\"], [\"people\", \"人物与关系\"], [\"memories\", \"记忆内容\"], [\"recall-test\", \"检索测试\"], [\"weekly\", \"周记\"], [\"archives\", \"记忆存档\"], [\"backups\", \"导入与备份\"]]],\n\t\t\t[\"character\", \"角色\", [[\"persona\", \"人格卡\"], [\"templates\", \"人格模板\"], [\"growth\", \"成长\"], [\"worldinfo\", \"世界书\"], [\"habits\", \"说话习惯\"], [\"groups\", \"群设定\"], [\"chat-models\", \"聊天模型\"]]],\n\t\t\t[\"daily\", \"日常\", [[\"life\", \"主动开口\"], [\"activity\", \"最近动态\"], [\"diary\", \"日记\"], [\"stickers\", \"表情包\"], [\"slang\", \"学到的说法\"]]],\n\t\t\t[\"channels\", \"平台\", [[\"qq\", \"QQ\"], [\"bili\", \"B站\"], [\"douyin\", \"抖音\"], [\"wechat\", \"微信\"]]],\n\t\t\t[\"models\", \"模型\", [[\"models\", \"功能模型\"], [\"usage\", \"用量与价格\"], [\"web\", \"联网搜索\"], [\"voice\", \"语音\"]]],\n\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"plugins\", \"个人插件\"], [\"version\", \"版本更新\"]]]"
-  },
-  {
-    "id": "W47",
-    "file": "lib/client.js",
-    "title": "client：微信子页签也走 channels 轮询",
-    "marker": "\t\t\t\tconst fn = subtab === \"retrieval\" ? loadRetrieval : subtab === \"qq\" || subtab === \"bili\" || subtab === \"douyin\" || subtab === \"wechat\" ? loadChannels : null;",
-    "old": "\t\t\t// 检索页 2s 刷新（重建进度）；QQ / B站 / 抖音 3s 刷新\n\t\t\treact.useEffect(() => {\n\t\t\t\tconst fn = subtab === \"retrieval\" ? loadRetrieval : subtab === \"qq\" || subtab === \"bili\" || subtab === \"douyin\" ? loadChannels : null;\n\t\t\t\tif (fn === null) return undefined;\n\t\t\t\tconst timer = setInterval(fn, subtab === \"retrieval\" ? 2000 : 3000);",
-    "new": "\t\t\t// 检索页 2s 刷新（重建进度）；QQ / B站 / 抖音 3s 刷新\n\t\t\treact.useEffect(() => {\n\t\t\t\tconst fn = subtab === \"retrieval\" ? loadRetrieval : subtab === \"qq\" || subtab === \"bili\" || subtab === \"douyin\" || subtab === \"wechat\" ? loadChannels : null;\n\t\t\t\tif (fn === null) return undefined;\n\t\t\t\tconst timer = setInterval(fn, subtab === \"retrieval\" ? 2000 : 3000);"
-  },
-  {
-    "id": "W48",
-    "file": "lib/client.js",
-    "title": "client：微信子页签渲染 WechatPane",
-    "marker": "\t\t\t\t: subtab === \"wechat\" ? h(ChunkTab, { file: \"client.wechat.js\", pick: (m) => m.WechatPane, failText: \"微信页加载失败\", data: channels, refresh: loadChannels, notify })",
-    "old": "\t\t\t\t: subtab === \"qq\" ? h(ChannelPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: subtab === \"bili\" ? h(BiliPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: h(ChunkTab, { file: \"client.douyin.js\", pick: (m) => m.DouyinPane, failText: \"抖音页加载失败\", data: channels, refresh: loadChannels, notify });\n",
-    "new": "\t\t\t\t: subtab === \"qq\" ? h(ChannelPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: subtab === \"bili\" ? h(BiliPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: subtab === \"wechat\" ? h(ChunkTab, { file: \"client.wechat.js\", pick: (m) => m.WechatPane, failText: \"微信页加载失败\", data: channels, refresh: loadChannels, notify })\n\t\t\t\t: h(ChunkTab, { file: \"client.douyin.js\", pick: (m) => m.DouyinPane, failText: \"抖音页加载失败\", data: channels, refresh: loadChannels, notify });\n"
-  }
+	{
+		"id": "W27",
+		"file": "lib/config-schema.js",
+		"title": "config-schema：新增 wechat 配置块（含表情动图两项）",
+		"marker": "\t\t\tstickerAnimatedStrict: z.boolean().default(false), // 挑不到动图就不发这张（宁可没有也不发静态）",
+		"old": "\t\t\t\trejectReason: z.string().default(''),\n\t\t\t\treleasePollMinutes: z.number().default(5), // 多久问一次 npm 有没有新版本\n\t\t\t\trequestPollSeconds: z.number().default(60) // 多久问一次有没有没处理的入群申请\n\t\t\t}).default({})\n\t\t}).default({}),",
+		"new": "\t\t\t\trejectReason: z.string().default(''),\n\t\t\t\treleasePollMinutes: z.number().default(5), // 多久问一次 npm 有没有新版本\n\t\t\t\trequestPollSeconds: z.number().default(60) // 多久问一次有没有没处理的入群申请\n\t\t\t}).default({})\n\t\t}).default({}),\n\t\t// 微信（WechatAgent 桥接）：收发的活由 WechatAgent 的 social-bridge 干，这边只存 soul 侧那部分配置 [FS-WECHAT-PANE]\n\t\twechat: z.object({\n\t\t\tenabled: z.boolean().default(false),\n\t\t\tbridgeUrl: z.string().default('http://127.0.0.1:11234/fish-soul/outbound'), // 出站：soul 把要发的消息投给 WechatAgent\n\t\t\tbridgeToken: z.string().default(''),\n\t\t\tinboundPort: z.number().default(11233), // 入站：WechatAgent 把微信消息推给 soul\n\t\t\tinboundPath: z.string().default('/fish-soul/wechat/inbound'),\n\t\t\tinboundToken: z.string().default(''),\n\t\t\tselfId: z.string().default(''), // 微信自己的 id：自己的消息不接、别自回\n\t\t\tmasterUserIds: z.array(z.string()).default([]), // 主人的微信 id（认成 master）\n\t\t\tprivateAllowList: z.array(z.string()).default([]), // 私聊白名单：空 = 谁都不放行（默认拒绝）\n\t\t\tgroupAllowList: z.array(z.string()).default([]), // 群白名单：空 = 谁都不放行\n\t\t\tallGroups: z.boolean().default(false), // 显式放开：true = 所有群\n\t\t\tfollowUpCount: z.number().default(3),\n\t\t\tfollowUpSeconds: z.number().default(120),\n\t\t\tfollowUpSmart: z.boolean().default(false),\n\t\t\tbatchMs: z.number().default(800), // 微信消息来得碎，攒一会儿再回\n\t\t\treplyWindowMinutes: z.number().default(10),\n\t\t\tcallNames: z.array(z.string()).default([]), // 叫这些名字也算点名\n\t\t\t// 表情：微信只认 GIF 动图（静态图发过去一定不动）\n\t\t\tstickerAnimatedFirst: z.boolean().default(true), // 出站挑表情时先只在动图里挑\n\t\t\tstickerAnimatedStrict: z.boolean().default(false), // 挑不到动图就不发这张（宁可没有也不发静态）\n\t\t\tinterject: z.object({\n\t\t\t\tenabled: z.boolean().default(false),\n\t\t\t\tchance: z.number().default(0.05),\n\t\t\t\tcooldownMinutes: z.number().default(15),\n\t\t\t\tmaxPerHour: z.number().default(3),\n\t\t\t\tkeywords: z.array(z.string()).default([])\n\t\t\t}).default({})\n\t\t}).default({}),"
+	},
+	{
+		"id": "W28",
+		"file": "lib/gateway.js",
+		"title": "gateway：新增 wechatStickerPrefs()（读微信表情动图偏好）",
+		"marker": "\t/** 微信表情偏好：微信只认 GIF 动图，静态图发过去一定不动（平台 → 微信 → 表情）[FS-WECHAT-PANE] */",
+		"old": "\t\t\tcallNames: Array.isArray(q.callNames) ? q.callNames.map((x) => String(x).trim()).filter(Boolean) : [],\n\t\t\tinterject: interjectConfig(q.interject)\n\t\t};\n\t}",
+		"new": "\t\t\tcallNames: Array.isArray(q.callNames) ? q.callNames.map((x) => String(x).trim()).filter(Boolean) : [],\n\t\t\tinterject: interjectConfig(q.interject)\n\t\t};\n\t}\n\n\t/** 微信表情偏好：微信只认 GIF 动图，静态图发过去一定不动（平台 → 微信 → 表情）[FS-WECHAT-PANE] */\n\twechatStickerPrefs() {\n\t\tconst w = this.getConfig().wechat ?? {};\n\t\treturn {\n\t\t\tanimatedFirst: w.stickerAnimatedFirst !== false,\n\t\t\tanimatedStrict: w.stickerAnimatedStrict === true\n\t\t};\n\t}"
+	},
+	{
+		"id": "W29",
+		"file": "lib/gateway.js",
+		"title": "gateway：微信出站按描述挑表情时透传动图偏好",
+		"marker": "\t\t\t\tconst tagged = await this.stickers?.resolveMemeTags(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel(), ...stickerPrefs })",
+		"old": "\t\t// 嵌入模型没配 / 库里没标签 / 算失败，都原样往下走（`@xxx` 那份会被丢掉，不会漏进她的话）。\n\t\tlet feelText = raw.replace(/\\s*\\[(不回|沉默)\\]\\s*$/g, '');\n\t\t// [表情: 描述]：QQ / 微信 / 抖音出站不走 dsh-meme 的前端配图，先换成真图片再发 [FS-MEME-BRIDGE-PATCH]\n\t\tif (/\\[表情\\s*[:：]/.test(feelText)) {\n\t\t\ttry {\n\t\t\t\tconst tagged = await this.stickers?.resolveMemeTags(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel() })\n\t\t\t\t\t?? { text: feelText, resolved: [] };\n\t\t\t\tfeelText = tagged.text;",
+		"new": "\t\t// 嵌入模型没配 / 库里没标签 / 算失败，都原样往下走（`@xxx` 那份会被丢掉，不会漏进她的话）。\n\t\tlet feelText = raw.replace(/\\s*\\[(不回|沉默)\\]\\s*$/g, '');\n\t\t// 微信只认 GIF 动图：这一轮挑表情时先只在 .gif 里挑（平台 → 微信 → 表情）[FS-WECHAT-PANE]\n\t\tconst stickerPrefs = platformOf(row.channel_id) === 'wechat' ? this.wechatStickerPrefs() : {};\n\t\t// [表情: 描述]：QQ / 微信 / 抖音出站不走 dsh-meme 的前端配图，先换成真图片再发 [FS-MEME-BRIDGE-PATCH]\n\t\tif (/\\[表情\\s*[:：]/.test(feelText)) {\n\t\t\ttry {\n\t\t\t\tconst tagged = await this.stickers?.resolveMemeTags(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel(), ...stickerPrefs })\n\t\t\t\t\t?? { text: feelText, resolved: [] };\n\t\t\t\tfeelText = tagged.text;",
+		"dependsOn": [
+			"W25"
+		],
+		"note": "锚点是 W25 写进去的微信出站表情段（上游本无）"
+	},
+	{
+		"id": "W30",
+		"file": "lib/gateway.js",
+		"title": "gateway：微信出站按感觉挑表情时也透传动图偏好",
+		"marker": "\t\t\t\tconst r = await this.stickers?.resolveFeelRefs(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel(), ...stickerPrefs }) ?? { text: feelText, resolved: [] };",
+		"old": "\t\tif (feelText.includes('_stickers/@') || feelText.includes('_stickers\\\\@')) {\n\t\t\ttry {\n\t\t\t\tconst r = await this.stickers?.resolveFeelRefs(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel() }) ?? { text: feelText, resolved: [] };\n\t\t\t\tfeelText = r.text;\n\t\t\t\tfor (const one of r.resolved) {",
+		"new": "\t\tif (feelText.includes('_stickers/@') || feelText.includes('_stickers\\\\@')) {\n\t\t\ttry {\n\t\t\t\tconst r = await this.stickers?.resolveFeelRefs(feelText, row.workspace_path, this.embedder, { model: this.embeddingModel(), ...stickerPrefs }) ?? { text: feelText, resolved: [] };\n\t\t\t\tfeelText = r.text;\n\t\t\t\tfor (const one of r.resolved) {"
+	},
+	{
+		"id": "W31",
+		"file": "lib/stickers.js",
+		"title": "stickers：resolveFeelRefs 收 animatedFirst / animatedStrict",
+		"marker": "\tasync resolveFeelRefs(text, workspacePath, embedder, { model = '', animatedFirst = false, animatedStrict = false } = {}) {",
+		"old": "\t * @returns {Promise<{text: string, resolved: Array<{feel: string, file: string|null}>}>}\n\t */\n\tasync resolveFeelRefs(text, workspacePath, embedder, { model = '' } = {}) {\n\t\tconst parsed = parseFeelRefs(text);\n\t\tif (parsed.feels.length === 0) return { text: parsed.text, resolved: [] };",
+		"new": "\t * @returns {Promise<{text: string, resolved: Array<{feel: string, file: string|null}>}>}\n\t */\n\tasync resolveFeelRefs(text, workspacePath, embedder, { model = '', animatedFirst = false, animatedStrict = false } = {}) {\n\t\tconst parsed = parseFeelRefs(text);\n\t\tif (parsed.feels.length === 0) return { text: parsed.text, resolved: [] };"
+	},
+	{
+		"id": "W32",
+		"file": "lib/stickers.js",
+		"title": "stickers：resolveFeelRefs 把动图偏好传给 pickByFeel",
+		"marker": "\t\t\tconst r = await this.pickByFeel(workspacePath, one.feel, embedder, { model, top: 5, animatedFirst, animatedStrict });",
+		"old": "\t\tconst resolved = [];\n\t\tfor (const one of parsed.feels.slice(0, 2)) {\n\t\t\tconst r = await this.pickByFeel(workspacePath, one.feel, embedder, { model, top: 5 });\n\t\t\t// 借 dsh-meme 挑到的是磁盘绝对路径（已经在 fish-soul 自己的缓存目录里），自己的表情仍是 _stickers/ 文件名 [FS-MEME-BRIDGE-PATCH]\n\t\t\tconst ref = r.ok ? (r.absolute === true ? imageRef(r.file) : `_stickers/${r.file}`) : '';",
+		"new": "\t\tconst resolved = [];\n\t\tfor (const one of parsed.feels.slice(0, 2)) {\n\t\t\tconst r = await this.pickByFeel(workspacePath, one.feel, embedder, { model, top: 5, animatedFirst, animatedStrict });\n\t\t\t// 借 dsh-meme 挑到的是磁盘绝对路径（已经在 fish-soul 自己的缓存目录里），自己的表情仍是 _stickers/ 文件名 [FS-MEME-BRIDGE-PATCH]\n\t\t\tconst ref = r.ok ? (r.absolute === true ? imageRef(r.file) : `_stickers/${r.file}`) : '';",
+		"dependsOn": [
+			"meme-bridge"
+		],
+		"note": "锚点在 P1 表情桥改造过的 stickers.js 里（上游本无）"
+	},
+	{
+		"id": "W33",
+		"file": "lib/stickers.js",
+		"title": "stickers：pickByFeel 收 animatedFirst / animatedStrict",
+		"marker": "\tasync pickByFeel(workspacePath, feel, embedder, { model = '', avoid = [], top = 5, animatedFirst = false, animatedStrict = false } = {}) {",
+		"old": "\t * @returns {Promise<{ok: boolean, file?: string, reason?: string, candidates?: string[]}>}\n\t */\n\tasync pickByFeel(workspacePath, feel, embedder, { model = '', avoid = [], top = 5 } = {}) {\n\t\tconst want = String(feel ?? '').trim();\n\t\tif (want === '') return { ok: false, reason: '没说要什么感觉' };\n\t\t// 先在自己的表情包里按标签向量找；没有 / 算不出来，才去借 dsh-meme 的图库 [FS-MEME-BRIDGE-PATCH]\n\t\tlet localReason = '';",
+		"new": "\t * @returns {Promise<{ok: boolean, file?: string, reason?: string, candidates?: string[]}>}\n\t */\n\tasync pickByFeel(workspacePath, feel, embedder, { model = '', avoid = [], top = 5, animatedFirst = false, animatedStrict = false } = {}) {\n\t\tconst want = String(feel ?? '').trim();\n\t\tif (want === '') return { ok: false, reason: '没说要什么感觉' };\n\t\t// 微信只认 GIF 动图：要动图时先挑 .gif，挑不到才退回静态（strict 时干脆不发） [FS-WECHAT-PANE]\n\t\tconst isGif = (f) => /\\.gif$/i.test(String(f ?? ''));\n\t\tconst wantAnim = animatedFirst === true || animatedStrict === true;\n\t\t// 先在自己的表情包里按标签向量找；没有 / 算不出来，才去借 dsh-meme 的图库 [FS-MEME-BRIDGE-PATCH]\n\t\tlet localReason = '';",
+		"dependsOn": [
+			"meme-bridge"
+		],
+		"note": "锚点在 P1 表情桥改造过的 stickers.js 里（上游本无）"
+	},
+	{
+		"id": "W34",
+		"file": "lib/stickers.js",
+		"title": "stickers：pickByFeel 动图排前面 + 严格模式挑不到就不发",
+		"marker": "\t\t\t\t\tconst ordered = wantAnim ? [...ranked].sort((a, b) => (isGif(b.file) ? 1 : 0) - (isGif(a.file) ? 1 : 0)) : ranked;",
+		"old": "\t\t\t\t\tconst q = new Float32Array(normalizeToBlob(r.vectors[0]).buffer.slice(0));\n\t\t\t\t\tconst ranked = rankByFeel({ vec: q, pool, top: Math.max(top, 1) });\n\t\t\t\t\tconst fresh = ranked.filter((x) => !avoid.includes(x.file));\n\t\t\t\t\tconst pick = (fresh.length > 0 ? fresh : ranked)[0];\n\t\t\t\t\tif (!pick) localReason = '没找到像的';\n\t\t\t\t\telse return { ok: true, file: pick.file, candidates: ranked.map((x) => x.file) };\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\tconst borrowed = await this.pickFromMeme(want, avoid);\n\t\tif (borrowed.ok) return borrowed;\n\t\treturn { ok: false, reason: localReason || borrowed.reason || '没找到像的', memeReason: borrowed.reason };",
+		"new": "\t\t\t\t\tconst q = new Float32Array(normalizeToBlob(r.vectors[0]).buffer.slice(0));\n\t\t\t\t\tconst ranked = rankByFeel({ vec: q, pool, top: Math.max(top, 1) });\n\t\t\t\t\t// 要动图就把 GIF 排前面（自己的收藏里静态图更多）\n\t\t\t\t\tconst ordered = wantAnim ? [...ranked].sort((a, b) => (isGif(b.file) ? 1 : 0) - (isGif(a.file) ? 1 : 0)) : ranked;\n\t\t\t\t\tconst fresh = ordered.filter((x) => !avoid.includes(x.file));\n\t\t\t\t\tconst pick = (fresh.length > 0 ? fresh : ordered)[0];\n\t\t\t\t\tif (!pick) localReason = '没找到像的';\n\t\t\t\t\telse if (wantAnim && animatedStrict === true && !isGif(pick.file)) localReason = '自己收藏的表情里没有对得上的动图';\n\t\t\t\t\telse return { ok: true, file: pick.file, animated: isGif(pick.file), candidates: ordered.map((x) => x.file) };\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\tconst borrowed = await this.pickFromMeme(want, avoid, { animatedFirst, animatedStrict });\n\t\tif (borrowed.ok) return borrowed;\n\t\treturn { ok: false, reason: localReason || borrowed.reason || '没找到像的', memeReason: borrowed.reason };",
+		"dependsOn": [
+			"meme-bridge"
+		],
+		"note": "锚点在 P1 表情桥改造过的 stickers.js 里（上游本无）"
+	},
+	{
+		"id": "W35",
+		"file": "lib/stickers.js",
+		"title": "stickers：resolveMemeTags 收 animatedFirst / animatedStrict",
+		"marker": "\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2, animatedFirst = false, animatedStrict = false } = {}) {",
+		"old": "\t * [FS-MEME-BRIDGE-PATCH]\n\t */\n\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2 } = {}) {\n\t\tconst src = String(text ?? '');\n\t\tconst hits = [...src.matchAll(/\\[表情\\s*[:：]\\s*([^\\]\\n]{1,80})\\]/g)];",
+		"new": "\t * [FS-MEME-BRIDGE-PATCH]\n\t */\n\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2, animatedFirst = false, animatedStrict = false } = {}) {\n\t\tconst src = String(text ?? '');\n\t\tconst hits = [...src.matchAll(/\\[表情\\s*[:：]\\s*([^\\]\\n]{1,80})\\]/g)];",
+		"dependsOn": [
+			"meme-bridge"
+		],
+		"note": "锚点带 [FS-MEME-BRIDGE-PATCH]，是 P1 写进去的"
+	},
+	{
+		"id": "W36",
+		"file": "lib/stickers.js",
+		"title": "stickers：resolveMemeTags 按描述挑图时带上动图偏好",
+		"marker": "\t\t\tresolved.push({ desc, file: r.ok ? r.file : null, fromMeme: r.fromMeme === true, animated: r.animated === true, reason: r.ok ? null : (r.reason ?? null) });",
+		"old": "\t\t\tif (i >= max) { out = out.split(whole).join(''); continue; }\n\t\t\tlet r = { ok: false, reason: '没写要什么表情' };\n\t\t\tif (desc !== '') r = await this.pickByFeel(workspacePath, desc, embedder, { model, avoid: used, top: 5 });\n\t\t\tif (r.ok) used.push(r.file);\n\t\t\tconst ref = r.ok ? (r.absolute === true ? imageRef(r.file) : '_stickers/' + r.file) : '';\n\t\t\tresolved.push({ desc, file: r.ok ? r.file : null, fromMeme: r.fromMeme === true, reason: r.ok ? null : (r.reason ?? null) });\n\t\t\tout = out.split(whole).join(r.ok ? '![' + desc.replace(/[[\\]]/g, '') + '](' + ref + ')' : '');\n\t\t}",
+		"new": "\t\t\tif (i >= max) { out = out.split(whole).join(''); continue; }\n\t\t\tlet r = { ok: false, reason: '没写要什么表情' };\n\t\t\tif (desc !== '') r = await this.pickByFeel(workspacePath, desc, embedder, { model, avoid: used, top: 5, animatedFirst, animatedStrict });\n\t\t\tif (r.ok) used.push(r.file);\n\t\t\tconst ref = r.ok ? (r.absolute === true ? imageRef(r.file) : '_stickers/' + r.file) : '';\n\t\t\tresolved.push({ desc, file: r.ok ? r.file : null, fromMeme: r.fromMeme === true, animated: r.animated === true, reason: r.ok ? null : (r.reason ?? null) });\n\t\t\tout = out.split(whole).join(r.ok ? '![' + desc.replace(/[[\\]]/g, '') + '](' + ref + ')' : '');\n\t\t}",
+		"dependsOn": [
+			"meme-bridge"
+		],
+		"note": "锚点在 P1 表情桥改造过的 stickers.js 里（上游本无）"
+	},
+	{
+		"id": "W37",
+		"file": "lib/stickers.js",
+		"title": "stickers：pickFromMeme 借 dsh-meme 时也先挑 GIF",
+		"marker": "\tasync pickFromMeme(feel, avoid = [], { animatedFirst = false, animatedStrict = false } = {}) {",
+		"old": "\t * @returns {Promise<{ok: boolean, file?: string, absolute?: boolean, fromMeme?: boolean, label?: string, reason?: string}>}\n\t */\n\tasync pickFromMeme(feel, avoid = []) {\n\t\tconst cfg = this.getConfig();\n\t\tif (cfg.meme !== true) return { ok: false, reason: '没开「借 dsh-meme 的表情库」' };\n\t\tif (!this.meme || typeof this.meme.pick !== 'function') return { ok: false, reason: '没找到 dsh-meme 的取图服务' };\n\t\ttry {\n\t\t\tconst r = await this.meme.pick({ feel, avoid });\n\t\t\tif (!r?.ok) return { ok: false, reason: r?.reason ?? 'dsh-meme 那边没挑到' };\n\t\t\treturn {",
+		"new": "\t * @returns {Promise<{ok: boolean, file?: string, absolute?: boolean, fromMeme?: boolean, label?: string, reason?: string}>}\n\t */\n\tasync pickFromMeme(feel, avoid = [], { animatedFirst = false, animatedStrict = false } = {}) {\n\t\tconst cfg = this.getConfig();\n\t\tif (cfg.meme !== true) return { ok: false, reason: '没开「借 dsh-meme 的表情库」' };\n\t\tif (!this.meme || typeof this.meme.pick !== 'function') return { ok: false, reason: '没找到 dsh-meme 的取图服务' };\n\t\ttry {\n\t\t\tconst r = await this.meme.pick({ feel, avoid, animatedFirst, animatedStrict });\n\t\t\tif (!r?.ok) return { ok: false, reason: r?.reason ?? 'dsh-meme 那边没挑到' };\n\t\t\treturn {",
+		"dependsOn": [
+			"meme-bridge"
+		],
+		"note": "锚点在 P1 表情桥改造过的 stickers.js 里（上游本无）"
+	},
+	{
+		"id": "W38",
+		"file": "lib/stickers.js",
+		"title": "stickers：挑图结果带 animated 标记",
+		"marker": "\t\t\t\tanimated: r.animated === true,",
+		"old": "\t\t\t\tabsolute: true,\n\t\t\t\tfromMeme: true,\n\t\t\t\tlabel: r.label ?? r.caption ?? r.tag ?? '',\n\t\t\t\tcaption: r.caption ?? '',",
+		"new": "\t\t\t\tabsolute: true,\n\t\t\t\tfromMeme: true,\n\t\t\t\tanimated: r.animated === true,\n\t\t\t\tlabel: r.label ?? r.caption ?? r.tag ?? '',\n\t\t\t\tcaption: r.caption ?? '',",
+		"dependsOn": [
+			"meme-bridge"
+		],
+		"note": "锚点在 P1 表情桥改造过的 stickers.js 里（上游本无）"
+	},
+	{
+		"id": "W39",
+		"file": "lib/meme-bridge.js",
+		"title": "meme-bridge：入参说明补动图两项",
+		"marker": "\t * @returns {Promise<{ok: boolean, path?: string, sourcePath?: string, tag?: string, caption?: string, packName?: string, label?: string, animated?: boolean, reason?: string}>}",
+		"old": "\t * 按感觉挑一张：先按「感觉词 + 情绪桶」搜，再按情绪桶随机，最后只按关键词搜。\n\t * 只读图库；返回的 path 是 fish-soul 自己缓存目录里的副本（可以直接发）。\n\t * @param {{feel?: string, avoid?: string[]}} [opts]\n\t * @returns {Promise<{ok: boolean, path?: string, sourcePath?: string, tag?: string, caption?: string, packName?: string, label?: string, reason?: string}>}\n\t */\n\tasync function pick({ feel = '', avoid = [] } = {}) {\n\t\tconst want = String(feel ?? '').trim();\n\t\tif (want === '') return { ok: false, reason: '没说要什么感觉' };",
+		"new": "\t * 按感觉挑一张：先按「感觉词 + 情绪桶」搜，再按情绪桶随机，最后只按关键词搜。\n\t * 只读图库；返回的 path 是 fish-soul 自己缓存目录里的副本（可以直接发）。\n\t * @param {{feel?: string, avoid?: string[], animatedFirst?: boolean, animatedStrict?: boolean}} [opts]\n\t *   animatedFirst / animatedStrict：微信只认 GIF 动图，静态图发过去一定不动。\n\t *   first = 先只在 .gif 里挑，挑不到再退回普通图；strict = 只在 .gif 里挑，挑不到就报没找到。\n\t * @returns {Promise<{ok: boolean, path?: string, sourcePath?: string, tag?: string, caption?: string, packName?: string, label?: string, animated?: boolean, reason?: string}>}\n\t */\n\tasync function pick({ feel = '', avoid = [], animatedFirst = false, animatedStrict = false } = {}) {\n\t\tconst want = String(feel ?? '').trim();\n\t\tif (want === '') return { ok: false, reason: '没说要什么感觉' };",
+		"dependsOn": [
+			"meme-bridge"
+		],
+		"note": "锚点在 P1 表情桥改造过的 meme-bridge.js 里（上游本无）"
+	},
+	{
+		"id": "W40",
+		"file": "lib/meme-bridge.js",
+		"title": "meme-bridge：加 isGif / usable 判定",
+		"marker": "\t\tconst isGif = (p) => extname(String(p ?? '')).toLowerCase() === '.gif';",
+		"old": "\t\tconst skip = new Set((Array.isArray(avoid) ? avoid : []).map((x) => String(x)));\n\t\tconst tried = new Set();\n\t\tfor (const q of [{ query: want, tag }, { query: '', tag }, { query: want, tag: '' }]) {\n\t\t\tconst query = String(q.query ?? '');",
+		"new": "\t\tconst skip = new Set((Array.isArray(avoid) ? avoid : []).map((x) => String(x)));\n\t\tconst tried = new Set();\n\t\tconst isGif = (p) => extname(String(p ?? '')).toLowerCase() === '.gif';\n\t\tconst usable = (m) => {\n\t\t\tconst p = String(m?.path ?? '');\n\t\t\tif (p === '' || !existsSync(p) || skip.has(p)) return false;\n\t\t\tconst ext = extname(p).toLowerCase();\n\t\t\tif (!IMAGE_EXT.has(ext)) return false;\n\t\t\treturn ext !== '.webp' || canConvertWebp() === true;\n\t\t};\n\t\tconst wantAnim = animatedFirst === true || animatedStrict === true;\n\t\tfor (const q of [{ query: want, tag }, { query: '', tag }, { query: want, tag: '' }]) {\n\t\t\tconst query = String(q.query ?? '');",
+		"dependsOn": [
+			"meme-bridge"
+		],
+		"note": "锚点在 P1 表情桥改造过的 meme-bridge.js 里（上游本无）"
+	},
+	{
+		"id": "W41",
+		"file": "lib/meme-bridge.js",
+		"title": "meme-bridge：要动图时多拉候选，GIF 优先、严格模式不回退",
+		"marker": "\t\t\t\t? (memes.find((m) => usable(m) && isGif(m.path)) ?? (animatedStrict === true ? undefined : memes.find(usable)))",
+		"old": "\t\t\ttried.add(key);\n\t\t\tlet memes = [];\n\t\t\ttry { memes = svc.search({ query, tag: mood, limit: 12 })?.memes ?? []; } catch { memes = []; }\n\t\t\tconst hit = memes.find((m) => {\n\t\t\t\tconst p = String(m?.path ?? '');\n\t\t\t\tif (p === '' || !existsSync(p) || skip.has(p)) return false;\n\t\t\t\tconst ext = extname(p).toLowerCase();\n\t\t\t\tif (!IMAGE_EXT.has(ext)) return false;\n\t\t\t\treturn ext !== '.webp' || canConvertWebp() === true;\n\t\t\t});\n\t\t\tif (!hit) continue;\n\t\t\tconst cached = cacheCopy(hit.path);",
+		"new": "\t\t\ttried.add(key);\n\t\t\tlet memes = [];\n\t\t\t// 要动图就多拉一点，图库里 GIF 占比低，12 条很容易全被静态图占满\n\t\t\ttry { memes = svc.search({ query, tag: mood, limit: wantAnim ? 40 : 12 })?.memes ?? []; } catch { memes = []; }\n\t\t\tconst hit = wantAnim\n\t\t\t\t? (memes.find((m) => usable(m) && isGif(m.path)) ?? (animatedStrict === true ? undefined : memes.find(usable)))\n\t\t\t\t: memes.find(usable);\n\t\t\tif (!hit) continue;\n\t\t\tconst cached = cacheCopy(hit.path);",
+		"dependsOn": [
+			"meme-bridge"
+		],
+		"note": "锚点在 P1 表情桥改造过的 meme-bridge.js 里（上游本无）"
+	},
+	{
+		"id": "W42",
+		"file": "lib/meme-bridge.js",
+		"title": "meme-bridge：返回 animated 标记",
+		"marker": "\t\t\t\tanimated: isGif(hit.path),",
+		"old": "\t\t\t\tpath: cached,\n\t\t\t\tsourcePath: hit.path,\n\t\t\t\ttag: String(hit.tag ?? mood ?? ''),\n\t\t\t\tcaption,",
+		"new": "\t\t\t\tpath: cached,\n\t\t\t\tsourcePath: hit.path,\n\t\t\t\tanimated: isGif(hit.path),\n\t\t\t\ttag: String(hit.tag ?? mood ?? ''),\n\t\t\t\tcaption,",
+		"dependsOn": [
+			"meme-bridge"
+		],
+		"note": "锚点在 P1 表情桥改造过的 meme-bridge.js 里（上游本无）"
+	},
+	{
+		"id": "W43",
+		"file": "lib/routes.js",
+		"title": "routes：新增 wechatState()（微信配置回显）",
+		"marker": "\t\tconst list = (v) => (Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : []);",
+		"old": "\t/** 进行中的 B站扫码（密钥只留在服务端） */\n\tlet qr = null;\n\tconst biliState = () => {\n\t\tconst b = getConfig().bili ?? {};",
+		"new": "\t/** 进行中的 B站扫码（密钥只留在服务端） */\n\tlet qr = null;\n\t/**\n\t * 平台 → 微信的状态（[FS-WECHAT-PANE]）。\n\t * 微信的收发本身就是 WechatAgent 的 social-bridge 在干，这边只回显 soul 侧存着的那份配置，\n\t * 面板上「哪些在这儿改就生效、哪些得去 WechatAgent 改」就是照这份数据 + 静态清单渲染的。\n\t */\n\tconst wechatState = () => {\n\t\tconst w = getConfig().wechat ?? {};\n\t\tconst list = (v) => (Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : []);\n\t\treturn {\n\t\t\tenabled: w.enabled === true,\n\t\t\tbridgeUrl: w.bridgeUrl ?? 'http://127.0.0.1:11234/fish-soul/outbound',\n\t\t\thasBridgeToken: Boolean(w.bridgeToken),\n\t\t\tbridgeTokenMasked: maskKey(w.bridgeToken ?? ''),\n\t\t\tinboundPort: w.inboundPort ?? 11233,\n\t\t\tinboundPath: w.inboundPath ?? '/fish-soul/wechat/inbound',\n\t\t\thasInboundToken: Boolean(w.inboundToken),\n\t\t\tselfId: String(w.selfId ?? ''),\n\t\t\tmasterUserIds: list(w.masterUserIds),\n\t\t\tprivateAllowList: list(w.privateAllowList),\n\t\t\tgroupAllowList: list(w.groupAllowList),\n\t\t\tallGroups: w.allGroups === true,\n\t\t\tfollowUpCount: w.followUpCount ?? 3,\n\t\t\tfollowUpSeconds: w.followUpSeconds ?? 120,\n\t\t\tfollowUpSmart: w.followUpSmart === true,\n\t\t\tbatchMs: w.batchMs ?? 800,\n\t\t\treplyWindowMinutes: w.replyWindowMinutes ?? 10,\n\t\t\tcallNames: list(w.callNames),\n\t\t\t// 微信只认 GIF 动图（静态图发过去一定不动），这两个开关是 soul 这边唯一能救表情的地方\n\t\t\tstickerAnimatedFirst: w.stickerAnimatedFirst !== false,\n\t\t\tstickerAnimatedStrict: w.stickerAnimatedStrict === true,\n\t\t\tinterject: interjectConfig(w.interject),\n\t\t\t// 通道是否在线由 WechatAgent 的 bridge 决定，这边只知道配置里开没开\n\t\t\tbridge: gateway?.wechat?.connected === true\n\t\t};\n\t};\n\tconst biliState = () => {\n\t\tconst b = getConfig().bili ?? {};"
+	},
+	{
+		"id": "W44",
+		"file": "lib/routes.js",
+		"title": "/channels/state 回显里加 wechat",
+		"marker": "\t\t\t\t\t\twechat: wechatState(),",
+		"old": "\t\t\t\t\t\tbili: biliState(),\n\t\t\t\t\t\tdouyin: douyinState(deps),\n\t\t\t\t\t\tsessions: {\n\t\t\t\t\t\t\tworkspacePath: current,",
+		"new": "\t\t\t\t\t\tbili: biliState(),\n\t\t\t\t\t\tdouyin: douyinState(deps),\n\t\t\t\t\t\twechat: wechatState(),\n\t\t\t\t\t\tsessions: {\n\t\t\t\t\t\t\tworkspacePath: current,"
+	},
+	{
+		"id": "W45",
+		"file": "lib/routes.js",
+		"title": "routes：新增 POST /channels/wechat-config（只存 soul 侧微信设置）",
+		"marker": "\t\t\t\t\tconst list = (v, fallback) => (v === undefined ? (Array.isArray(fallback) ? fallback : []) : (Array.isArray(v) ? v : []).map((x) => String(x).trim()).filter(Boolean));",
+		"old": "\t\t\t\t\tif (connectionChanged) channel?.restart();\n\t\t\t\t\treturn send(200, { ok: true, reconnecting: connectionChanged });\n\t\t\t\t}\n",
+		"new": "\t\t\t\t\tif (connectionChanged) channel?.restart();\n\t\t\t\t\treturn send(200, { ok: true, reconnecting: connectionChanged });\n\t\t\t\t}\n\n\t\t\t\t// ── 契约 15：微信设置（[FS-WECHAT-PANE]）──\n\t\t\t\t// 只存 soul 侧那部分：认人白名单、接话、分批、插嘴、叫名字、表情动图偏好。\n\t\t\t\t// 微信登录 / 收发端口 / 表情入库格式这些归 WechatAgent 的 social-bridge 管，这边存了也不生效，所以面板只做只读说明。\n\t\t\t\tif (method === 'POST' && path === '/channels/wechat-config') {\n\t\t\t\t\tif (!sameOrigin(req)) return send(403, { ok: false, error: 'forbidden' });\n\t\t\t\t\tconst body = JSON.parse(await readBody(req) || '{}');\n\t\t\t\t\tconst cur = getConfig().wechat ?? {};\n\t\t\t\t\tconst list = (v, fallback) => (v === undefined ? (Array.isArray(fallback) ? fallback : []) : (Array.isArray(v) ? v : []).map((x) => String(x).trim()).filter(Boolean));\n\t\t\t\t\tconst clampInt = (v, fb, min, max) => Math.min(max, Math.max(min, Math.floor(Number(v ?? fb)) || 0));\n\t\t\t\t\tconst portOf = (v, fb) => {\n\t\t\t\t\t\tconst n = Math.floor(Number(v ?? fb));\n\t\t\t\t\t\treturn Number.isFinite(n) && n >= 1 && n <= 65535 ? n : fb;\n\t\t\t\t\t};\n\t\t\t\t\tconst bridgeUrl = String(body.bridgeUrl ?? cur.bridgeUrl ?? '').trim();\n\t\t\t\t\tif (bridgeUrl !== '' && !/^https?:\\/\\/\\S+$/.test(bridgeUrl)) return send(200, { ok: false, error: 'bridge 地址要写成 http://127.0.0.1:11234/fish-soul/outbound 这种' });\n\t\t\t\t\tconst inboundPath = String(body.inboundPath ?? cur.inboundPath ?? '/fish-soul/wechat/inbound').trim();\n\t\t\t\t\tif (inboundPath !== '' && !/^\\/\\S*$/.test(inboundPath)) return send(200, { ok: false, error: '入站路径要以 / 开头' });\n\t\t\t\t\tconst next = {\n\t\t\t\t\t\t...cur,\n\t\t\t\t\t\t// 先摊开旧配置再逐项覆盖：面板上不给改的字段（收发 token、selfId、以后新加的项）不会因一次保存被抹掉\n\t\t\t\t\t\tenabled: body.enabled === undefined ? cur.enabled === true : body.enabled === true,\n\t\t\t\t\t\tbridgeUrl,\n\t\t\t\t\t\t...(typeof body.bridgeToken === 'string' && body.bridgeToken.trim() !== '' ? { bridgeToken: body.bridgeToken.trim() } : {}),\n\t\t\t\t\t\t...(body.clearBridgeToken === true ? { bridgeToken: '' } : {}),\n\t\t\t\t\t\tinboundPort: portOf(body.inboundPort, cur.inboundPort ?? 11233),\n\t\t\t\t\t\tinboundPath,\n\t\t\t\t\t\t...(typeof body.inboundToken === 'string' && body.inboundToken.trim() !== '' ? { inboundToken: body.inboundToken.trim() } : {}),\n\t\t\t\t\t\t...(body.clearInboundToken === true ? { inboundToken: '' } : {}),\n\t\t\t\t\t\tmasterUserIds: list(body.masterUserIds, cur.masterUserIds).slice(0, 20),\n\t\t\t\t\t\tprivateAllowList: list(body.privateAllowList, cur.privateAllowList).slice(0, 200),\n\t\t\t\t\t\tgroupAllowList: list(body.groupAllowList, cur.groupAllowList).slice(0, 200),\n\t\t\t\t\t\tallGroups: body.allGroups === undefined ? cur.allGroups === true : body.allGroups === true,\n\t\t\t\t\t\tfollowUpCount: clampInt(body.followUpCount, cur.followUpCount ?? 3, 0, 20),\n\t\t\t\t\t\tfollowUpSeconds: clampInt(body.followUpSeconds, cur.followUpSeconds ?? 120, 0, 1800),\n\t\t\t\t\t\tfollowUpSmart: body.followUpSmart === undefined ? cur.followUpSmart === true : body.followUpSmart === true,\n\t\t\t\t\t\tbatchMs: clampInt(body.batchMs, cur.batchMs ?? 800, 0, 15000),\n\t\t\t\t\t\treplyWindowMinutes: clampInt(body.replyWindowMinutes, cur.replyWindowMinutes ?? 10, 0, 1440),\n\t\t\t\t\t\tcallNames: list(body.callNames, cur.callNames).slice(0, 10),\n\t\t\t\t\t\t// 表情：微信只认 GIF，默认「先挑动图」，严格模式挑不到就不发（宁可没表情也不发张不动的）\n\t\t\t\t\t\tstickerAnimatedFirst: body.stickerAnimatedFirst === undefined ? cur.stickerAnimatedFirst !== false : body.stickerAnimatedFirst === true,\n\t\t\t\t\t\tstickerAnimatedStrict: body.stickerAnimatedStrict === undefined ? cur.stickerAnimatedStrict === true : body.stickerAnimatedStrict === true,\n\t\t\t\t\t\tinterject: interjectConfig(body.interject === undefined ? cur.interject : { ...(cur.interject ?? {}), ...body.interject })\n\t\t\t\t\t};\n\t\t\t\t\tsaveConfig({ wechat: next });\n\t\t\t\t\treturn send(200, { ok: true });\n\t\t\t\t}\n"
+	},
+	{
+		"id": "W46",
+		"file": "lib/client.js",
+		"title": "client：页签短名与子页签加「微信」",
+		"marker": "\t\tconst TAB_KEYS = { memory: \"忆\", character: \"角\", daily: \"常\", channels: \"台\", models: \"模\", system: \"统\", guide: \"引\", retrieval: \"索\", persona: \"人\", life: \"自\", inspector: \"忆\", activity: \"动\", behavior: \"习\", qq: \"Q\", bili: \"B\", douyin: \"抖\", wechat: \"微\", version: \"版\" };",
+		"old": "\n\t\t// ── 面板根组件：页签 + 数据装载 + 轮询 ──\n\t\tconst TAB_KEYS = { memory: \"忆\", character: \"角\", daily: \"常\", channels: \"台\", models: \"模\", system: \"统\", guide: \"引\", retrieval: \"索\", persona: \"人\", life: \"自\", inspector: \"忆\", activity: \"动\", behavior: \"习\", qq: \"Q\", bili: \"B\", douyin: \"抖\", version: \"版\" };\n\t\tconst TABS = [\n\t\t\t[\"memory\", \"记忆\", [[\"retrieval\", \"检索设置\"], [\"people\", \"人物与关系\"], [\"memories\", \"记忆内容\"], [\"recall-test\", \"检索测试\"], [\"weekly\", \"周记\"], [\"archives\", \"记忆存档\"], [\"backups\", \"导入与备份\"]]],\n\t\t\t[\"character\", \"角色\", [[\"persona\", \"人格卡\"], [\"templates\", \"人格模板\"], [\"growth\", \"成长\"], [\"worldinfo\", \"世界书\"], [\"habits\", \"说话习惯\"], [\"groups\", \"群设定\"], [\"chat-models\", \"聊天模型\"]]],\n\t\t\t[\"daily\", \"日常\", [[\"life\", \"主动开口\"], [\"activity\", \"最近动态\"], [\"diary\", \"日记\"], [\"stickers\", \"表情包\"], [\"slang\", \"学到的说法\"]]],\n\t\t\t[\"channels\", \"平台\", [[\"qq\", \"QQ\"], [\"bili\", \"B站\"], [\"douyin\", \"抖音\"]]],\n\t\t\t[\"models\", \"模型\", [[\"models\", \"功能模型\"], [\"usage\", \"用量与价格\"], [\"web\", \"联网搜索\"], [\"voice\", \"语音\"]]],\n\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"plugins\", \"个人插件\"], [\"version\", \"版本更新\"]]]",
+		"new": "\n\t\t// ── 面板根组件：页签 + 数据装载 + 轮询 ──\n\t\tconst TAB_KEYS = { memory: \"忆\", character: \"角\", daily: \"常\", channels: \"台\", models: \"模\", system: \"统\", guide: \"引\", retrieval: \"索\", persona: \"人\", life: \"自\", inspector: \"忆\", activity: \"动\", behavior: \"习\", qq: \"Q\", bili: \"B\", douyin: \"抖\", wechat: \"微\", version: \"版\" };\n\t\tconst TABS = [\n\t\t\t[\"memory\", \"记忆\", [[\"retrieval\", \"检索设置\"], [\"people\", \"人物与关系\"], [\"memories\", \"记忆内容\"], [\"recall-test\", \"检索测试\"], [\"weekly\", \"周记\"], [\"archives\", \"记忆存档\"], [\"backups\", \"导入与备份\"]]],\n\t\t\t[\"character\", \"角色\", [[\"persona\", \"人格卡\"], [\"templates\", \"人格模板\"], [\"growth\", \"成长\"], [\"worldinfo\", \"世界书\"], [\"habits\", \"说话习惯\"], [\"groups\", \"群设定\"], [\"chat-models\", \"聊天模型\"]]],\n\t\t\t[\"daily\", \"日常\", [[\"life\", \"主动开口\"], [\"activity\", \"最近动态\"], [\"diary\", \"日记\"], [\"stickers\", \"表情包\"], [\"slang\", \"学到的说法\"]]],\n\t\t\t[\"channels\", \"平台\", [[\"qq\", \"QQ\"], [\"bili\", \"B站\"], [\"douyin\", \"抖音\"], [\"wechat\", \"微信\"]]],\n\t\t\t[\"models\", \"模型\", [[\"models\", \"功能模型\"], [\"usage\", \"用量与价格\"], [\"web\", \"联网搜索\"], [\"voice\", \"语音\"]]],\n\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"plugins\", \"个人插件\"], [\"version\", \"版本更新\"]]]",
+		"dependsOn": [
+			"W46-prev-tabs"
+		],
+		"note": "TAB_KEYS 里 qq / bili / douyin 是前序页签补丁加进去的（上游本无）"
+	},
+	{
+		"id": "W47",
+		"file": "lib/client.js",
+		"title": "client：微信子页签也走 channels 轮询",
+		"marker": "\t\t\t\tconst fn = subtab === \"retrieval\" ? loadRetrieval : subtab === \"qq\" || subtab === \"bili\" || subtab === \"douyin\" || subtab === \"wechat\" ? loadChannels : null;",
+		"old": "\t\t\t// 检索页 2s 刷新（重建进度）；QQ / B站 / 抖音 3s 刷新\n\t\t\treact.useEffect(() => {\n\t\t\t\tconst fn = subtab === \"retrieval\" ? loadRetrieval : subtab === \"qq\" || subtab === \"bili\" || subtab === \"douyin\" ? loadChannels : null;\n\t\t\t\tif (fn === null) return undefined;\n\t\t\t\tconst timer = setInterval(fn, subtab === \"retrieval\" ? 2000 : 3000);",
+		"new": "\t\t\t// 检索页 2s 刷新（重建进度）；QQ / B站 / 抖音 3s 刷新\n\t\t\treact.useEffect(() => {\n\t\t\t\tconst fn = subtab === \"retrieval\" ? loadRetrieval : subtab === \"qq\" || subtab === \"bili\" || subtab === \"douyin\" || subtab === \"wechat\" ? loadChannels : null;\n\t\t\t\tif (fn === null) return undefined;\n\t\t\t\tconst timer = setInterval(fn, subtab === \"retrieval\" ? 2000 : 3000);"
+	},
+	{
+		"id": "W48",
+		"file": "lib/client.js",
+		"title": "client：微信子页签渲染 WechatPane",
+		"marker": "\t\t\t\t: subtab === \"wechat\" ? h(ChunkTab, { file: \"client.wechat.js\", pick: (m) => m.WechatPane, failText: \"微信页加载失败\", data: channels, refresh: loadChannels, notify })",
+		"old": "\t\t\t\t: subtab === \"qq\" ? h(ChannelPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: subtab === \"bili\" ? h(BiliPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: h(ChunkTab, { file: \"client.douyin.js\", pick: (m) => m.DouyinPane, failText: \"抖音页加载失败\", data: channels, refresh: loadChannels, notify });\n",
+		"new": "\t\t\t\t: subtab === \"qq\" ? h(ChannelPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: subtab === \"bili\" ? h(BiliPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: subtab === \"wechat\" ? h(ChunkTab, { file: \"client.wechat.js\", pick: (m) => m.WechatPane, failText: \"微信页加载失败\", data: channels, refresh: loadChannels, notify })\n\t\t\t\t: h(ChunkTab, { file: \"client.douyin.js\", pick: (m) => m.DouyinPane, failText: \"抖音页加载失败\", data: channels, refresh: loadChannels, notify });\n"
+	}
 ]
