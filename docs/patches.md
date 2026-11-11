@@ -14,13 +14,13 @@
 | P4 | `plugins` | 设置 → 系统 → 已装插件 | 5 | `assets/plugins-route.js` → 插件 `lib/` | `assets/plugins-hunks.json` |
 | P5 | `dm` | 抖音 —— 主动给互关好友发私信 | 21 | `assets/douyin-proactive.js` → 插件 `lib/` | `assets/dm-hunks.json` |
 | P6 | `share` | 刷到有意思的就发给你 → 视频卡片 | 9 | — | `assets/share-hunks.json` |
-| P7 | `wechat` | 微信（WechatAgent）↔ 人格记忆互通 | 22 | — | `assets/wechat-hunks.json` |
+| P7 | `wechat` | 微信（WechatAgent）↔ 人格记忆互通 | 25 | — | `assets/wechat-hunks.json` |
 
-合计锚点 **64 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
+合计锚点 **67 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
 
 每处补丁在运行时按四种判定之一处理：`PATCHED` 打上 / `ALREADY` 跳过 / `UPSTREAM` 上游已原生实现则自动退役 / `DRIFT` 锚点没了停手报错（见 README「用法」）。
 
-## P1 · 借 dsh-meme 的表情库（`--only meme`，15 处 + 1 个新文件）
+## P1 · 借 dsh-meme 的表情库（`--only meme`，22 处 + 1 个新文件）
 
 这一组的改动**不放在 `*-hunks.json` 里**，直接写在 `patch-fish-soul.mjs` 的 `patchMeme()` 内（`replaceOnce` / `replaceFunction`），下面按脚本源码逐处列出。
 
@@ -39,15 +39,22 @@
 | 10 | `index.js` | 提示词里加借库说明 | 锚点替换 |
 | 11 | `config-schema.js` | config-schema 加 meme | 锚点替换 |
 | 12 | `routes-v07.js` | /stickers/config 收 meme | 锚点替换 |
-| 13 | `client.js` | QQ 设置页的借库开关搬走（只留指路注释） | 锚点替换 |
-| 14 | `client.soul.js` | 表情包页读 `cfg.meme`（修掉 QQ 页读 `qq.stickers?.meme` 永远显示关闭的 bug） | 锚点替换 |
-| 15 | `client.soul.js` | 表情包页加借库开关 + 开着时多一行「表情包配置看 dsh-meme 设置」提示 | 锚点替换 |
+| 13 | `client.js` | 搬到「日常 → 表情包」页了 | 锚点替换 |
+| 14 | `client.soul.js` | 表情包页读 meme 状态 | 锚点替换 |
+| 15 | `client.soul.js` | 表情包配置看 dsh-meme 设置 | 锚点替换 |
+| 16 | `stickers.js` | 没写要什么表情 | 锚点替换 |
+| 17 | `gateway.js` | /\\[表情\\s*[:：]/.test(feelText) | 锚点替换 |
+| 18 | `gateway.js` | 抖音私信签名加图 | 锚点替换 |
+| 19 | `gateway.js` | 抖音私信拼上图片段 | 锚点替换 |
+| 20 | `gateway.js` | 抖音私信传会话 ID | 锚点替换 |
+| 21 | `gateway.js` | 抖音分支带上图片 | 锚点替换 |
+| 22 | `douyin-social.js` | /\\[表情\\s*[:：]/.test(out.text) | 锚点替换 |
 
-涉及文件：`stickers.js` / `gateway.js` / `index.js` / `config-schema.js` / `routes-v07.js` / `client.js` / `client.soul.js`。
+涉及文件：`stickers.js` / `gateway.js` / `index.js` / `config-schema.js` / `routes-v07.js` / `client.js` / `client.soul.js` / `douyin-social.js`。
 
 | 项 | 说明 |
 | --- | --- |
-| 开关 | 日常 → 表情包 → 「借 dsh-meme 的表情库」（默认关）；开着时下方多一行「表情包配置看 dsh-meme 设置」，关着与原生一致 |
+| 开关 | 设置 → 表情包 → 「用 dsh-meme 的表情库」（默认关） |
 | 上游状态 | 🟡 仍需（上游未接入 dsh-meme）；上游 lib 下任意 js 出现 `dshMeme` 就在运行时自动退役 |
 | 标记 | 每处改动行尾带 `FS-MEME-BRIDGE-PATCH`，`--check` 与体检靠它认 |
 | 关闭方式 | 关掉开关即可；彻底回滚就删 `lib/meme-bridge.js` 并把 `lib/` 从备份拷回 |
@@ -284,7 +291,7 @@ afterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, 
 
 </details>
 
-## P7 · 微信（WechatAgent）↔ 人格记忆互通（`--only wechat`，22 处）
+## P7 · 微信（WechatAgent）↔ 人格记忆互通（`--only wechat`，25 处）
 
 | # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |
 | --- | --- | --- | --- | --- |
@@ -310,6 +317,9 @@ afterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, 
 | 20 | `W20` | `lib/slang.js` | slang：手动合并写进共桶 | — |
 | 21 | `W21` | `lib/slang.js` | slang：外部导入写进共桶 | — |
 | 22 | `W22` | `lib/soul-memory.js` | soul-memory：记忆卡片 / 联系人清单的通道种类认得出微信（wechat-private / wechat-group，不再记成 qq-private） | — |
+| 23 | `W23` | `lib/gateway.js` | 微信出站表情挑选结果落日志（[表情:] 到底挑到没挑到，对着日志能看见） | — |
+| 24 | `W24` | `lib/index.js` | 微信回复规则变量（replyIsWechat） | — |
+| 25 | `W25` | `lib/index.js` | 微信回复规则整段（分条 / [表情:] 走 dsh-meme 图库 / 防被带跑 / 上网） | — |
 
 <details><summary>锚点原文（marker）</summary>
 
@@ -382,6 +392,15 @@ setKv(this.db, `slang.${slangBucket(this.db, channelId)}`, d);
 # W22
 const isWechat = channelId.startsWith('wechat:')
 
+# W23
+[FS-WECHAT-STICKER-TRACE]
+
+# W24
+const replyIsWechat = replyWhere === 'wechat-private' || replyWhere === 'wechat-group';
+
+# W25
+if (replyIsWechat) {
+
 ```
 
 </details>
@@ -392,13 +411,13 @@ const isWechat = channelId.startsWith('wechat:')
 
 | 组 | 锚点 / 改动处数（补丁器） | 页面探针条数 | 差异 |
 | --- | --- | --- | --- |
-| P1 | 16 | 6 | 少 10 条（合并成功能项） |
+| P1 | 23 | 6 | 少 17 条（合并成功能项） |
 | P2 | 5 | 4 | 少 1 条（合并成功能项） |
 | P3 | 2 | 2 | 一致 |
 | P4 | 6 | 5 | 少 1 条（合并成功能项） |
 | P5 | 22 | 11 | 少 11 条（合并成功能项） |
 | P6 | 9 | 10 | 多 1 条（一处拆成多项） |
-| P7 | 22 | 23 | 多 1 条（一处拆成多项） |
+| P7 | 25 | 23 | 少 2 条（合并成功能项） |
 
 页面上某一组显示「已打 N / M」，N 是按探针数出来的；锚点数以本文件为准。探针漏了某处时，页面会少报，但补丁器 `--check` 仍然会管到那一处。
 

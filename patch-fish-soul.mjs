@@ -153,14 +153,19 @@ function write(rel, text) {
  */
 function replaceOnce(rel, oldStr, newStr, title, probe = '') {
 	const text = read(rel);
+	// 多行锚点必须按目标文件的实际换行符比较：上游有的文件整份是 CRLF（index.js / config-schema.js /
+	// gateway.js 都是），拿 \n 拼出来的锚点永远 includes 不到 → 会误报「锚点过期」。这里统一 fit 一次。
+	const useCrlf = text.includes('\r\n');
+	const oldS = fit(oldStr, useCrlf);
+	const newS = fit(newStr, useCrlf);
 	// probe：打完之后才会出现的短串。给「锚点替换后依然保留」的那几处用，避免重跑时在同一锚点上叠第二遍
 	if (probe !== '' && text.includes(probe)) {
 		log(`  ＝ ${rel}：${title} 已经打过`);
 		skipped += 1;
 		return 'skipped';
 	}
-	if (!text.includes(oldStr)) {
-		if (text.includes(newStr)) {
+	if (!text.includes(oldS)) {
+		if (text.includes(newS)) {
 			log(`  ＝ ${rel}：${title} 已经打过`);
 			skipped += 1;
 			return 'skipped';
@@ -170,12 +175,12 @@ function replaceOnce(rel, oldStr, newStr, title, probe = '') {
 		drifted += 1;
 		return 'drift';
 	}
-	if (text.split(oldStr).length > 2) {
+	if (text.split(oldS).length > 2) {
 		log(`  × ${rel}：${title} 的锚点出现多次，不敢改`);
 		failed += 1;
 		return 'failed';
 	}
-	write(rel, text.replace(oldStr, newStr));
+	write(rel, text.replace(oldS, newS));
 	log(`  ✓ ${rel}：${title}`);
 	changed += 1;
 	return 'patched';
