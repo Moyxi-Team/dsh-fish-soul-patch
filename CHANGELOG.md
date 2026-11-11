@@ -5,6 +5,31 @@
 
 ---
 
+## 微信「说的比收到的多」：一轮多条助手消息以前被覆盖，只剩最后一条（W26）
+
+**为什么改**：主人在微信上反馈「DSH 里明明有好几条，微信实际收到的少了几条」。查会话记录（`sessions/.../session.v4.jsonl.zstd`）发现 DSH 一轮里 `assistant/message` 会出现不止一条（模型分步输出、续写重试），而上游 `ChatGateway.onSessionEvent` 收的是覆盖赋值 `st.text = text` —— 后一条一进来，前一条已经说出口的正文直接被顶掉。`turn/end` 只拿得到最后一条，于是 `sendReply` 只发了最后一句：微信 / QQ 端看起来就是「少了几条」，DSH 会话里却一条不少。
+
+实测（本机 12 轮微信对话）：第 1、4、8、10、11 轮各有 2 条助手消息，「在呢在呢」「对呀」「你爹啊」「你是肥鱼啊」「我啊 / 我是希希啊」全部没发出去。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `assets/wechat-hunks.json` · 新增 W26 | `lib/gateway.js` 的 `assistant/message` 分支：改为按 `message.id` 累积到 `st.said`，再按顺序用空行拼成 `st.text`；`interrupted` 时连 `said` 一起清空（保持「被打断的这一轮不发」的原语义）；图片同样累积并限 10 张 |
+| `docs/patches.md` | 由 `tools/gen-patch-docs.mjs` 重新生成（68 处锚点） |
+
+**怎么验证**
+
+```powershell
+node patch-fish-soul.mjs --only wechat   # 期望：✓ 本处 + 已打过 25 处 + 失败 0
+```
+
+重启 DSH 后，微信里同一轮出现多条回复时应该一条不落；`fish-soul-debug.log` 里同一次 `turn/end` 下会出现 `seg=0 / seg=1 / seg=2…` 多行 `sent`（以前恒定只有 `seg=0`）。顺带 `turn/end` 的 `textLen` 会等于该轮所有助手消息拼接后的长度。
+
+**回滚**：把 W26 从 `wechat-hunks.json` 删掉，从 `~/.dsh/backup/fish-soul-patch-<时间戳>/` 还原 `lib/gateway.js`（或重装插件），重跑 `--check`。
+
+---
+
 ## 表情包设置页：借库开关从 QQ 页搬过来 + 修「永远显示关」的老 bug
 
 **为什么改**：P1 的「借 dsh-meme 的表情库」开关原先挂在 QQ 设置页，可表情包本身的设置（B 站小表情、收藏、导入的图）都在「日常 → 表情包」页，开关落在 QQ 页既难找、也割裂。更实际的问题是那段读的是 `qq.stickers?.meme`——多套了一层 `qq`，真正落盘的是顶层 `stickers.meme`，于是取值恒为 `undefined`，界面永远显示关闭：用户以为没开，其实配置里可能早就开着。此外开着开关时，应当让人知道「表情包怎么挑」这套东西以 dsh-meme 那边为准。

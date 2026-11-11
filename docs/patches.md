@@ -14,9 +14,9 @@
 | P4 | `plugins` | 设置 → 系统 → 已装插件 | 5 | `assets/plugins-route.js` → 插件 `lib/` | `assets/plugins-hunks.json` |
 | P5 | `dm` | 抖音 —— 主动给互关好友发私信 | 21 | `assets/douyin-proactive.js` → 插件 `lib/` | `assets/dm-hunks.json` |
 | P6 | `share` | 刷到有意思的就发给你 → 视频卡片 | 9 | — | `assets/share-hunks.json` |
-| P7 | `wechat` | 微信（WechatAgent）↔ 人格记忆互通 | 25 | — | `assets/wechat-hunks.json` |
+| P7 | `wechat` | 微信（WechatAgent）↔ 人格记忆互通 | 26 | — | `assets/wechat-hunks.json` |
 
-合计锚点 **67 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
+合计锚点 **68 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
 
 每处补丁在运行时按四种判定之一处理：`PATCHED` 打上 / `ALREADY` 跳过 / `UPSTREAM` 上游已原生实现则自动退役 / `DRIFT` 锚点没了停手报错（见 README「用法」）。
 
@@ -291,7 +291,7 @@ afterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, 
 
 </details>
 
-## P7 · 微信（WechatAgent）↔ 人格记忆互通（`--only wechat`，25 处）
+## P7 · 微信（WechatAgent）↔ 人格记忆互通（`--only wechat`，26 处）
 
 | # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |
 | --- | --- | --- | --- | --- |
@@ -320,6 +320,7 @@ afterRound(this, '抖音', watched, (w) => ({ title: w.title, author: w.author, 
 | 23 | `W23` | `lib/gateway.js` | 微信出站表情挑选结果落日志（[表情:] 到底挑到没挑到，对着日志能看见） | — |
 | 24 | `W24` | `lib/index.js` | 微信回复规则变量（replyIsWechat） | — |
 | 25 | `W25` | `lib/index.js` | 微信回复规则整段（分条 / [表情:] 走 dsh-meme 图库 / 防被带跑 / 上网） | — |
+| 26 | `W26` | `lib/gateway.js` | 微信出站不再丢段：一轮里多条 assistant/message 按 id 累积（以前是覆盖，只剩最后一条） | — |
 
 <details><summary>锚点原文（marker）</summary>
 
@@ -401,6 +402,9 @@ const replyIsWechat = replyWhere === 'wechat-private' || replyWhere === 'wechat-
 # W25
 if (replyIsWechat) {
 
+# W26
+[FS-WECHAT-SEG-LOST]
+
 ```
 
 </details>
@@ -417,7 +421,7 @@ if (replyIsWechat) {
 | P4 | 6 | 5 | 少 1 条（合并成功能项） |
 | P5 | 22 | 11 | 少 11 条（合并成功能项） |
 | P6 | 9 | 10 | 多 1 条（一处拆成多项） |
-| P7 | 25 | 23 | 少 2 条（合并成功能项） |
+| P7 | 26 | 23 | 少 3 条（合并成功能项） |
 
 页面上某一组显示「已打 N / M」，N 是按探针数出来的；锚点数以本文件为准。探针漏了某处时，页面会少报，但补丁器 `--check` 仍然会管到那一处。
 
