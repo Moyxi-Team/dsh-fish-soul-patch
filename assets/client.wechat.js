@@ -17,6 +17,8 @@ window.__ModuleLoader__.load({
 	factory: (require) => {
 		const react = require("react");
 		const lines = (v) => String(v).split(/\n+/).map((x) => x.trim()).filter(Boolean);
+		/** ui.Row 只把 string 型 desc 挂成悬停 tip；数组要先拼成多行文本，否则说明会整段消失 */
+		const tipText = (v) => (Array.isArray(v) ? v.filter((x) => x !== undefined && x !== null && x !== "").join("\n") : v);
 
 		/** 改了也必须去 WechatAgent 那边动手才算数的（这边存了也不生效）——整段只在悬停里出现 */
 		const AGENT_SIDE = "微信登录 / 掉线重登：WechatAgent 客户端扫码登录，soul 看不到二维码，也不该管。"
@@ -173,7 +175,7 @@ window.__ModuleLoader__.load({
 						w.enabled !== true)),
 					Row({
 						title: "这条会话通到哪儿",
-						desc: linkTip,
+						desc: tipText(linkTip),
 						meta: Tag(linkText, linked ? undefined : "outline")
 					},
 						ms.workspacePath ? Muted(`→ ${ms.workspaceTitle || ""}${ms.workspaceTitle ? " · " : ""}${ms.workspacePath}`) : Muted("还没有会话记录"),
@@ -221,7 +223,7 @@ window.__ModuleLoader__.load({
 						Button({ variant: "ghost", disabled: busy, onClick: () => refresh() }, "重新体检")),
 					Row({
 						title: "上一张挑的",
-						desc: lastTip,
+						desc: tipText(lastTip),
 						meta: Tag(lastText, last !== null && last.animated === true ? undefined : "outline")
 					},
 						last !== null && last.file !== "" ? Muted(String(last.file).split(/[\\/]/).pop()) : Muted("—"))),
@@ -284,9 +286,9 @@ window.__ModuleLoader__.load({
 
 				// ── ⑦ 去哪儿改（信息不减，全在悬停里）──
 				Group({ title: "去哪儿改", tip: "微信这套是两半拼起来的：soul 管人格 / 认人 / 节奏 / 挑图，WechatAgent 管登录和收发。分不清哪边的时候看这两行。" },
-					Row({ title: "本页 / soul 其它页改了就生效", desc: SOUL_SIDE },
+					Row({ title: "本页 / soul 其它页改了就生效", desc: tipText(SOUL_SIDE) },
 						Tag("soul", "outline")),
-					Row({ title: "必须去 WechatAgent 改才生效", desc: AGENT_SIDE },
+					Row({ title: "必须去 WechatAgent 改才生效", desc: tipText(AGENT_SIDE) },
 						Tag("WechatAgent", "danger"))),
 
 				// ── ⑧ 排错 ──

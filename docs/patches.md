@@ -770,7 +770,7 @@ ctx.effect(() => () => channel.stop(), 'dsh-fish-soul: qq channel');
 | 2 | `wechat-master-02` | `lib/config-schema.js` | 微信插话：让着你（masterQuiet）要能存住 | — |
 | 3 | `wechat-master-03` | `lib/gateway.js` | 微信运行配置里带上 masterTakeover | — |
 | 4 | `wechat-master-04` | `lib/gateway.js` | 主人私聊接管关掉时整条不进 soul（不回复、不记记忆） | — |
-| 5 | `wechat-master-05` | `lib/gateway.js` | 微信出站：模型挑中的 _stickers 静态图，发之前先换成真动图 | — |
+| 5 | `wechat-master-05` | `lib/gateway.js` | 微信出站：任何静态图（含 dsh-meme 缓存的 webp）发之前先换成真动图 | — |
 | 6 | `wechat-master-06` | `lib/gateway-media.js` | 新增 wechatAnimatedSwap：拿文件名当"感觉"去图库换一张真 GIF | — |
 | 7 | `wechat-master-07` | `lib/routes.js` | /state 里算出「微信·嘉新（主人）」这条会话通到哪儿（认人、工作区、活跃） | — |
 | 8 | `wechat-master-08` | `lib/routes.js` | 微信表情体检：借库开没开、图库有没有 GIF、上一次挑图结果 | — |

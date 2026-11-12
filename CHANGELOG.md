@@ -5,6 +5,49 @@
 
 ---
 
+## P10 追加：微信表情还是发静态图 —— 漏的是 `meme-cache` 那条路（不是挑图策略坏了）
+
+**为什么还发静态**：P10 第一版把「换动图」的条件写成"路径在 `_stickers` 里"。可借 dsh-meme 挑图时，
+命中的图会先被复制到 `meme-cache\meme-<sha1>.webp` 再出站——那条路径不在 `_stickers` 里，于是
+换图整个被跳过，微信收到一张 webp，渲染成不动的一张。日志里 13:37 那条 `sticker …meme-72e90d42b9b5.webp
+fromMeme=true` 就是这么来的。挑图策略本身没坏（实测见下）。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `assets/wechat-master-hunks.json` → `wechat-master-05`（gateway.js） | 换图判定从"只认 `_stickers`"改成**所有静态图**（`.png/.jpg/.jpeg/.webp/.bmp`，含 `meme-cache` 里的缓存副本）；带 `upgradeOld`，已打过旧版的机器直接升到新版，不会两段并存 |
+| `assets/wechat-master-hunks.json` → `wechat-master-06`（gateway-media.js） | `wechatAnimatedSwap()` 三处收紧：① 严格开关 `animatedStrict` **真的透传**给 `meme.pick`（以前写死 `false`，开了严格也没用）；② 缓存文件名是 sha1（`meme-72e90d42b9b5`），拿它当"感觉"等于没给词——改用**本轮挑图描述**兜底（`lastWechatSticker.desc`，没有就 `日常`）；③ 换不到时严格模式返回空 file（这张不发），非严格原样发 |
+| `assets/client.wechat.js` | `tipText()`：`ui.Row` 只把 **string** 型 `desc` 挂成悬停 tip，数组型会整段消失——`linkTip` / `lastTip` / `SOUL_SIDE` / `AGENT_SIDE` 全部先拼成多行文本再挂，说明真的只在悬停里出现 |
+
+**实测（不改线上代码，直接 import 插件里的 meme-bridge，用真图库跑）**
+
+```text
+status = {"ok":true,"total":660,"animated":11}
+gifPool size = 11
+feel=得意  -> meme-678ac7165011.gif animated=true viaPool=true
+feel=害羞  -> meme-0cf00b0cb73a.gif animated=true viaPool=true
+feel=开心  -> meme-678ac7165011.gif animated=true viaPool=true
+feel=亲亲  -> meme-ef7ac259e479.gif animated=true viaPool=true
+strict     -> meme-678ac7165011.gif animated=true
+默认(不过滤)-> meme-d0eb733fb113.webp animated=false
+```
+
+结论：只要 `animatedFirst` 传下去（P10 已接），图库那 11 张 GIF 就能被挑中；之所以此前还发静态，
+是**出站换图在 `meme-cache` 路径上没触发**，以及旧运行时根本没把动画偏好传进 `pick`。两条这次都补上了。
+
+**怎么验证**
+
+```powershell
+node patch-fish-soul.mjs --only wechat-master   # 05 / 06 显示「旧版已打 → 升到新版」
+node patch-fish-soul.mjs --check                # 漂移 0 处、失败 0 处
+```
+
+重开 DeepSeek Harness 后，在微信私聊让她发个表情，面板「平台 → 微信 → 上一张挑的」里看
+`是不是 GIF：是`，文件名为 `meme-*.gif`。
+
+---
+
 ## 新增 P10：微信主人接管开关 + 静态表情换动图 + 面板状态；services/ 跟随启动脚本入库
 
 **为什么改**：三件事凑一起。
