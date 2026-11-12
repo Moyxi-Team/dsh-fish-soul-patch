@@ -65,7 +65,7 @@ const DEFAULT_SHARE_TYPES = {
  * 把设置里的类型词表归一成 [{name, words}]：内置打底，用户写同名就覆盖，写新名字就新增。
  * 也接受只给类型名（没给词表）—— 那就拿类型名自己当唯一命中词。
  */
-function normalizeShareTypes(raw) {
+function normalizeShareTypes(raw, deleted) {
 	const merge = new Map(Object.entries(DEFAULT_SHARE_TYPES).map(([k, v]) => [k, [...v]]));
 	const put = (name, words) => {
 		const key = String(name ?? '').trim();
@@ -83,6 +83,12 @@ function normalizeShareTypes(raw) {
 	} else if (raw !== null && typeof raw === 'object') {
 		for (const [k, v] of Object.entries(raw)) put(k, v);
 	}
+	// [FS-DM-TYPE-DEL] 删掉的类型：删过一次就真的不再出现 —— 内置词表打底时也会跳过它。
+	// 用户明确要求「我自己加的类型必须能删、不能被代码加回来」，所以删除名单是最终裁决。
+	const gone = new Set((Array.isArray(deleted) ? deleted : String(deleted ?? '').split(/[，,、\s]+/))
+		.map((x) => String(x ?? '').trim())
+		.filter((x) => x !== ''));
+	for (const k of gone) merge.delete(k);
 	return [...merge.entries()].map(([name, words]) => ({ name, words }));
 }
 
@@ -115,10 +121,27 @@ export function dmCfg(d) {
 	const on = d?.enabled === true;
 	const dm = d?.dm ?? {};
 	// 视频类型词表：内置打底，设置页写了就覆盖/新增
-	const shareTypes = normalizeShareTypes(dm.shareTypes);
+	// [FS-DM-TYPE-DEL] 删掉的类型名单（前端删自定义类型时记下来；内置打底也要跳过它，否则删完刷新又回来）
+	const shareTypesDeleted = (Array.isArray(dm.shareTypesDeleted) ? dm.shareTypesDeleted : String(dm.shareTypesDeleted ?? '').split(/[，,、\s]+/))
+		.map((x) => String(x ?? '').trim())
+		.filter((x) => x !== '')
+		.slice(0, 100);
+	const shareTypes = normalizeShareTypes(dm.shareTypes, shareTypesDeleted);
 	// [FS-DM-SHARE-DEFAULT] 默认分享哪几类（没单独指定的人按这个；空 = 不限）
 	const defaultShareTypes = String(dm.defaultShareTypes ?? '').trim().slice(0, 200);
-	const defaultWantTypes = parseTypeList(defaultShareTypes, shareTypes);
+	// [FS-DM-TYPE-DEL] 类型被删了、但某个人（或默认档）还写着这个名字时，不能悄悄退化成「不限」乱发：
+	// 名字还在 → 就按这个名字当搜索词去搜（类型名本身就是关键词），保证「只发这一类」不失效。
+	const namesOf = (raw) => {
+		const list = (Array.isArray(raw) ? raw : String(raw ?? '').split(/[，,、\s]+/))
+			.map((x) => String(x ?? '').trim())
+			.filter((x) => x !== '');
+		return [...new Set(list)];
+	};
+	const pickTypes = (raw) => {
+		const picked = parseTypeList(raw, shareTypes);
+		return picked.length > 0 ? picked : namesOf(raw);
+	};
+	const defaultWantTypes = pickTypes(defaultShareTypes);
 	// 要发给谁：设置页自己勾的名单（[{name, uid, shareType}]），空着就是谁也不发
 	// shareType 是这个人的「只看哪几类视频」，留空 = 跟默认（再空 = 不限，随便挑一条）
 	const targets = (Array.isArray(dm.targets) ? dm.targets : [])
@@ -128,7 +151,7 @@ export function dmCfg(d) {
 				name: String(x?.name ?? '').trim(),
 				uid: String(x?.uid ?? '').trim(),
 				shareType,
-				wantTypes: shareType === '' ? defaultWantTypes : parseTypeList(shareType, shareTypes),
+				wantTypes: shareType === '' ? defaultWantTypes : pickTypes(shareType),
 			};
 		})
 		.filter((x) => x.name !== '');
@@ -144,6 +167,11 @@ export function dmCfg(d) {
 		// 视频类型：词表 + 每人想收哪几类（targets[].wantTypes）
 		shareTypes,
 		shareTypeNames: shareTypes.map((t) => t.name),
+		// [FS-DM-TYPE-DEL] 内置类型名单 + 删掉的类型名单一起回给设置页：
+		// 前端据此判断「哪些是内置（不给删）/ 哪些是自己加的（给删）」，不用再各存一份硬编码，
+		// 也不会再出现「自己加的类型被当成内置、删不掉」。
+		builtinTypeNames: Object.keys(DEFAULT_SHARE_TYPES),
+		deletedTypes: shareTypesDeleted,
 		defaultShareTypes,
 		defaultWantTypes,
 		master: String(d?.masterName ?? '').trim(),
@@ -211,6 +239,9 @@ export function proactiveStatus(social) {
 		// 视频类型：给设置页做候选提示（每人一行按名字选，可多人不同）
 		shareTypes: cfg.shareTypes.map((t) => ({ name: t.name, words: t.words })),
 		shareTypeNames: cfg.shareTypeNames,
+		// [FS-DM-TYPE-DEL] 内置名单 + 已删名单：设置页据此只给「自己加的」类型显示删除按钮
+		builtinTypeNames: cfg.builtinTypeNames ?? [],
+		deletedTypes: cfg.deletedTypes ?? [],
 		defaultShareTypes: cfg.defaultShareTypes,
 		defaultWantTypes: cfg.defaultWantTypes,
 		pickedNames: picked,
@@ -903,12 +934,12 @@ async function searchPool(social, keyword, words = []) {
 	const browser = social.host?.browser;
 	const kw = String(keyword ?? '').trim();
 	if (!browser || kw === '') return [];
-	const hits = [...new Set([kw, ...(Array.isArray(words) ? words : [])].map((w) => String(w ?? '').trim()).filter((w) => w !== ''))];
-	const okType = (desc) => {
-		const d = String(desc ?? '');
-		if (d === '') return false;
-		return hits.some((w) => d.includes(w));
-	};
+	// [FS-SHARE-SEARCH-TRUST] 搜索词本身就是类型 —— 抖音按这个词排出来的就是这一类的，直接收。
+	// 旧版还有一道「卡片文案必须带类型词」的二次拦截：卡片上常是歌词 / 半句话题 / 空文案，
+	// 一拦就全灭（实测搜「萝莉」抓到的全是空 desc），池子里只剩收藏和推荐，
+	// 最后一条都对不上类型 → 整轮不发。用户要的就是「搜什么发什么」，这里不再筛文案。
+	const hints = [...new Set([kw, ...(Array.isArray(words) ? words : [])].map((w) => String(w ?? '').trim()).filter((w) => w !== ''))];
+	void hints;
 	// [FS-SHARE-SEARCH-V2] 两套地址都试：先视频 Tab，再裸搜索页（新版有时只认后者）
 	const urls = [
 		`https://www.douyin.com/search/${encodeURIComponent(kw)}?type=video`,
@@ -916,7 +947,6 @@ async function searchPool(social, keyword, words = []) {
 	];
 	const out = [];
 	const seen = new Set();
-	let rejected = 0;
 	for (const url of urls) {
 		await browser.goto(url, { settleMs: 6500, retries: 0 }).catch(() => {});
 		await sleep(1800);
@@ -931,8 +961,7 @@ async function searchPool(social, keyword, words = []) {
 			for (const x of (Array.isArray(found) ? found : [])) {
 				const id = String(x?.id ?? '');
 				if (!/^\d{8,20}$/.test(id) || seen.has(id)) continue;
-				// [FS-SHARE-STRICT-TYPE] 文案里没带这个类型的词 → 不进池
-				if (!okType(x?.desc)) { rejected += 1; continue; }
+				// [FS-SHARE-SEARCH-TRUST] 搜索页给的就是「这个类型」的视频 → 直接收，不再按文案拦
 				seen.add(id);
 				out.push({ id, desc: String(x?.desc ?? ''), tags: [] });
 			}
@@ -940,7 +969,7 @@ async function searchPool(social, keyword, words = []) {
 			await browser.eval('window.scrollBy(0, 2400)').catch(() => {});
 			await sleep(1500 + i * 400);
 		}
-		social.log?.('info', `[fish-soul] 抖音：搜「${kw}」抓到 ${out.length} 条${rejected > 0 ? `（另有 ${rejected} 条文案对不上「${hits.join('/')}」，已剔除）` : ''}`);
+		social.log?.('info', `[fish-soul] 抖音：搜「${kw}」抓到 ${out.length} 条（搜索结果直接按「${kw}」这一类算）`);
 		if (out.length > 0) break;
 	}
 	return out;
@@ -969,8 +998,14 @@ async function othersPool(social, { wantTypes = [], types = [] } = {}) {
 	});
 	// [FS-SHARE-SEARCH-V2] 缓存带版本号：老版本缓存里全是「srcType 为空」的残池（搜索页一条没抓到），
 	// 不认版本的话修好了也会继续吃那口坏缓存、继续「没抓到这类的视频」。
-	// [FS-SHARE-STRICT-TYPE] 升到 v3：v2 池子里存的是 alt="icon" 那种脏文案，必须作废重抓。
-	if (Number(cached?.v ?? 0) === 3 && cached?.key === key && Array.isArray(cached?.items) && cached.items.length > 0 && Date.now() - Number(cached?.at ?? 0) < 12 * HOUR_MS) {
+	// [FS-DM-SHARE-V4] 升到 v4：v3 会把「一条没搜到 + 收藏/推荐凑出来的池」缓存 12 小时，
+	// 于是整天都在吃那口没有类型的旧池，永远「13 条没一条对得上」。v4 起只有 search=true（真按类型搜到过）才认缓存。
+	const cachedOk = Number(cached?.v ?? 0) === 4
+		&& cached?.key === key
+		&& Array.isArray(cached?.items) && cached.items.length > 0
+		&& Date.now() - Number(cached?.at ?? 0) < 12 * HOUR_MS
+		&& (want.length === 0 || cached?.search === true);
+	if (cachedOk) {
 		return cached.items.map(norm).filter((x) => /^\d{8,}$/.test(x.id));
 	}
 	// 她自己的作品 id + 她的 sec_uid —— 一个都不许进池
@@ -994,26 +1029,30 @@ async function othersPool(social, { wantTypes = [], types = [] } = {}) {
 	};
 
 	// ① 按类型搜（第一个词搜不到就换下一个词再试，词表没配就拿类型名）
+	let searchHit = 0;
 	for (const t of want) {
 		const def = types.find((x) => x.name === t);
 		const kws = (Array.isArray(def?.words) ? def.words : []).map((w) => String(w ?? '').trim()).filter((w) => w !== '').slice(0, 3);
 		if (kws.length === 0) kws.push(t);
 		let got = [];
 		for (const kw of kws) {
-			// [FS-SHARE-STRICT-TYPE] 词表整份传下去：文案要带类型名或词表里的词才算这个类型
+			// [FS-SHARE-SEARCH-TRUST] 搜到什么就是什么类型（srcType 直接标成这次的类型词）
 			got = await searchPool(social, kw, [t, ...kws]).catch(() => []);
 			if (got.length > 0) break;
 		}
 		if (got.length === 0) social.log?.('warn', `[fish-soul] 抖音：「${t}」这类一条都没搜到（试过 ${kws.join('/')}）`);
 		put(got, t);
+		searchHit += got.length;
 	}
-	// ② 她的收藏夹 + ③ 推荐流（都是别人的，兜底用；类型只能按文案判，
-	//    [FS-SHARE-STRICT-TYPE] 严格模式下 pickShareVideo 会把对不上类型的一条不留地剔掉）
-	if (http && typeof http.collection === 'function' && http.isLoggedIn?.() === true) {
+	// [FS-SHARE-SEARCH-TRUST] 按类型搜到了 → 就只用搜索结果。
+	// 收藏夹 / 推荐流里的视频 srcType 是空的，严格模式下会被 pickShareVideo 一条不留地剔掉；
+	// 掺进来只会把池子弄脏（就是上次那「13 条没一条对得上」的来源），还会诱使缓存把脏池存 12 小时。
+	const useFallback = want.length === 0 || searchHit === 0;
+	if (useFallback && http && typeof http.collection === 'function' && http.isLoggedIn?.() === true) {
 		const col = await http.collection({ count: 20 }).catch(() => null);
 		if (col?.ok) put(col.list.filter(notMine).map(toVideoItem), '');
 	}
-	if (http && typeof http.feed === 'function' && http.isLoggedIn?.() === true) {
+	if (useFallback && http && typeof http.feed === 'function' && http.isLoggedIn?.() === true) {
 		for (let i = 0; i < 2; i += 1) {
 			const f = await http.feed(20).catch(() => null);
 			if (f?.ok) put(f.list.filter(notMine).map(toVideoItem), '');
@@ -1029,7 +1068,7 @@ async function othersPool(social, { wantTypes = [], types = [] } = {}) {
 			out.push({ ...norm(x), srcType: String(x?.srcType ?? '') });
 		}
 	}
-	if (out.length > 0) { try { setKv(social.db, KV_OTHERS, { v: 3, at: Date.now(), key, items: out }); } catch { /* 存不下不影响这次 */ } }
+	if (out.length > 0) { try { setKv(social.db, KV_OTHERS, { v: 4, search: searchHit > 0, at: Date.now(), key, items: out }); } catch { /* 存不下不影响这次 */ } }
 	return out;
 }
 
@@ -1184,20 +1223,11 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 		if (want.length > 0) {
 			social.log?.('info', `[fish-soul] 抖音：这次只按「${want[0]}」搜视频（她选的是 ${wantTypes.join('/')}）`);
 		}
-		let others = await othersPool(social, { wantTypes: want, types }).catch(() => []);
-		let items = others.filter((x) => !selfIds.includes(String(x?.id ?? '')));
-		// [FS-SHARE-KEYWORD-RETRY] 这次随机挑中的那一类一条都没搜到（搜索页空 / 关键词太窄）——
-		// 换她选的另外几类再搜一次，而不是直接放弃这一轮。
-		const typedHit = (list) => list.filter((x) => String(x?.srcType ?? '') !== '').length;
-		if (want.length > 0 && typedHit(items) === 0 && wantTypes.length > 1) {
-			const rest = wantTypes.map((t) => String(t ?? '').trim()).filter((t) => t !== '' && t !== want[0]).slice(0, 2);
-			if (rest.length > 0) {
-				social.log?.('info', `[fish-soul] 抖音：「${want[0]}」一条没搜到，换 ${rest.join('/')} 再搜一次`);
-				want = rest;
-				others = await othersPool(social, { wantTypes: want, types }).catch(() => []);
-				items = others.filter((x) => !selfIds.includes(String(x?.id ?? '')));
-			}
-		}
+		const others = await othersPool(social, { wantTypes: want, types }).catch(() => []);
+		const items = others.filter((x) => !selfIds.includes(String(x?.id ?? '')));
+		// [FS-SHARE-ONE-TYPE-ONLY] 这次定了哪一类就只发这一类。
+		// 旧版这里会「这一类没搜到就换她选的另一个类型再搜」—— 那等于发错类型，用户明确否掉了；
+		// 现在搜不到就是这轮不发，把原因写清楚（同类不同搜索词的轮换在 othersPool 里已经做过）。
 		if (items.length === 0) {
 			return {
 				ok: false,
