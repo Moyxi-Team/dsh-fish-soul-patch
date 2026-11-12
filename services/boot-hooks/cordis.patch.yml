@@ -1,0 +1,4 @@
+# This bundle's own patch layer: register the plugin body itself.
+- insert:
+    - id: dsh-boot-hooks
+      name: "file:///C:/Users/Administrator/.dsh/boot-hooks/boot-hooks.mjs"

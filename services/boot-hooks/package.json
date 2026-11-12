@@ -1,0 +1,18 @@
+{
+  "name": "dsh-boot-hooks",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local DSH plugin: wakes the fish-soul service stack whenever DSH starts.",
+  "type": "module",
+  "main": "boot-hooks.mjs",
+  "exports": {
+    ".": "./boot-hooks.mjs",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
