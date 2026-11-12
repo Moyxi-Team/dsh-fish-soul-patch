@@ -636,38 +636,64 @@ const shareRowJs = (name) => `(() => {
   const sc = document.querySelector('[data-e2e="video-share-container"]') || document.querySelector('[data-e2e="video-share-icon-container"]');
   if (!sc) return JSON.stringify({ err: 'no-panel' });
   const inView = (el) => { const r = el.getBoundingClientRect(); return r.width > 6 && r.height > 6 && r.bottom > 0 && r.top < window.innerHeight; };
-  const nameNodes = [...sc.querySelectorAll('div,span,p,a')].filter((e) => {
-    if (!inView(e)) return false;
-    const t = clean(e.innerText);
-    if (t === '' || t.length > 40) return false;
-    if (t !== NAME && !t.startsWith(NAME) && !(KEY.length >= 2 && t.includes(KEY))) return false;
-    return ![...e.children].some((c) => clean(c.innerText) === t);
-  }).sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return ra.width * ra.height - rb.width * rb.height; });
-  const out = [];
-  for (const n of nameNodes) {
-    let row = n;
-    for (let i = 0; i < 6 && row && row !== sc; i += 1) {
-      const rt = clean(row.innerText);
-      if (rt.includes('捎句话')) { out.push({ state: 'sent' }); break; }
-      if (rt.length > 240) break;
-      const btn = [...row.querySelectorAll('div,span,button,a')].find((e) => {
-        if (!inView(e)) return false;
-        if (clean(e.innerText) !== '分享') return false;
-        return ![...e.children].some((c) => clean(c.innerText) === '分享');
-      });
-      if (btn) {
-        const r = btn.getBoundingClientRect();
-        if (r.width >= 16 && r.height >= 12) out.push({ state: 'ready', x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) });
-        break;
+  const btnOk = (e) => {
+    const r = e.getBoundingClientRect();
+    if (r.width < 16 || r.height < 12 || r.bottom <= 0 || r.top >= window.innerHeight) return false;
+    if (clean(e.innerText) !== '分享') return false;
+    return ![...e.children].some((c) => clean(c.innerText) === '分享');
+  };
+  const hitKey = (t) => t !== '' && t.length <= 120 && (t.includes(KEY) || t.includes(NAME));
+  const center = (e) => { const r = e.getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; };
+
+  // [FS-SHARE-ROW-UID] 主路：面板里每个好友的「分享」按钮都带 data-userid（文本就是「分享」）。
+  //   老写法「找名字节点 → 往上爬 6 层找按钮」会爬到面板外，抓到页面上别处的「分享」
+  //   （实测抓到 (710,98)，真正按钮在 (710,394)），点下去当然没反应。
+  //   现在反过来：以带 data-userid 的按钮为准，往上 4 层看这一行里有没有她。
+  const uidBtns = [...document.querySelectorAll('[data-userid]')].filter((e) => {
+    const r = e.getBoundingClientRect();
+    return r.width >= 16 && r.height >= 12 && r.bottom > 0 && r.top < window.innerHeight;
+  });
+  let ready = null;
+  let sent = false;
+  for (const btn of uidBtns) {
+    let node = btn;
+    let rowHit = false;
+    let rowSent = false;
+    for (let i = 0; i < 4 && node; i += 1) {
+      const t = clean(node.innerText);
+      if (hitKey(t)) rowHit = true;
+      if (hitKey(t) && t.includes('捎句话')) rowSent = true;
+      node = node.parentElement;
+    }
+    if (rowSent && !sent) sent = true;
+    if (rowHit && !rowSent && btnOk(btn) && !ready) ready = center(btn);
+  }
+  // 兜底：面板里没有 data-userid（旧版面板）时，退回名字节点往上爬
+  if (!ready && !sent) {
+    const nameNodes = [...sc.querySelectorAll('div,span,p,a')].filter((e) => {
+      if (!inView(e)) return false;
+      const t = clean(e.innerText);
+      if (t === '' || t.length > 40) return false;
+      if (t !== NAME && !t.startsWith(NAME) && !(KEY.length >= 2 && t.includes(KEY))) return false;
+      return ![...e.children].some((c) => clean(c.innerText) === t);
+    }).sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return ra.width * ra.height - rb.width * rb.height; });
+    for (const n of nameNodes) {
+      let row = n;
+      for (let i = 0; i < 3 && row && row !== sc; i += 1) {
+        const rt = clean(row.innerText);
+        if (rt.length > 200) break;
+        if (rt.includes('捎句话')) { sent = true; break; }
+        const btn = [...row.querySelectorAll('div,span,button,a')].find(btnOk);
+        if (btn) { ready = center(btn); break; }
+        row = row.parentElement;
       }
-      row = row.parentElement;
+      if (ready || sent) break;
     }
   }
-  const ready = out.find((x) => x.state === 'ready');
   return JSON.stringify({
-    ok: !!ready || out.some((x) => x.state === 'sent'),
-    sent: out.some((x) => x.state === 'sent'),
-    ready: ready ? { x: ready.x, y: ready.y } : null,
+    ok: !!ready || sent,
+    sent: sent,
+    ready: ready,
     text: clean(sc.innerText).slice(0, 160)
   });
 })()`;
@@ -710,8 +736,10 @@ async function cdpHover(browser, x, y) {
 async function cdpClick(browser, x, y) {
 	await cdpMove(browser, x, y);
 	await sleep(120);
+	// [FS-SHARE-CLICK-PARAMS] 实测能发出卡片的按下/抬起序列：pressed 带 buttons:1、released 带 buttons:0、间隔 75ms。
+	//   不带 buttons 的写法在分享面板那个按钮上点下去毫无反应（面板文本都不变），别改成不带 buttons。
 	await browser.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 }, browser.sessionId).catch(() => {});
-	await sleep(70);
+	await sleep(75);
 	await browser.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 }, browser.sessionId).catch(() => {});
 }
 
@@ -795,51 +823,125 @@ async function videoPool(social) {
 	return merged;
 }
 
-/** 搜索页上能看到的视频（id + 卡片文案）。[FS-DM-SHARE-OTHERS] */
+/**
+ * [FS-SHARE-SEARCH-V2] 搜索页上能看到的视频（id + 卡片文案）。
+ *
+ * 老写法只找 a[href*="/video/"] —— 抖音新版搜索页卡片是 div + 点击跳转，根本没有这个 href，
+ * 真机上一抓就是 0 条，于是「按类型分享」每次都败在「没抓到这类的视频」。
+ * 现在三路抓：① 链接（老版）② 卡片元素（data-aweme-id / React props）③ 整页正则兜底。
+ */
 const SEARCH_VIDEOS_JS = String.raw`(() => {
   const out = [];
   const seen = new Set();
   const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
-  for (const a of document.querySelectorAll('a[href*="/video/"]')) {
-    const m = /\/video\/(\d{8,})/.exec(String(a.getAttribute('href') || ''));
-    if (!m || seen.has(m[1])) continue;
-    seen.add(m[1]);
-    const card = a.closest('li') || a.parentElement || a;
-    const img = a.querySelector('img') || card.querySelector('img');
-    const desc = clean(
-      (img && (img.getAttribute('alt') || img.getAttribute('aria-label'))) ||
-      a.getAttribute('aria-label') || a.getAttribute('title') || (card.innerText || '')
-    );
-    out.push({ id: m[1], desc: desc.slice(0, 200) });
-    if (out.length >= 30) break;
-  }
+  // [FS-SHARE-DESC-FIX] 真机实测：搜索页卡片里第一个 img 是装饰图（alt="icon"），
+  //   老写法把它当文案 —— 每条 desc 都成了 "icon"，类型判定必然全不命中，
+  //   表现就是「没抓到「萝莉」这类的视频」。现在文案优先取卡片自身文字，
+  //   img alt 只在不是装饰词时才采用。
+  const junkAlt = (s) => /^(icon|avatar|头像|图片|image|img|loading|video|cover)$/i.test(clean(s));
+  const textOf = (el) => {
+    if (!el) return '';
+    let t = '';
+    try { t = clean(el.innerText); } catch (e) { t = ''; }
+    return t;
+  };
+  const altOf = (el) => {
+    if (!el || !el.querySelector) return '';
+    const img = el.querySelector('img');
+    if (!img) return '';
+    const a = clean(img.getAttribute('alt') || img.getAttribute('aria-label') || '');
+    return junkAlt(a) ? '' : a;
+  };
+  const put = (id, desc) => {
+    const v = String(id == null ? '' : id).trim();
+    if (!/^\d{8,20}$/.test(v) || seen.has(v)) return;
+    seen.add(v);
+    out.push({ id: v, desc: clean(desc).slice(0, 200) });
+  };
+  // ① 卡片上的链接（老版搜索页）
+  try {
+    for (const a of document.querySelectorAll('a[href*="/video/"]')) {
+      const m = /\/video\/(\d{8,20})/.exec(String(a.getAttribute('href') || ''));
+      if (!m) continue;
+      const card = a.closest('li') || (a.parentElement && a.parentElement.parentElement) || a.parentElement || a;
+      const desc = textOf(card) || altOf(card) || altOf(a) || clean(a.getAttribute('aria-label') || a.getAttribute('title') || '');
+      put(m[1], desc);
+      if (out.length >= 40) return out;
+    }
+  } catch (e) { /* 走下一路 */ }
+  // ② 卡片元素：新版是 div，作品 id 藏在 data-* 或 React props 里
+  try {
+    const nodes = document.querySelectorAll('[data-aweme-id], [data-e2e*="video"], [data-e2e*="search"] li, ul li');
+    for (const el of nodes) {
+      let id = String((el.getAttribute && el.getAttribute('data-aweme-id')) || '').trim();
+      if (id === '') {
+        for (const k of Object.keys(el).filter((x) => x.startsWith('__reactProps'))) {
+          let s = '';
+          try { s = String(JSON.stringify(el[k], (kk, vv) => (kk === '_owner' || kk === '_store' ? undefined : vv)) || ''); } catch (e) { s = ''; }
+          const m = /"aweme_?[Ii]d"\s*:\s*"?(\d{8,20})"?|"itemId"\s*:\s*"?(\d{8,20})"?/.exec(s);
+          if (m) { id = m[1] || m[2] || ''; break; }
+        }
+      }
+      if (id !== '') put(id, textOf(el) || altOf(el) || '');
+      if (out.length >= 40) return out;
+    }
+  } catch (e) { /* 走下一路 */ }
+  // ③ [FS-SHARE-STRICT-TYPE] 原来的「整页正则兜底」已删除：它捞到的 id 没有文案，
+  //  无法确认是不是用户要的那个类型（页面上还混着热搜/推荐位），
+  //  在「不是这个类型就不发」的前提下属于脏数据来源，宁可少抓也不能发错。
   return out;
 })()`;
 
 /**
  * [FS-DM-SHARE-OTHERS] 在搜索页按关键词抓一批视频（别人的），滚几次多拿一些。
- * 搜索本身就是「按类型筛」—— 搜什么类型拿到的就是什么类型，不用再猜文案。
+ * 搜索本身就是「按类型筛」—— 搜什么类型拿到的就是什么类型。
+ * [FS-SHARE-STRICT-TYPE] 用户要求「不是那个类型就不许发」，所以这里再加一道关：
+ *   卡片文案必须真的带上该类型的关键词（或词表里的词）才算数，
+ *   否则宁可这批一条不返回（上层会因此这次不发），也不把不对味的内容塞进池。
  */
-async function searchPool(social, keyword) {
+async function searchPool(social, keyword, words = []) {
 	const browser = social.host?.browser;
 	const kw = String(keyword ?? '').trim();
 	if (!browser || kw === '') return [];
-	const url = `https://www.douyin.com/search/${encodeURIComponent(kw)}?type=video`;
-	await browser.goto(url, { settleMs: 6500, retries: 0 }).catch(() => {});
-	await sleep(1600);
+	const hits = [...new Set([kw, ...(Array.isArray(words) ? words : [])].map((w) => String(w ?? '').trim()).filter((w) => w !== ''))];
+	const okType = (desc) => {
+		const d = String(desc ?? '');
+		if (d === '') return false;
+		return hits.some((w) => d.includes(w));
+	};
+	// [FS-SHARE-SEARCH-V2] 两套地址都试：先视频 Tab，再裸搜索页（新版有时只认后者）
+	const urls = [
+		`https://www.douyin.com/search/${encodeURIComponent(kw)}?type=video`,
+		`https://www.douyin.com/search/${encodeURIComponent(kw)}`,
+	];
 	const out = [];
 	const seen = new Set();
-	for (let i = 0; i < 3; i += 1) {
-		const found = await browser.eval(SEARCH_VIDEOS_JS).catch(() => []);
-		for (const x of (Array.isArray(found) ? found : [])) {
-			const id = String(x?.id ?? '');
-			if (!/^\d{8,}$/.test(id) || seen.has(id)) continue;
-			seen.add(id);
-			out.push({ id, desc: String(x?.desc ?? ''), tags: [] });
+	let rejected = 0;
+	for (const url of urls) {
+		await browser.goto(url, { settleMs: 6500, retries: 0 }).catch(() => {});
+		await sleep(1800);
+		const href = String(await browser.eval('location.href').catch(() => '') ?? '');
+		// 没登录 / 被风控时抖音会把搜索页弹回首页或验证页 —— 别硬滚，换下一套地址
+		if (!href.includes('/search/')) {
+			social.log?.('warn', `[fish-soul] 抖音：搜「${kw}」没进搜索页（落到了 ${href.slice(0, 80)}），可能没登录或被风控`);
+			continue;
 		}
-		if (out.length >= 20) break;
-		await browser.eval('window.scrollBy(0, 2400)').catch(() => {});
-		await sleep(1500 + i * 400);
+		for (let i = 0; i < 3; i += 1) {
+			const found = await browser.eval(SEARCH_VIDEOS_JS).catch(() => []);
+			for (const x of (Array.isArray(found) ? found : [])) {
+				const id = String(x?.id ?? '');
+				if (!/^\d{8,20}$/.test(id) || seen.has(id)) continue;
+				// [FS-SHARE-STRICT-TYPE] 文案里没带这个类型的词 → 不进池
+				if (!okType(x?.desc)) { rejected += 1; continue; }
+				seen.add(id);
+				out.push({ id, desc: String(x?.desc ?? ''), tags: [] });
+			}
+			if (out.length >= 20) break;
+			await browser.eval('window.scrollBy(0, 2400)').catch(() => {});
+			await sleep(1500 + i * 400);
+		}
+		social.log?.('info', `[fish-soul] 抖音：搜「${kw}」抓到 ${out.length} 条${rejected > 0 ? `（另有 ${rejected} 条文案对不上「${hits.join('/')}」，已剔除）` : ''}`);
+		if (out.length > 0) break;
 	}
 	return out;
 }
@@ -865,7 +967,10 @@ async function othersPool(social, { wantTypes = [], types = [] } = {}) {
 		at: Number(x?.at) || 0,
 		srcType: String(x?.srcType ?? ''),
 	});
-	if (cached?.key === key && Array.isArray(cached?.items) && cached.items.length > 0 && Date.now() - Number(cached?.at ?? 0) < 12 * HOUR_MS) {
+	// [FS-SHARE-SEARCH-V2] 缓存带版本号：老版本缓存里全是「srcType 为空」的残池（搜索页一条没抓到），
+	// 不认版本的话修好了也会继续吃那口坏缓存、继续「没抓到这类的视频」。
+	// [FS-SHARE-STRICT-TYPE] 升到 v3：v2 池子里存的是 alt="icon" 那种脏文案，必须作废重抓。
+	if (Number(cached?.v ?? 0) === 3 && cached?.key === key && Array.isArray(cached?.items) && cached.items.length > 0 && Date.now() - Number(cached?.at ?? 0) < 12 * HOUR_MS) {
 		return cached.items.map(norm).filter((x) => /^\d{8,}$/.test(x.id));
 	}
 	// 她自己的作品 id + 她的 sec_uid —— 一个都不许进池
@@ -888,19 +993,22 @@ async function othersPool(social, { wantTypes = [], types = [] } = {}) {
 		}
 	};
 
-	// ① 按类型搜（第一个词搜不到就换第二个词再试，词表没配就拿类型名）
+	// ① 按类型搜（第一个词搜不到就换下一个词再试，词表没配就拿类型名）
 	for (const t of want) {
 		const def = types.find((x) => x.name === t);
-		const kws = (Array.isArray(def?.words) ? def.words : []).map((w) => String(w ?? '').trim()).filter((w) => w !== '').slice(0, 2);
+		const kws = (Array.isArray(def?.words) ? def.words : []).map((w) => String(w ?? '').trim()).filter((w) => w !== '').slice(0, 3);
 		if (kws.length === 0) kws.push(t);
 		let got = [];
 		for (const kw of kws) {
-			got = await searchPool(social, kw).catch(() => []);
+			// [FS-SHARE-STRICT-TYPE] 词表整份传下去：文案要带类型名或词表里的词才算这个类型
+			got = await searchPool(social, kw, [t, ...kws]).catch(() => []);
 			if (got.length > 0) break;
 		}
+		if (got.length === 0) social.log?.('warn', `[fish-soul] 抖音：「${t}」这类一条都没搜到（试过 ${kws.join('/')}）`);
 		put(got, t);
 	}
-	// ② 她的收藏夹 + ③ 推荐流（都是别人的，兜底用；类型只能按文案判）
+	// ② 她的收藏夹 + ③ 推荐流（都是别人的，兜底用；类型只能按文案判，
+	//    [FS-SHARE-STRICT-TYPE] 严格模式下 pickShareVideo 会把对不上类型的一条不留地剔掉）
 	if (http && typeof http.collection === 'function' && http.isLoggedIn?.() === true) {
 		const col = await http.collection({ count: 20 }).catch(() => null);
 		if (col?.ok) put(col.list.filter(notMine).map(toVideoItem), '');
@@ -921,7 +1029,7 @@ async function othersPool(social, { wantTypes = [], types = [] } = {}) {
 			out.push({ ...norm(x), srcType: String(x?.srcType ?? '') });
 		}
 	}
-	if (out.length > 0) { try { setKv(social.db, KV_OTHERS, { at: Date.now(), key, items: out }); } catch { /* 存不下不影响这次 */ } }
+	if (out.length > 0) { try { setKv(social.db, KV_OTHERS, { v: 3, at: Date.now(), key, items: out }); } catch { /* 存不下不影响这次 */ } }
 	return out;
 }
 
@@ -1031,8 +1139,14 @@ export function pickShareVideo(items, { wantTypes = [], types = [], sentIds = []
  * @returns {Promise<{ok: boolean, videoId?: string, picked?: string, videoDesc?: string, videoTypes?: string[], fellBack?: boolean, error?: string}>}
  */
 export async function shareVideoToFriend(social, friend, opts = {}) {
-	const browser = social.host?.browser;
-	if (!browser) return { ok: false, error: '浏览器没在运行' };
+	// [FS-SHARE-BROWSER-RETRY] 掉线（她关过窗口 / 标签页被关）时先自动重开一次，
+	// 别让「浏览器没在运行」把这一轮直接白扔（日志里这种情况占了三分之一）。
+	let browser = social.host?.browser;
+	if (!browser) {
+		try { await social.host?.start?.(); } catch { /* 起不来就走下面的报错 */ }
+		browser = social.host?.browser;
+	}
+	if (!browser) return { ok: false, error: '浏览器没在运行（自动重开也失败了，去设置页点「启动抖音浏览器」）' };
 	const name = String(friend?.name ?? '').trim();
 	if (name === '') return { ok: false, error: '没有好友名字，分享不了' };
 	const types = Array.isArray(opts.types) && opts.types.length > 0
@@ -1070,16 +1184,31 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 		if (want.length > 0) {
 			social.log?.('info', `[fish-soul] 抖音：这次只按「${want[0]}」搜视频（她选的是 ${wantTypes.join('/')}）`);
 		}
-		const others = await othersPool(social, { wantTypes: want, types }).catch(() => []);
-		const items = others.filter((x) => !selfIds.includes(String(x?.id ?? '')));
+		let others = await othersPool(social, { wantTypes: want, types }).catch(() => []);
+		let items = others.filter((x) => !selfIds.includes(String(x?.id ?? '')));
+		// [FS-SHARE-KEYWORD-RETRY] 这次随机挑中的那一类一条都没搜到（搜索页空 / 关键词太窄）——
+		// 换她选的另外几类再搜一次，而不是直接放弃这一轮。
+		const typedHit = (list) => list.filter((x) => String(x?.srcType ?? '') !== '').length;
+		if (want.length > 0 && typedHit(items) === 0 && wantTypes.length > 1) {
+			const rest = wantTypes.map((t) => String(t ?? '').trim()).filter((t) => t !== '' && t !== want[0]).slice(0, 2);
+			if (rest.length > 0) {
+				social.log?.('info', `[fish-soul] 抖音：「${want[0]}」一条没搜到，换 ${rest.join('/')} 再搜一次`);
+				want = rest;
+				others = await othersPool(social, { wantTypes: want, types }).catch(() => []);
+				items = others.filter((x) => !selfIds.includes(String(x?.id ?? '')));
+			}
+		}
 		if (items.length === 0) {
 			return {
 				ok: false,
 				error: want.length > 0
-					? `没找到「${want[0]}」这类的「别人的」视频，这次不发`
+					? `连「${want.join('/')}」的别人的视频都没抓到（搜索页空着或没登录），这次不发`
 					: '没找到可分享的「别人的」视频（她自己的作品按设置不再分享）',
 			};
 		}
+		// [FS-SHARE-STRICT-TYPE] 用户明确要求：必须是这个类型的视频才分享，不是就这次不发。
+		// 上一版 strictTypes=false（类型没命中就退回不限池照发）已被用户否掉，改回严格：
+		// 只要这次定了类型（want 非空）就绝不退回不限池，宁可这一轮不发。
 		strictTypes = want.length > 0;
 		pickedVideo = pickShareVideo(items, {
 			wantTypes: want,
@@ -1093,9 +1222,9 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 		if (!item) {
 			return {
 				ok: false,
-				error: strictTypes
-					? `没抓到「${want.join('/')}」这类的视频，这次不发（宁愿不发也不发不对类型的）`
-					: '没找到可分享的「别人的」视频',
+				error: want.length > 0
+					? `这次只发「${want.join('/')}」类的视频，池子里 ${items.length} 条没一条对得上这个类型，这次不发`
+					: `抓到的候选都被过滤掉了，这次不发（池子里 ${items.length} 条）`,
 			};
 		}
 		if (pickedVideo.fellBack) {
@@ -1114,23 +1243,40 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 	}
 	if (!onVideo) return { ok: false, error: `视频详情页打不开（${id} 被弹回首页了）` };
 	// 1) 真实鼠标 hover 分享图标唤出面板（纯 click 唤不出来 —— 这就是之前一直失败的原因）
+	// [FS-SHARE-PANEL-WAIT] 分享面板里的好友数据是异步拉的：实测 hover 之后要 28~46 秒才把好友行渲染出来。
+	//   原来总共只等 5 秒多 → 必然走到「面板没弹出来」，这也是之前「不能主动分享」的主因之一。
+	//   现在改成 hover 上去之后就长轮询（默认 60 秒），期间鼠标一直停在分享图标上不动。
+	const panelWaitMs = Math.max(5000, Math.min(120000, Number(opts.panelWaitMs ?? 60000) || 60000));
 	let panel = null;
-	for (let i = 0; i < 3 && !panel?.open; i += 1) {
-		const pos = parseJson(await browser.eval(SHARE_ICON_POS_JS).catch(() => null));
-		if (pos?.ok === true) {
-			await cdpHover(browser, pos.x, pos.y);
-			await sleep(1800);
+	// [FS-SHARE-ICON-WAIT] 详情页刚打开时底栏分享图标还没渲染出来（冷启动 / 慢网更明显），
+	//   原来只取一次坐标，取不到就直接判「页面里没找到分享图标」，白扔一轮。这里轮询等它出现。
+	const iconWaitMs = Math.max(3000, Math.min(40000, Number(opts.iconWaitMs ?? 20000) || 20000));
+	let iconPos = null;
+	for (const iconUntil = Date.now() + iconWaitMs; Date.now() < iconUntil;) {
+		iconPos = parseJson(await browser.eval(SHARE_ICON_POS_JS).catch(() => null));
+		if (iconPos?.ok === true) break;
+		await sleep(1500);
+	}
+	if (iconPos?.ok === true) {
+		await cdpHover(browser, iconPos.x, iconPos.y);
+		const until = Date.now() + panelWaitMs;
+		while (Date.now() < until) {
+			await sleep(2000);
 			panel = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
+			if (panel?.open === true) break;
 		}
 		if (panel?.open !== true) {
 			// 兜底：万一这一版面板是点击展开的
 			const clicked = (await browser.eval(CLICK_SHARE_BTN_JS).catch(() => false)) === true;
 			if (clicked) {
-				await sleep(1600);
-				panel = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
+				const until2 = Date.now() + 15000;
+				while (Date.now() < until2) {
+					await sleep(2000);
+					panel = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
+					if (panel?.open === true) break;
+				}
 			}
 		}
-		if (panel?.open !== true) await sleep(1200);
 	}
 	if (panel?.open !== true) {
 		const seen = String(panel?.text ?? '').slice(0, 40);
@@ -1159,13 +1305,69 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 	}
 
 	// 3) 点「分享」→ 该行变成「捎句话」就算发出去了
-	await cdpClick(browser, row.ready.x, row.ready.y);
-	await sleep(2600);
-	const done = parseJson(await browser.eval(shareRowJs(name)).catch(() => null));
-	if (done?.sent !== true) {
+	// [FS-SHARE-SETTLE-HOLD] 关键修复（实测定位）：面板刚渲染出来时按钮还没「通电」，
+	//   立刻点下去事件确实命中了 DOM（pointerdown/mousedown/mouseup/click 全到），但文案不变、
+	//   无 toast、无任何请求 —— 看起来像「点了没反应」。鼠标必须先停在目标按钮上等它稳定
+	//   （默认 3 秒；期间鼠标钉在按钮上不动，面板一收就跳到下一轮重新唤出）再点，点下去才会真的发出卡片。
+	//   [FS-SHARE-RETRY] 面板刚 open 时好友行还在重排，坐标可能是旧的 —— 每轮都重新取一次坐标，
+	//   点不出去就再来一轮（最多 3 轮），而不是一轮判死。
+	const holdMs = Math.max(0, Math.min(30000, Number(opts.shareHoldMs ?? 3000) || 3000));
+	let sent = false;
+	let lastText = '';
+	for (let attempt = 1; attempt <= 3 && !sent; attempt += 1) {
+		// [FS-SHARE-REPANEL] 面板会自己收起来（鼠标长时间停在一个位置 / 页面重渲染 / 抖一下都可能关），
+		//   关了之后 shareRowJs 自然找不到她，如果还拿着上一轮的旧坐标去点，就是点空气 —— 之前「三次都没发出去、
+		//   面板内容只剩 772」就是这么来的。所以每轮先确认面板还在，不在就重新 hover 图标唤出来。
+		let pnl = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
+		if (pnl?.open !== true) {
+			const ip = parseJson(await browser.eval(SHARE_ICON_POS_JS).catch(() => null));
+			if (ip?.ok === true) {
+				await cdpHover(browser, ip.x, ip.y);
+				for (const u = Date.now() + 20000; Date.now() < u;) {
+					await sleep(2000);
+					pnl = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
+					if (pnl?.open === true) break;
+				}
+			}
+			if (pnl?.open !== true) continue;
+		}
+		const pts = parseJson(await browser.eval(shareRowJs(name)).catch(() => null));
+		if (pts?.sent === true) { sent = true; break; }
+		const p0 = pts?.ready;
+		if (p0 == null) {
+			// 面板开着但这一轮没定位到她（好友行还在重排）—— 立刻重试，别用旧坐标
+			await sleep(1200);
+			continue;
+		}
+		await cdpMove(browser, p0.x, p0.y);
+		const holdUntil = Date.now() + holdMs;
+		while (Date.now() < holdUntil) {
+			await sleep(500);
+			// 面板中途收起来了就别再等，直接进下一轮重新唤出（硬等只会拿着一张废坐标去点）
+			const chk = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
+			if (chk?.open !== true) break;
+			await cdpMove(browser, p0.x, p0.y);
+		}
+		// 布局已稳定，用最新坐标点（取不到就别点旧坐标，直接下一轮重新唤面板）
+		const fresh = parseJson(await browser.eval(shareRowJs(name)).catch(() => null));
+		const pt = fresh?.ready;
+		if (pt == null) {
+			social.log?.('warn', `[fish-soul] 抖音：定位「${name}」的分享按钮时面板跑了，第 ${attempt} 轮重来`);
+			await sleep(1200);
+			continue;
+		}
+		await cdpClick(browser, pt.x, pt.y);
+		await sleep(2600);
+		const after = parseJson(await browser.eval(shareRowJs(name)).catch(() => null));
+		if (after?.sent === true) { sent = true; break; }
 		const now = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
-		const toast = /已发送|发送成功|分享成功/.test(String(now?.text ?? ''));
-		if (!toast) return { ok: false, error: '点了「分享」但没发出去（面板没变成「捎句话」）' };
+		lastText = String(now?.text ?? '').slice(0, 120);
+		if (/已发送|发送成功|分享成功/.test(lastText)) { sent = true; break; }
+		social.log?.('warn', `[fish-soul] 抖音：第 ${attempt} 次点「分享」没发出去（${name}），再来一次`);
+		await sleep(1500);
+	}
+	if (!sent) {
+		return { ok: false, error: `点了「分享」但没发出去（面板没变成「捎句话」，面板内容：${lastText || '读不到'}）` };
 	}
 	noteShared(social, name, id);
 	return {
@@ -1343,19 +1545,30 @@ function remember(social, { name, text, ok, error = '', shared = false }) {
  * 拉一份「互相关注」候选名单（设置页「重新拉名单」用）。抓到就顺手写缓存。
  * 只在 host.exclusive 里跑，最多两分半。
  */
-export async function listCandidates(social, { refresh = true } = {}) {
+export async function listCandidates(social, { refresh = false } = {}) {
 	const host = social.host;
 	if (!host || host.running !== true) return { ok: false, list: [], error: '抖音浏览器没在运行' };
 	if (host.loggedIn !== true) return { ok: false, list: [], error: '抖音还没登录' };
-	if (!refresh) {
-		let cached = null;
-		try { cached = getKv(social.db, KV_MUTUAL, null); } catch { cached = null; }
-		if (Array.isArray(cached?.list) && cached.list.length > 0) return { ok: true, list: cached.list, at: Number(cached.at ?? 0) };
+	// [FS-MUTUAL-CACHE-ONLY] 用户要求：互关名单「拉一次就够」，不用每次分享视频都重新拉。
+	//   所以默认走缓存（refresh 缺省 false，缓存没有有效期）；只有设置页手动点「拉互相关注名单」
+	//   才传 refresh:true 去翻关注页。任何别的路径想读名单，都拿缓存，绝不再触发一次抓取。
+	let cached = null;
+	try { cached = getKv(social.db, KV_MUTUAL, null); } catch { cached = null; }
+	const cachedList = Array.isArray(cached?.list) ? cached.list : [];
+	const cachedAt = Number(cached?.at ?? 0);
+	if (refresh !== true) {
+		if (cachedList.length > 0) return { ok: true, list: cachedList, at: cachedAt, cached: true };
+		return { ok: false, list: [], at: 0, error: '还没拉过互关名单：设置 → 平台 → 抖音 → 主动私信，点一下「拉互相关注名单」（拉一次就会存下来，之后分享不用再拉）' };
 	}
 	const grabbed = await host.exclusive('读抖音互关名单', () => listMutualFriends(host), { maxMs: 150_000 })
 		.catch((e) => ({ ok: false, list: [], error: errText(e) }));
 	if (grabbed.ok !== true) {
 		const why = grabbed.error ?? '没读到互关名单';
+		// 手动重拉失败但手里有旧名单：继续用旧的，别把「发视频」这条链一起拖死
+		if (cachedList.length > 0) {
+			social.log('warn', `[fish-soul] 抖音主动私信：重拉互关名单失败（${why}），继续用上次拉到的 ${cachedList.length} 人`);
+			return { ok: true, list: cachedList, at: cachedAt, cached: true, warning: why };
+		}
 		try { setKv(social.db, KV_ERROR, why); } catch { /* 同上 */ }
 		social.log('warn', `[fish-soul] 抖音主动私信：${why}`);
 		return { ok: false, list: [], error: why };
@@ -1372,7 +1585,28 @@ export async function runProactive(social, { manual = false } = {}) {
 	if (host.loggedIn !== true) return { ok: false, error: '抖音还没登录' };
 
 	// ① 只发给她在设置页勾过的那几个人（不再自己抓名单、不再自己挑）
-	if (c.targets.length === 0) {
+	//    [FS-MUTUAL-CACHE-ONLY] 设置里一个都没勾、但以前拉过名单时，直接用那份缓存名单发 ——
+	//    用户要求：名单拉一次就存着，分享视频时不要再跑一遍「读互关名单」。
+	let targets = c.targets;
+	if (targets.length === 0) {
+		let cachedList = [];
+		try {
+			const cached = getKv(social.db, KV_MUTUAL, null);
+			cachedList = Array.isArray(cached?.list) ? cached.list : [];
+		} catch { cachedList = []; }
+		if (cachedList.length > 0) {
+			targets = cachedList
+				.map((x) => ({
+					name: String(x?.name ?? '').trim(),
+					uid: String(x?.uid ?? '').trim(),
+					shareType: '',
+					wantTypes: c.defaultWantTypes,
+				}))
+				.filter((x) => x.name !== '');
+			social.log('info', `[fish-soul] 抖音主动私信：设置里没勾人，改用上次拉到的互关名单（${targets.length} 人，不再重新拉）`);
+		}
+	}
+	if (targets.length === 0) {
 		return { ok: false, error: '还没选要发给谁（设置 → 平台 → 抖音 → 主动私信，先拉互相关注名单再点选）' };
 	}
 
@@ -1384,7 +1618,7 @@ export async function runProactive(social, { manual = false } = {}) {
 	try { sent = getKv(social.db, KV_SENT, {}) ?? {}; } catch { sent = {}; }
 	const dateStr = social.clock.getRoleDateParts().dateStr;
 	const day = readDay(social, dateStr);
-	const picked = c.targets;
+	const picked = targets;
 	// [FS-DM-NOW-FORCE] 设置页「现在试一次」是手动验证：无视这个人的冷却期，也无视「同一个人一天最多几次」。
 	const cooled = manual === true ? picked : picked.filter((x) => {
 		const last = Number(sent[x.name] ?? 0);
@@ -1393,7 +1627,7 @@ export async function runProactive(social, { manual = false } = {}) {
 	const pool = manual === true ? picked : cooled.filter((x) => sentToday(day, x.name) < c.perDay);
 	if (pool.length === 0) {
 		if (cooled.length === 0) {
-			return { ok: false, error: `选中的 ${c.targets.length} 个人都在冷却期（同一个人要隔 ${c.coolHours} 小时）` };
+			return { ok: false, error: `选中的 ${targets.length} 个人都在冷却期（同一个人要隔 ${c.coolHours} 小时）` };
 		}
 		return { ok: false, error: `选中的每个人今天都发到上限了（同一个人一天最多 ${c.perDay} 次）` };
 	}
