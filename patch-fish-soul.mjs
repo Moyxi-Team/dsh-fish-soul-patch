@@ -137,6 +137,11 @@ const keyAddedLine = (h) => {
 /** 把模板里的 \n 换成跟目标文件一致的换行符。 */
 const fit = (text, useCrlf) => (useCrlf ? text.replace(/\n/g, '\r\n') : text);
 
+/** 整文件比对时忽略换行风格：Windows 上文件可能被写成 CRLF，内容一样就别再重写一遍。 */
+const sameText = (a, b) =>
+	String(a).replace(/\r\n/g, '\n').replace(/\r/g, '\n') ===
+	String(b).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
 /** 备份 + 写回。 */
 function write(rel, text) {
 	if (CHECK) {
@@ -879,7 +884,7 @@ function patchWechatPane() {
 		return;
 	}
 	const body = readFileSync(tpl, 'utf8');
-	if (existsSync(target) && readFileSync(target, 'utf8') === body) {
+	if (existsSync(target) && sameText(readFileSync(target, 'utf8'), body)) {
 		skipped += 1;
 		note('P8 wechat-pane', 'ALREADY', 'lib/client.wechat.js 已是当前版本');
 		log('  · lib/client.wechat.js 已是最新，跳过');
@@ -935,7 +940,7 @@ function patchWechatTransport() {
 			continue;
 		}
 		const body = readFileSync(tpl, 'utf8');
-		if (existed && readFileSync(target, 'utf8') === body) {
+		if (existed && sameText(readFileSync(target, 'utf8'), body)) {
 			skipped += 1;
 			note('P9 wechat-transport', 'ALREADY', `lib/${f.rel} 已是当前版本`);
 			log(`  · lib/${f.rel} 已是最新，跳过`);
@@ -1009,6 +1014,8 @@ try {
 	if (ONLY === '' || ONLY === 'wechat') patchWechat();
 	if (ONLY === '' || ONLY === 'wechat-pane') patchWechatPane();
 	if (ONLY === '' || ONLY === 'wechat-transport') patchWechatTransport();
+	if (ONLY === '' || ONLY === 'wechat-master')
+		patchHunks({ tag: 'P10 wechat-master', label: '微信 —— 主人接管开关 + 静态表情换动图 + 面板状态', jsonName: 'wechat-master-hunks.json' });
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;

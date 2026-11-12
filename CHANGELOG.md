@@ -5,6 +5,58 @@
 
 ---
 
+## 新增 P10：微信主人接管开关 + 静态表情换动图 + 面板状态；services/ 跟随启动脚本入库
+
+**为什么改**：三件事凑一起。
+
+1. **微信发出去的表情包是静止的**。模型挑表情时给的是 `_stickers` 里的静态 PNG/JPG（文件名、`animated` 标记都来自 dsh-meme 图库），而微信只有 GIF 才会自己动——于是「让她发个动态表情」最终发出去一定是一张不动图。挑图策略本身没坏，缺的是**出站前把静态候选换成真 GIF**这一步。
+2. **面板上看不出微信这条线到底通没通**。会话是否正确落进「鱼」工作区的「微信·嘉新（主人）」、有没有认出主人 canonical、上次挑图挑到了什么，全要翻日志；也不给关的地方——想让她别接管私聊，只能改配置文件。
+3. **平台 → 微信设置页太长太吵**。选项说明每项都是整段话铺在页面上，一眼看不出哪个是关键开关；同页还混着「借 dsh-meme 表情库」这类本该一眼看到开没开的东西。
+
+顺手把**跟随 DSH 启动的那套服务脚本**也收进仓库（`services/`）。之前它们只在本机 `.dsh` 里，重装或换机就丢了，而「DSH 起来才起服务、DSH 关掉 5 分钟内退场」这个行为全靠它们。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `assets/wechat-master-hunks.json`（新增，11 处） | `config-schema.js` 2 处：让 `wechat.masterTakeover`（默认开）与 `interject.masterQuiet` / `masterQuietMinutes` **真的存得住**（以前面板上开了、保存完就回落）；`gateway.js` 3 处：运行配置带上 `masterTakeover`、关掉后**主人私聊整条不进 soul**（不回复、不记记忆，交回 WechatAgent 自己回）、出站时把 `_stickers` 里的静态候选换成真动图；`gateway-media.js` 1 处：新增 `wechatAnimatedSwap()`，拿文件名当「感觉」去 dsh-meme 图库换一张真 GIF（`animatedStrict` 语义，挑不到就不发静态图，池里没 GIF 时按原样退回）；`routes.js` 5 处：`/state` 算出「微信·嘉新（主人）」会话状态（认没认出主人、落没落进「鱼」工作区、最后活跃时间）+ 表情体检（借库开没开、图库里有多少张 GIF、上次挑图结果），并把两项与 `masterTakeover` 一起回给面板、保存时接受该开关 |
+| `assets/client.wechat.js`（整文件，20 处锚点） | 平台 → 微信页重排：**每个选项的说明收进 `title`（鼠标悬停才显示）**，页内只留「分组标题 + 开关名 + 当前值」；顶部新增**主人会话状态卡**（生效 / 未生效、落到哪个工作区、最后活跃）与**表情体检条**（借库状态 / GIF 张数 / 上次挑图），并把「借 dsh-meme 的表情库」从 QQ 页挪到本页（关掉即回到原版行为） |
+| `assets/wechat-transport-hunks.json` | `gateway` 06 / 08 两处注入 `FS-WECHAT-MASTER-GATE`：开关读取 + 关掉后不进 soul 的判定（运输层与 P10 同一判据，避免两处各判一套） |
+| `assets/meme-bridge.js`（整文件） | 同步为插件 `lib/` 最新版：加 `isGif` / `usable` 判定、返回值带 `animated` 标记——动图换图要按这两个字段筛 |
+| `assets/wechat-pane-hunks.json` | 删掉 W39 / W41（内容已并进 `client.wechat.js` 整文件，留着只会重复插入） |
+| `patch-fish-soul.mjs` | 注册 `patchWechatMaster()`（`--only wechat-master`）；新增 `sameText()` 整文件比对**忽略换行风格**——`wechat-inbound.js` / `channels/wechat.js` 当初是 CRLF 手写的，以前每次 `--check` 都被判「不一致」重写一遍 |
+| `audit-upstream.mjs` / `tools/gen-patch-docs.mjs` | 两处 `GROUPS` / `rows` 补 P10（不补就等于这组没人跟上游对表、也不进逐处清单） |
+| `services/`（新增，14 个文件） | 跟随 DSH 启动的服务栈整体入库：`app-triggered-boot.ps1/.vbs`（2 分钟去抖入口）、`install-boot-hook.ps1`（幂等修 `dsh-boot-hooks` 注册，DSH 更新会冲掉）、`boot-hooks/`（cordis 插件本体，住 node_modules 外）、`fish-stack-watchdog.ps1/.vbs`（17890 / 3001 / 8791）、`wechat-stack-watchdog.ps1/.vbs`（11229 + 11234 + 定时重打 bridge 接线）、`wechat-bridge-start.ps1/.vbs`、`README.md`（触发链 / 端口表 / 安装 / 验证 / 卸载 / 换机要改的硬编码路径）。**不含任何 token**：`SOCIAL_DSH_TOKEN` 是起服时从 `WechatAgent\data\workspace\state\social-dsh-token.txt` 现读的 |
+| `README.md`、`docs/patches.md` | 组表补 P10、`--only` 列表补 `wechat-master`、仓库内容补 `services/` 与 P9/P10 资产；处数 112 → **121 处锚点**（`gen-patch-docs.mjs` 重生成，`--check` 一致） |
+
+**怎么验证**（实跑结果）
+
+```powershell
+# 1) 逐处核对：本机这份插件是不是都已经打上了
+node patch-fish-soul.mjs --check
+# 结果：改了 0 处，已打过 135 处，上游已实现 / 自动退役 3 段，漂移 0 处，失败 0 处
+#       （含「lib/client.wechat.js 已是最新，跳过」与 meme-bridge 两处 isGif / animated 判定）
+
+# 2) 文档与 JSON 是否同步
+node tools/gen-patch-docs.mjs --check
+# 结果：一致（121 处锚点）
+
+# 3) 语法
+node --check audit-upstream.mjs   # ok
+```
+
+**重启之后怎么看生效**
+
+1. 设置 → 平台 → 微信：顶部状态卡应显示**生效**、写清落在「鱼」工作区的「微信·嘉新（主人）」、带最后活跃时间；「借 dsh-meme 的表情库」显示**已开**、GIF **张数 > 0**。
+2. 微信里让她发个动态表情：出站日志应出现换图（`wechatAnimatedSwap`），收到的应是会动的 GIF；若她反复发静态图，先看体检条的「GIF 张数」——为 0 说明图库里真没有动图，得先在 dsh-meme 那边补。
+3. 把「主人私聊接管」关掉再发消息：微信仍由 WechatAgent 自己回，**不应**出现希希的第二条回复，也不该往记忆里写。
+
+**回滚**：面板上把「主人私聊接管」关掉即可回到「微信不接管私聊」；要连动图换图一起去掉，`node patch-fish-soul.mjs --only wechat-master --check` 之后按需用打补丁前的自动备份（`~/.dsh/backup/fish-soul-patch-<时间戳>`）恢复 `lib/`。`services/` 与本仓库补丁互不依赖，停用见 `services/README.md` 第五节。
+
+---
+
+---
+
 ## 新增 P9：微信运输层入库（入站口 + 出站通道 + 网关挂载）
 
 **为什么改**：0.15.36 的适配只恢复了「修改型」补丁，微信真正收发消息要用的运输层从来没进过仓库——`assets/` 里没有 `wechat-inbound.js`、`channels/wechat.js`，`wechat-hunks.json` 里也搜不到 `onWechatMessage` / `this.wechat` / `11233`。后果是重装或重打补丁之后，微信那侧虽然配置还在（`wechatagent.json` 的 `brain=fish-soul`、`bridge-config.json` 的 `inboundUrl=http://127.0.0.1:11233/...`），但 11233 / 11234 两个端口没人监听，微信消息直接掉回 WechatAgent 的「未分组」会话，希希不接话。这次把三件套补齐并纳入体检。

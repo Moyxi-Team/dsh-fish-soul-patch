@@ -301,7 +301,8 @@ const rows = [
 	...auditHunks(dir, 'wechat-pane-hunks.json', 'P8 wechat-pane'),
 	...auditHunks(dir, 'wechat-transport-hunks.json', 'P9 wechat-transport'),
 	auditNewFile(dir, 'P9 wechat-transport', 'wechat-inbound-file', '微信入站服务（整文件 wechat-inbound.js）', 'wechat-inbound.js', '微信入站口（本机回环）'),
-	auditNewFile(dir, 'P9 wechat-transport', 'wechat-channel-file', '微信出站通道（整文件 channels/wechat.js）', 'channels/wechat.js', '微信通道适配器（本机回环）')
+	auditNewFile(dir, 'P9 wechat-transport', 'wechat-channel-file', '微信出站通道（整文件 channels/wechat.js）', 'channels/wechat.js', '微信通道适配器（本机回环）'),
+	...auditHunks(dir, 'wechat-master-hunks.json', 'P10 wechat-master')
 ];
 
 const retired = rows.filter((r) => r.status === 'RETIRED').length;

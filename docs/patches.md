@@ -1,4 +1,4 @@
-# 补丁逐处清单（P1–P9）
+# 补丁逐处清单（P1–P10）
 
 > **本文件由 `tools/gen-patch-docs.mjs` 根据 `assets/*-hunks.json` 生成，请勿手改。**
 > 锚点增删后跑 `node tools/gen-patch-docs.mjs` 重生成；`--check` 可校验是否与 JSON 一致。
@@ -15,10 +15,11 @@
 | P5 | `dm` | 抖音 —— 主动给互关好友发私信 | 22 | `assets/douyin-proactive.js` → 插件 `lib/` | `assets/dm-hunks.json` |
 | P6 | `share` | 刷到有意思的就发给你 → 视频卡片 | 9 | — | `assets/share-hunks.json` |
 | P7 | `wechat` | 微信（WechatAgent）↔ 人格记忆互通 | 26 | — | `assets/wechat-hunks.json` |
-| P8 | `wechat-pane` | 平台 → 微信设置页 + 表情只发动图 | 22 | `assets/client.wechat.js` → 插件 `lib/` | `assets/wechat-pane-hunks.json` |
+| P8 | `wechat-pane` | 平台 → 微信设置页 + 表情只发动图 | 20 | `assets/client.wechat.js` → 插件 `lib/` | `assets/wechat-pane-hunks.json` |
 | P9 | `wechat-transport` | 微信运输层 —— 出站通道 / 入站口 / 网关挂载 | 20 | `assets/wechat-inbound.js` → 插件 `lib/`<br>`assets/channels/wechat.js` → 插件 `lib/` | `assets/wechat-transport-hunks.json` |
+| P10 | `wechat-master` | 微信 —— 主人接管开关 + 静态表情换动图 + 面板状态 | 11 | — | `assets/wechat-master-hunks.json` |
 
-合计锚点 **112 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
+合计锚点 **121 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
 
 每处补丁在运行时按四种判定之一处理：`PATCHED` 打上 / `ALREADY` 跳过 / `UPSTREAM` 上游已原生实现则自动退役 / `DRIFT` 锚点没了停手报错（见 README「用法」）。
 
@@ -422,7 +423,7 @@ if (replyIsWechat) {
 
 </details>
 
-## P8 · 平台 → 微信设置页 + 表情只发动图（`--only wechat-pane`，22 处）
+## P8 · 平台 → 微信设置页 + 表情只发动图（`--only wechat-pane`，20 处）
 
 另有整文件模块：`assets/client.wechat.js` → 插件 `lib/`（内容变了要同步升脚本里的版本戳，见维护约定）。
 
@@ -440,16 +441,14 @@ if (replyIsWechat) {
 | 10 | `W36` | `lib/stickers.js` | stickers：resolveMemeTags 按描述挑图时带上动图偏好 | — |
 | 11 | `W37` | `lib/stickers.js` | stickers：pickFromMeme 借 dsh-meme 时也先挑 GIF | — |
 | 12 | `W38` | `lib/stickers.js` | stickers：挑图结果带 animated 标记 | — |
-| 13 | `W39` | `lib/meme-bridge.js` | meme-bridge：入参说明补动图两项 | — |
-| 14 | `W40` | `lib/meme-bridge.js` | meme-bridge：加 isGif / usable 判定 | — |
-| 15 | `W41` | `lib/meme-bridge.js` | meme-bridge：要动图时多拉候选，GIF 优先、严格模式不回退 | — |
-| 16 | `W42` | `lib/meme-bridge.js` | meme-bridge：返回 animated 标记 | — |
-| 17 | `W43` | `lib/routes.js` | routes：新增 wechatState()（微信配置回显） | — |
-| 18 | `W44` | `lib/routes.js` | /channels/state 回显里加 wechat | — |
-| 19 | `W45` | `lib/routes.js` | routes：新增 POST /channels/wechat-config（只存 soul 侧微信设置） | — |
-| 20 | `W46` | `lib/client.js` | client：页签短名与子页签加「微信」 | — |
-| 21 | `W47` | `lib/client.js` | client：微信子页签也走 channels 轮询 | — |
-| 22 | `W48` | `lib/client.js` | client：微信子页签渲染 WechatPane | — |
+| 13 | `W40` | `lib/meme-bridge.js` | meme-bridge：加 isGif / usable 判定 | — |
+| 14 | `W42` | `lib/meme-bridge.js` | meme-bridge：返回 animated 标记 | — |
+| 15 | `W43` | `lib/routes.js` | routes：新增 wechatState()（微信配置回显） | — |
+| 16 | `W44` | `lib/routes.js` | /channels/state 回显里加 wechat | — |
+| 17 | `W45` | `lib/routes.js` | routes：新增 POST /channels/wechat-config（只存 soul 侧微信设置） | — |
+| 18 | `W46` | `lib/client.js` | client：页签短名与子页签加「微信」 | — |
+| 19 | `W47` | `lib/client.js` | client：微信子页签也走 channels 轮询 | — |
+| 20 | `W48` | `lib/client.js` | client：微信子页签渲染 WechatPane | — |
 
 <details><summary>锚点原文（marker）</summary>
 
@@ -490,14 +489,8 @@ async pickFromMeme(feel, avoid = [], { animatedFirst = false, animatedStrict = f
 # W38
 animated: r.animated === true,
 
-# W39
-* @returns {Promise<{ok: boolean, path?: string, sourcePath?: string, tag?: string, caption?: string, packName?: string, label?: string, animated?: boolean, reason?: string}>}
-
 # W40
 const isGif = (p) => extname(String(p ?? '')).toLowerCase() === '.gif';
-
-# W41
-? (memes.find((m) => usable(m) && isGif(m.path)) ?? (animatedStrict === true ? undefined : memes.find(usable)))
 
 # W42
 animated: isGif(hit.path),
@@ -769,6 +762,62 @@ ctx.effect(() => () => channel.stop(), 'dsh-fish-soul: qq channel');
 
 </details>
 
+## P10 · 微信 —— 主人接管开关 + 静态表情换动图 + 面板状态（`--only wechat-master`，11 处）
+
+| # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |
+| --- | --- | --- | --- | --- |
+| 1 | `wechat-master-01` | `lib/config-schema.js` | 微信配置：主人私聊接管开关要能存住（否则面板上开了保存完就回落） | — |
+| 2 | `wechat-master-02` | `lib/config-schema.js` | 微信插话：让着你（masterQuiet）要能存住 | — |
+| 3 | `wechat-master-03` | `lib/gateway.js` | 微信运行配置里带上 masterTakeover | — |
+| 4 | `wechat-master-04` | `lib/gateway.js` | 主人私聊接管关掉时整条不进 soul（不回复、不记记忆） | — |
+| 5 | `wechat-master-05` | `lib/gateway.js` | 微信出站：模型挑中的 _stickers 静态图，发之前先换成真动图 | — |
+| 6 | `wechat-master-06` | `lib/gateway-media.js` | 新增 wechatAnimatedSwap：拿文件名当"感觉"去图库换一张真 GIF | — |
+| 7 | `wechat-master-07` | `lib/routes.js` | /state 里算出「微信·嘉新（主人）」这条会话通到哪儿（认人、工作区、活跃） | — |
+| 8 | `wechat-master-08` | `lib/routes.js` | 微信表情体检：借库开没开、图库有没有 GIF、上一次挑图结果 | — |
+| 9 | `wechat-master-09` | `lib/routes.js` | /state 回给面板：接管开关 + 主人会话状态 | — |
+| 10 | `wechat-master-10` | `lib/routes.js` | /state 回给面板：表情体检结果 | — |
+| 11 | `wechat-master-11` | `lib/routes.js` | 保存微信配置时接受 masterTakeover | — |
+
+<details><summary>锚点原文（marker）</summary>
+
+```text
+# wechat-master-01
+masterTakeover: z.boolean().default(true)
+
+# wechat-master-02
+masterQuietMinutes: z.number().default(5)
+
+# wechat-master-03
+masterTakeover: w.masterTakeover !== false
+
+# wechat-master-04
+master-takeover=off 丢弃主人私聊
+
+# wechat-master-05
+[FS-WECHAT-STICKER-ANIM] 微信只认 GIF
+
+# wechat-master-06
+async wechatAnimatedSwap(filePath, prefs = {}) {
+
+# wechat-master-07
+const wechatMasterSession = (masterIds) => {
+
+# wechat-master-08
+const wechatStickerDiag = () => {
+
+# wechat-master-09
+masterSession: wechatMasterSession(masterIds),
+
+# wechat-master-10
+sticker: wechatStickerDiag(),
+
+# wechat-master-11
+masterTakeover: body.masterTakeover === undefined
+
+```
+
+</details>
+
 ## 设置里「个人插件」页显示几处（探针口径）
 
 设置 → 系统 → 个人插件 那一页读的是 `assets/plugins-route.js` 里内联的 `PATCH_GROUPS`（探针：靠一段「只有打过才出现」的代码判断在不在），**按功能合并**，条数与上面的锚点数不是一一对应。核对时别拿两边的数字硬对。
@@ -782,8 +831,9 @@ ctx.effect(() => () => channel.stop(), 'dsh-fish-soul: qq channel');
 | P5 | 23 | 12 | 少 11 条（合并成功能项） |
 | P6 | 9 | 10 | 多 1 条（一处拆成多项） |
 | P7 | 26 | 23 | 少 3 条（合并成功能项） |
-| P8 | 23 | 22 | 少 1 条（合并成功能项） |
+| P8 | 21 | 22 | 多 1 条（一处拆成多项） |
 | P9 | 22 | — | 页面未覆盖该组 |
+| P10 | 11 | — | 页面未覆盖该组 |
 
 页面上某一组显示「已打 N / M」，N 是按探针数出来的；锚点数以本文件为准。探针漏了某处时，页面会少报，但补丁器 `--check` 仍然会管到那一处。
 
