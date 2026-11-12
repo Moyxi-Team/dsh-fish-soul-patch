@@ -117,3 +117,19 @@ Get-CimInstance Win32_Process |
 * 插件升级/重装**不会**影响这里（`boot-hooks` 在 node_modules 之外，watchdog 只是外部进程）；
 * 重打补丁**也不会**动这里；
 * 唯一交叉点是微信链路：`wechat-stack-watchdog.ps1` 会周期性重打 WechatAgent 的 `social-bridge.js` 接线（为的是 11233/11234 两个口），而 fish-soul 这侧监听 11233 的入站服务由 P9 补丁提供。**两个都要在**，微信消息才走得通。
+
+## 八、入库校验（2026-11-12）
+
+`services/` 里 13 个脚本（含 `boot-hooks/` 三个）与本机 `C:\Users\Administrator\.dsh\` 下的实际运行版本逐文件 MD5 相同，逐项结果：
+
+```text
+app-triggered-boot.ps1 / .vbs   一致
+install-boot-hook.ps1           一致
+fish-stack-watchdog.ps1 / .vbs  一致
+wechat-stack-watchdog.ps1 / .vbs 一致
+wechat-bridge-start.ps1 / .vbs  一致
+start-fish-stack-now.vbs        一致
+boot-hooks\boot-hooks.mjs / cordis.patch.yml / package.json  一致
+```
+
+也就是说：**仓库里这一份就是当前正在跑的那一份**，换机照 README 里的硬编码路径表改完、`install-boot-hook.ps1` 跑一次即可。
