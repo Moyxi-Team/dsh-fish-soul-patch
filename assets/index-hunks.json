@@ -7,7 +7,7 @@
 		"old": "\t\tconst source = message?.source ?? {};\n\t\tif (source.kind === SOURCE_QQ || source.kind === SOURCE_PROACTIVE || source.kind === SOURCE_BILI || source.kind === SOURCE_DOUYIN) return;",
 		"new": "\t\t// #80：自家会话的 agent 是插件 create/resume 出来的，人格卡 + 瞬态块挂在它的 ctx 上。\n\t\t// 插件重载（升级、装别的插件触发 pnpm 重链、宿主重开插件实例）会把旧 ctx 的段释放掉，\n\t\t// 而会话本体还活着 —— gateway.ensureSession 看见 live 就直接 return，不会再走 setup，\n\t\t// 于是人格卡和「此刻状态 / Top5 记忆」永久消失，动态页每条都变成「记忆没进这轮」。\n\t\t// 这里每条消息都补挂一次（Map 记住挂在哪个 ctx 上，ctx 换了就重挂，同一 ctx 不重复注册）。 [FS-REMOUNT-PATCH]\n\t\tif (gateway?.isOurSession(agentId) === true) mountSectionsFor(payload?.agent);\n\t\tconst source = message?.source ?? {};\n\t\tif (source.kind === SOURCE_QQ || source.kind === SOURCE_PROACTIVE || source.kind === SOURCE_BILI || source.kind === SOURCE_DOUYIN) return;",
 		"upstreamFixed": {
-			"present": "gateway?.isOurSession(agentId) === true) mountSectionsFor"
+			"present": "所有会话都在 inbox 时补挂一次做保险"
 		}
 	},
 	{

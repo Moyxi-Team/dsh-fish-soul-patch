@@ -1,11 +1,12 @@
 [
  {
-  "old": "\tconstructor({ ctx, db, clock, getConfig, log, channel, bili = null, browser = null, douyin = null, douyinBrowser = null, canvasConvert = null, soul, voice = null, stickers = null, slang = null, agentSections = null, groupAdmin = null, embedder = null, embeddingCfg = null }) {",
-  "new": "\tconstructor({ ctx, db, clock, getConfig, log, channel, wechat = null, bili = null, browser = null, douyin = null, douyinBrowser = null, canvasConvert = null, soul, voice = null, stickers = null, slang = null, agentSections = null, groupAdmin = null, embedder = null, embeddingCfg = null }) {",
+  "old": "\tconstructor({ ctx, db, clock, getConfig, log, channel, bili = null, browser = null, douyin = null, douyinBrowser = null, canvasConvert = null, soul, voice = null, stickers = null, slang = null, agentSections = null, groupAdmin = null, embedder = null, embeddingCfg = null, diag = null }) {",
+  "new": "\tconstructor({ ctx, db, clock, getConfig, log, channel, wechat = null, bili = null, browser = null, douyin = null, douyinBrowser = null, canvasConvert = null, soul, voice = null, stickers = null, slang = null, agentSections = null, groupAdmin = null, embedder = null, embeddingCfg = null, diag = null }) {",
   "file": "lib/gateway.js",
   "id": "wechat-transport-gateway-01",
   "title": "ChatGateway 构造参数加 wechat 通道",
-  "marker": "\tconstructor({ ctx, db, clock, getConfig, log, channel, wechat = null, bili = null, browser = null, douyin = null, douyinBrowser = null, canvasConvert = null, soul, voice = null, stickers = null, slang = null, agentSections = null, groupAdmin = null, embedder = null, embeddingCfg = null }) {"
+  "marker": "\tconstructor({ ctx, db, clock, getConfig, log, channel, wechat = null, bili = null, browser = null, douyin = null, douyinBrowser = null, canvasConvert = null, soul, voice = null, stickers = null, slang = null, agentSections = null, groupAdmin = null, embedder = null, embeddingCfg = null, diag = null }) {",
+  "upgradeOld": "\tconstructor({ ctx, db, clock, getConfig, log, channel, wechat = null, bili = null, browser = null, douyin = null, douyinBrowser = null, canvasConvert = null, soul, voice = null, stickers = null, slang = null, agentSections = null, groupAdmin = null, embedder = null, embeddingCfg = null }) {"
  },
  {
   "old": "\t\tthis.channel = channel;\n\t\tthis.bili = bili;",
@@ -128,12 +129,13 @@
   "marker": "\tconst qqCfg = () => currentConfig.qq ?? {};\n\t/** 微信通道配置（见 fish-soul-config.json 的 wechat 段）[FS-WECHAT-TRANSPORT] */\n\tconst wechatCfg = () => currentConfig.wechat ?? {};\n\t/** @type {ChatGateway|null} */"
  },
  {
-  "old": "\tlet groupAdmin = null;\n\tconst channel = new SnowLumaChannel({",
-  "new": "\tlet groupAdmin = null;\n\t/** @type {WechatChannel|null} */\n\tlet wechatChannel = null;\n\t/** @type {WechatInboundServer|null} */\n\tlet wechatInbound = null;\n\tconst channel = new SnowLumaChannel({",
+  "old": "\tlet groupAdmin = null;\n\t/** @type {GroupList|null} */\n\tlet groupList = null;\n\tconst channel = new SnowLumaChannel({",
+  "new": "\tlet groupAdmin = null;\n\t/** @type {GroupList|null} */\n\tlet groupList = null;\n\t/** @type {WechatChannel|null} */\n\tlet wechatChannel = null;\n\t/** @type {WechatInboundServer|null} */\n\tlet wechatInbound = null;\n\tconst channel = new SnowLumaChannel({",
   "file": "lib/index.js",
   "id": "wechat-transport-index-03",
   "title": "index 加 wechatChannel / wechatInbound 变量",
-  "marker": "\tlet groupAdmin = null;\n\t/** @type {WechatChannel|null} */\n\tlet wechatChannel = null;\n\t/** @type {WechatInboundServer|null} */\n\tlet wechatInbound = null;\n\tconst channel = new SnowLumaChannel({"
+  "marker": "\tlet groupAdmin = null;\n\t/** @type {GroupList|null} */\n\tlet groupList = null;\n\t/** @type {WechatChannel|null} */\n\tlet wechatChannel = null;\n\t/** @type {WechatInboundServer|null} */\n\tlet wechatInbound = null;\n\tconst channel = new SnowLumaChannel({",
+  "upgradeOld": "\tlet groupAdmin = null;\n\t/** @type {WechatChannel|null} */\n\tlet wechatChannel = null;\n\t/** @type {WechatInboundServer|null} */\n\tlet wechatInbound = null;\n\tconst channel = new SnowLumaChannel({"
  },
  {
   "old": "\n\tgateway = new ChatGateway({",

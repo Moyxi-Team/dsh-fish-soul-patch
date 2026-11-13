@@ -89,3 +89,9 @@ if ($waUp) {
 Start-Sleep -Seconds 8
 Write-Log ('ports: voice17890={0} snow3001={1} sink8791={2} bridge11229={3} out11234={4} adapter8766={5} dsh11230={6}' -f `
   (Test-Port 17890), (Test-Port 3001), (Test-Port 8791), (Test-Port 11229), (Test-Port 11234), (Test-Port 8766), (Test-Port 11230))
+
+# Patch self-heal: the pnpm install DSH runs on this launch may have rewritten
+# node_modules\dsh-fish-soul with the pristine upstream build (every patch gone, together with
+# the WeChat tab and the animated-sticker swap). The guard waits 90s for the install to settle,
+# re-checks, and re-applies the patch set if anything is missing. Log: ~/.dsh/fish-soul-patch-guard.log
+Start-Hidden (Join-Path $root 'fish-soul-patch-guard.vbs')

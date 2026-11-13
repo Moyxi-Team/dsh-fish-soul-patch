@@ -4,8 +4,8 @@
 		"title": "系统设置多一个「个人插件」子页",
 		"file": "lib/client.js",
 		"marker": "[\"plugins\", \"个人插件\"]",
-		"old": "\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"version\", \"版本更新\"]]]",
-		"new": "\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"plugins\", \"个人插件\"], [\"version\", \"版本更新\"]]]",
+		"old": "\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"version\", \"版本更新\"], [\"diag\", \"运行日志\"]]]",
+		"new": "\t\t\t[\"system\", \"系统\", [[\"interface\", \"界面\"], [\"plugins\", \"个人插件\"], [\"version\", \"版本更新\"], [\"diag\", \"运行日志\"]]]",
 		"upstreamFixed": {
 			"present": "[\"plugins\", \"个人插件\"]"
 		},

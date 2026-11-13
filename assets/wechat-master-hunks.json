@@ -1,103 +1,103 @@
 [
-  {
-    "id": "wechat-master-01",
-    "file": "lib/config-schema.js",
-    "title": "微信配置：主人私聊接管开关要能存住（否则面板上开了保存完就回落）",
-    "marker": "masterTakeover: z.boolean().default(true)",
-    "old": "\t\t\tmasterUserIds: z.array(z.string()).default([]), // 主人的微信 id（认成 master）\n",
-    "new": "\t\t\tmasterUserIds: z.array(z.string()).default([]), // 主人的微信 id（认成 master）\n\t\t\tmasterTakeover: z.boolean().default(true), // [FS-WECHAT-MASTER-GATE] 「微信·嘉新（主人）」这条私聊要不要由 soul 接管（关掉就整条不进 soul）\n",
-    "note": "缺这一行时 zod 会把 masterTakeover 当未知字段剥掉，开关看起来能点、保存完刷新又变回默认。"
-  },
-  {
-    "id": "wechat-master-02",
-    "file": "lib/config-schema.js",
-    "title": "微信插话：让着你（masterQuiet）要能存住",
-    "marker": "masterQuietMinutes: z.number().default(5)",
-    "old": "\t\t\t\tmaxPerHour: z.number().default(3),\n\t\t\t\tkeywords: z.array(z.string()).default([])\n\t\t\t}).default({})\n\t\t}).default({}),\n",
-    "new": "\t\t\t\tmaxPerHour: z.number().default(3),\n\t\t\t\tkeywords: z.array(z.string()).default([]),\n\t\t\t\tmasterQuiet: z.boolean().default(true), // 微信群里主人在聊时少插话\n\t\t\t\tmasterQuietMinutes: z.number().default(5)\n\t\t\t}).default({})\n\t\t}).default({}),\n",
-    "note": "QQ 那边的 interject 早就有这两个字段，微信那份漏了 → 微信设置页「让着你 / 改成不管」点了保存不生效。"
-  },
-  {
-    "id": "wechat-master-03",
-    "file": "lib/gateway.js",
-    "title": "微信运行配置里带上 masterTakeover",
-    "marker": "masterTakeover: w.masterTakeover !== false",
-    "old": "\t\t\tcallNames: list(w.callNames),\n\t\t\tinterject: interjectConfig(w.interject)\n\t\t};\n\t}\n",
-    "new": "\t\t\tcallNames: list(w.callNames),\n\t\t\t// [FS-WECHAT-MASTER-GATE] 「微信·嘉新（主人）」这条私聊要不要由 soul 接管（关掉就整条不进 soul，交给 WechatAgent 自己回）\n\t\t\tmasterTakeover: w.masterTakeover !== false,\n\t\t\tinterject: interjectConfig(w.interject)\n\t\t};\n\t}\n",
-    "note": "默认 true（不配置 = 照旧接管），关掉才 false，老配置不会因为升级突然不回主人。"
-  },
-  {
-    "id": "wechat-master-04",
-    "file": "lib/gateway.js",
-    "title": "主人私聊接管关掉时整条不进 soul（不回复、不记记忆）",
-    "marker": "master-takeover=off 丢弃主人私聊",
-    "old": "\tasync onWechatMessage(payload) {\n\t\tif (this.stopped) return;\n\t\tconst cfg = this.wechatConfig();\n\t\tif (!cfg.enabled) return;\n\t\tconst m = this.wechatToMessage(payload);\n\t\tif (m === null) return;\n",
-    "new": "\tasync onWechatMessage(payload) {\n\t\tif (this.stopped) return;\n\t\tconst cfg = this.wechatConfig();\n\t\tif (!cfg.enabled) return;\n\t\tconst m = this.wechatToMessage(payload);\n\t\tif (m === null) return;\n\t\t// [FS-WECHAT-MASTER-GATE] 平台 → 微信 → 接管开关：关掉后主人私聊不再进 soul（不回复、不记记忆，微信那边由 WechatAgent 自己处理）\n\t\tif (cfg.masterTakeover === false && m.chatType === 'private' && cfg.masterUserIds.includes(String(m.userId))) {\n\t\t\tthis.log('info', `[fish-soul][wechat-trace] master-takeover=off 丢弃主人私聊 from=${m.userId}`);\n\t\t\treturn;\n\t\t}\n",
-    "note": "放在 markSeen 之前，关掉后这条消息既不回也不写记忆，微信那边由 WechatAgent 自己回。"
-  },
-  {
-    "id": "wechat-master-05",
-    "file": "lib/gateway.js",
-    "title": "微信出站：任何静态图（含 dsh-meme 缓存的 webp）发之前先换成真动图",
-    "marker": "[FS-WECHAT-STICKER-ANIM] 微信只认 GIF",
-    "old": "\t\tconst images = [];\n\t\tfor (const g of 图) {\n\t\t\tconst seg = this.resolveImageFile(g.value, workspacePath);\n\t\t\tif (seg !== null) images.push(seg);\n\t\t}\n",
-    "new": "\t\tconst images = [];\n\t\t// [FS-WECHAT-STICKER-ANIM] 微信只认 GIF：模型挑中的静态图 —— 不管是 _stickers 里的，还是借 dsh-meme 后缓存成\n\t\t//   meme-cache\\*.webp 的 —— 出站前一律先换一张真动图。只认 _stickers 会漏掉缓存那条路，发出去就是张不动的。\n\t\t//   （换不到：严格模式这张不发；非严格照旧发，跟以前一样）\n\t\tconst wxSwap = platformOf(row.channel_id) === 'wechat' ? this.wechatStickerPrefs() : null;\n\t\tfor (const g of 图) {\n\t\t\tlet value = String(g.value ?? '');\n\t\t\tif (wxSwap !== null && /\\.(png|jpe?g|webp|bmp)$/i.test(value)) {\n\t\t\t\tconst swapped = await this.wechatAnimatedSwap(value, wxSwap);\n\t\t\t\trecordSticker({ file: swapped.file, desc: swapped.desc, fromMeme: swapped.fromMeme, reason: swapped.reason }, 'image');\n\t\t\t\tif (swapped.file === '') continue;\n\t\t\t\tvalue = swapped.file;\n\t\t\t}\n\t\t\tconst seg = this.resolveImageFile(value, workspacePath);\n\t\t\tif (seg !== null) images.push(seg);\n\t\t}\n",
-    "note": "换到的记进表情金库（recordSticker）好看得见效果；严格模式下换不到就这张不发，不再发静态图糊弄。",
-    "upgradeOld": "\t\tconst images = [];\n\t\t// [FS-WECHAT-STICKER-ANIM] 微信只认 GIF：模型自己挑中 _stickers 里的静态图，出站前先换一张真动图\n\t\t//   （换不到：严格模式这张不发；非严格照旧发，跟以前一样）\n\t\tconst wxSwap = platformOf(row.channel_id) === 'wechat' ? this.wechatStickerPrefs() : null;\n\t\tfor (const g of 图) {\n\t\t\tlet value = String(g.value ?? '');\n\t\t\tif (wxSwap !== null && /_stickers[\\\\/]/i.test(value) && /\\.(png|jpe?g|webp|bmp)$/i.test(value)) {\n\t\t\t\tconst swapped = await this.wechatAnimatedSwap(value, wxSwap);\n\t\t\t\trecordSticker({ file: swapped.file, desc: swapped.desc, fromMeme: swapped.fromMeme, reason: swapped.reason }, 'image');\n\t\t\t\tif (swapped.file === '') continue;\n\t\t\t\tvalue = swapped.file;\n\t\t\t}\n\t\t\tconst seg = this.resolveImageFile(value, workspacePath);\n\t\t\tif (seg !== null) images.push(seg);\n\t\t}\n"
-  },
-  {
-    "id": "wechat-master-06",
-    "file": "lib/gateway-media.js",
-    "title": "新增 wechatAnimatedSwap：拿文件名当\"感觉\"去图库换一张真 GIF",
-    "marker": "async wechatAnimatedSwap(filePath, prefs = {}) {",
-    "old": "\tresolveImageFile(p, workspacePath) {\n",
-    "new": "\t/**\n\t * 微信只认 GIF：模型自己挑中的那张 `_stickers` 静态图，出站前先拿文件名当\"感觉\"去图库换一张真动图。\n\t * 换不到时按严格开关决定：严格 → 这张不发（宁可没表情也不发张不动的）；非严格 → 原样发。\n\t * @returns {Promise<{file: string, desc: string, reason: string, fromMeme: boolean}>} file 为空 = 这张别发\n\t */\n\tasync wechatAnimatedSwap(filePath, prefs = {}) {\n\t\tconst strict = prefs.animatedStrict === true;\n\t\tconst base = String(filePath ?? '').split(/[\\\\/]/).pop().replace(/\\.[^.]+$/, '').trim();\n\t\t// 缓存文件名是 sha1（meme-72e90d42b9b5），拿它当「感觉」等于没给词：能用本轮挑图描述就用描述\n\t\tconst seen = String(this.lastWechatSticker?.desc ?? '').trim();\n\t\tconst feel = base === '' || /^meme-[0-9a-f]{6,}$/i.test(base) ? (seen !== '' ? seen : '日常') : base;\n\t\t// 换不到 / 出错都走这里：严格模式给个空 file（= 这张不发），非严格原样发\n\t\tconst keep = (why) => (strict\n\t\t\t? { file: '', desc: feel, reason: why + '（严格模式：这张不发）', fromMeme: false }\n\t\t\t: { file: String(filePath ?? ''), desc: feel, reason: why, fromMeme: false });\n\t\tconst meme = this.stickers?.meme ?? null;\n\t\tif (meme === null || typeof meme.pick !== 'function') return keep('没有表情包服务');\n\t\ttry {\n\t\t\tconst hit = await meme.pick({ feel, animatedFirst: true, animatedStrict: strict });\n\t\t\tconst path = String(hit?.path ?? '');\n\t\t\tif (hit?.ok === true && /\\.gif$/i.test(path) === true) {\n\t\t\t\treturn { file: path, desc: String(hit.caption ?? hit.tag ?? feel), reason: '', fromMeme: true };\n\t\t\t}\n\t\t\treturn keep(String(hit?.reason ?? '图库里没有这张的动图'));\n\t\t} catch (error) {\n\t\t\treturn keep('换动图失败：' + String(error instanceof Error ? error.message : error));\n\t\t}\n\t},\n\n\tresolveImageFile(p, workspacePath) {\n",
-    "note": "挑图走的是表情包服务（dsh-meme）的 pick()，仍然是只读、不收藏；没有表情包服务就按开关决定原样发还是不发。",
-    "upgradeOld": "\t/**\n\t * 微信只认 GIF：模型自己挑中的那张 `_stickers` 静态图，出站前先拿文件名当\"感觉\"去图库换一张真动图。\n\t * 换不到时按严格开关决定：严格 → 这张不发（宁可没表情也不发张不动的）；非严格 → 原样发。\n\t * @returns {Promise<{file: string, desc: string, reason: string, fromMeme: boolean}>} file 为空 = 这张别发\n\t */\n\tasync wechatAnimatedSwap(filePath, prefs = {}) {\n\t\tconst strict = prefs.animatedStrict === true;\n\t\tconst feel = String(filePath ?? '').split(/[\\\\/]/).pop().replace(/\\.[^.]+$/, '').trim();\n\t\t// 换不到 / 出错都走这里：严格模式给个空 file（= 这张不发），非严格原样发\n\t\tconst keep = (why) => (strict\n\t\t\t? { file: '', desc: feel, reason: why + '（严格模式：这张不发）', fromMeme: false }\n\t\t\t: { file: String(filePath ?? ''), desc: feel, reason: why, fromMeme: false });\n\t\tconst meme = this.stickers?.meme ?? null;\n\t\tif (meme === null || typeof meme.pick !== 'function') return keep('没有表情包服务');\n\t\ttry {\n\t\t\tconst hit = await meme.pick({ feel, animatedFirst: true, animatedStrict: false });\n\t\t\tconst path = String(hit?.path ?? '');\n\t\t\tif (hit?.ok === true && /\\.gif$/i.test(path) === true) {\n\t\t\t\treturn { file: path, desc: String(hit.caption ?? hit.tag ?? feel), reason: '', fromMeme: true };\n\t\t\t}\n\t\t\treturn keep(String(hit?.reason ?? '图库里没有这张的动图'));\n\t\t} catch (error) {\n\t\t\treturn keep('换动图失败：' + String(error instanceof Error ? error.message : error));\n\t\t}\n\t},\n\n\tresolveImageFile(p, workspacePath) {\n"
-  },
-  {
-    "id": "wechat-master-07",
-    "file": "lib/routes.js",
-    "title": "/state 里算出「微信·嘉新（主人）」这条会话通到哪儿（认人、工作区、活跃）",
-    "marker": "const wechatMasterSession = (masterIds) => {",
-    "old": "\t/**\n\t * 平台 → 微信的状态（[FS-WECHAT-PANE]）。\n\t * 微信的收发本身就是 WechatAgent 的 social-bridge 在干，这边只回显 soul 侧存着的那份配置，\n\t * 面板上「哪些在这儿改就生效、哪些得去 WechatAgent 改」就是照这份数据 + 静态清单渲染的。\n\t */\n",
-    "new": "\t/**\n\t * 平台 → 微信的状态（[FS-WECHAT-PANE]）。\n\t * 微信的收发本身就是 WechatAgent 的 social-bridge 在干，这边只回显 soul 侧存着的那份配置，\n\t * 面板上「哪些在这儿改就生效、哪些得去 WechatAgent 改」就是照这份数据 + 静态清单渲染的。\n\t */\n\t/**\n\t * 「微信·嘉新（主人）」这条会话到底通到哪儿（[FS-WECHAT-MASTER-GATE]）。\n\t * 面板上要能一眼看出：认人里填的主人 id 有没有对应会话、会话挂在哪个工作区（应该是「鱼」）、还活不活跃。\n\t */\n\tconst wechatMasterSession = (masterIds) => {\n\t\tconst ids = Array.isArray(masterIds) ? masterIds.map((x) => String(x).trim()).filter(Boolean) : [];\n\t\tconst blank = {\n\t\t\tlinked: false, masterId: ids[0] ?? '', title: '', channelId: '', workspacePath: '', workspaceTitle: '',\n\t\t\texpectedWorkspace: safeDedicatedWorkspace(), status: '', lastInboundAt: 0, reason: '还没填主人微信 id（认人 → 主人）'\n\t\t};\n\t\tif (ids.length === 0) return blank;\n\t\tlet row = null;\n\t\ttry {\n\t\t\tconst marks = ids.flatMap((id) => [`wechat:private:${id}`, `wechat-private:${id}`]);\n\t\t\trow = db.prepare(\n\t\t\t\t`SELECT * FROM chat_session WHERE channel = 'wechat' AND channel_id IN (${marks.map(() => '?').join(', ')}) ORDER BY COALESCE(last_inbound_at, created_at) DESC LIMIT 1`\n\t\t\t).get(...marks) ?? null;\n\t\t} catch (error) {\n\t\t\tlogger('warn', '[fish-soul] 读微信主人会话失败：' + String(error instanceof Error ? error.message : error));\n\t\t}\n\t\tif (row === null) {\n\t\t\treturn { ...blank, reason: '还没有「微信·嘉新（主人）」这条会话（主人还没在微信上跟她说过话，或者会话被归档了）' };\n\t\t}\n\t\tconst workspacePath = String(row.workspace_path ?? '');\n\t\tlet workspaceTitle = '';\n\t\ttry {\n\t\t\tconst hit = (gateway?.listWorkspaces?.() ?? []).find((one) => String(one.path ?? '').toLowerCase() === workspacePath.toLowerCase());\n\t\t\tworkspaceTitle = String(hit?.title ?? '');\n\t\t} catch { workspaceTitle = ''; }\n\t\tconst expected = safeDedicatedWorkspace();\n\t\tconst onDedicated = expected !== '' && workspacePath.toLowerCase() === expected.toLowerCase();\n\t\tconst state = {\n\t\t\tlinked: row.status === 'active' && onDedicated,\n\t\t\tmasterId: ids[0] ?? '',\n\t\t\ttitle: String(row.title ?? ''),\n\t\t\tchannelId: String(row.channel_id ?? ''),\n\t\t\tworkspacePath,\n\t\t\tworkspaceTitle: workspaceTitle !== '' ? workspaceTitle : (onDedicated ? '鱼' : ''),\n\t\t\texpectedWorkspace: expected,\n\t\t\tstatus: String(row.status ?? ''),\n\t\t\tlastInboundAt: Number(row.last_inbound_at ?? 0) || 0,\n\t\t\treason: ''\n\t\t};\n\t\tif (state.linked) return state;\n\t\tif (row.status !== 'active') state.reason = `会话状态是 ${state.status || '未知'}，不是 active（被归档 / 暂停了）`;\n\t\telse if (!onDedicated) state.reason = `会话挂在别的工作区（${workspacePath || '空'}），不是「鱼」`;\n\t\telse state.reason = '会话没联通';\n\t\treturn state;\n\t};\n",
-    "note": "面板上要能一眼看出会话有没有落到「鱼」工作区；没联通时给出原因（没填 id / 没抓到会话 / 挂在别的工作区）。"
-  },
-  {
-    "id": "wechat-master-08",
-    "file": "lib/routes.js",
-    "title": "微信表情体检：借库开没开、图库有没有 GIF、上一次挑图结果",
-    "marker": "const wechatStickerDiag = () => {",
-    "old": "\tconst wechatState = () => {\n",
-    "new": "\t/**\n\t * 微信表情的体检 + 最近一次挑图结果（[FS-WECHAT-STICKER-ANIM]）。\n\t * 「设置都开着但发出来还是静态图」只有两种可能：借库没开 / 图库里没有 GIF / 上一张挑中的就是静态图。\n\t * 这三件事都摆在面板上，就不用再猜。\n\t */\n\tconst wechatStickerDiag = () => {\n\t\tconst sc = stickerConfig(getConfig().stickers ?? {});\n\t\tlet meme = { ok: false, total: 0, animated: 0, reason: '表情包功能没起来' };\n\t\ttry { meme = gateway?.stickers?.meme?.status?.() ?? meme; } catch { /* 表情包模块没起来 */ }\n\t\treturn {\n\t\t\tmemeEnabled: sc.meme === true,\n\t\t\tlibraryOk: meme.ok === true,\n\t\t\tlibraryTotal: Number(meme.total ?? 0),\n\t\t\tlibraryAnimated: Number(meme.animated ?? 0),\n\t\t\tlibraryReason: String(meme.reason ?? ''),\n\t\t\tlast: gateway?.lastWechatSticker ?? null\n\t\t};\n\t};\n\n\tconst wechatState = () => {\n",
-    "note": "「设置全开着但还是静态图」基本只有三种原因，这三件事都摆面板上就不用猜。"
-  },
-  {
-    "id": "wechat-master-09",
-    "file": "lib/routes.js",
-    "title": "/state 回给面板：接管开关 + 主人会话状态",
-    "marker": "masterSession: wechatMasterSession(masterIds),",
-    "old": "\t\t\tmasterUserIds: masterIds,\n",
-    "new": "\t\t\tmasterUserIds: masterIds,\n\t\t\t// [FS-WECHAT-MASTER-GATE] 接管开关 + 这条会话通到哪儿\n\t\t\tmasterTakeover: w.masterTakeover !== false,\n\t\t\tmasterSession: wechatMasterSession(masterIds),\n",
-    "note": ""
-  },
-  {
-    "id": "wechat-master-10",
-    "file": "lib/routes.js",
-    "title": "/state 回给面板：表情体检结果",
-    "marker": "sticker: wechatStickerDiag(),",
-    "old": "\t\t\tstickerAnimatedStrict: w.stickerAnimatedStrict === true,\n",
-    "new": "\t\t\tstickerAnimatedStrict: w.stickerAnimatedStrict === true,\n\t\t\tsticker: wechatStickerDiag(),\n",
-    "note": ""
-  },
-  {
-    "id": "wechat-master-11",
-    "file": "lib/routes.js",
-    "title": "保存微信配置时接受 masterTakeover",
-    "marker": "masterTakeover: body.masterTakeover === undefined",
-    "old": "\t\t\t\t\t\tstickerAnimatedStrict: body.stickerAnimatedStrict === undefined ? cur.stickerAnimatedStrict === true : body.stickerAnimatedStrict === true,\n",
-    "new": "\t\t\t\t\t\tstickerAnimatedStrict: body.stickerAnimatedStrict === undefined ? cur.stickerAnimatedStrict === true : body.stickerAnimatedStrict === true,\n\t\t\t\t\t\t// [FS-WECHAT-MASTER-GATE] 「微信·嘉新（主人）」接管开关：关掉后主人私聊不进 soul（不回复、不记忆，微信那边自己回）\n\t\t\t\t\t\tmasterTakeover: body.masterTakeover === undefined ? cur.masterTakeover !== false : body.masterTakeover === true,\n",
-    "note": ""
-  }
+ {
+  "id": "wechat-master-01",
+  "file": "lib/config-schema.js",
+  "title": "微信配置：主人私聊接管开关要能存住（否则面板上开了保存完就回落）",
+  "marker": "masterTakeover: z.boolean().default(true)",
+  "old": "\t\t\tmasterUserIds: z.array(z.string()).default([]), // 主人的微信 id（认成 master）\n",
+  "new": "\t\t\tmasterUserIds: z.array(z.string()).default([]), // 主人的微信 id（认成 master）\n\t\t\tmasterTakeover: z.boolean().default(true), // [FS-WECHAT-MASTER-GATE] 「微信·嘉新（主人）」这条私聊要不要由 soul 接管（关掉就整条不进 soul）\n",
+  "note": "缺这一行时 zod 会把 masterTakeover 当未知字段剥掉，开关看起来能点、保存完刷新又变回默认。"
+ },
+ {
+  "id": "wechat-master-02",
+  "file": "lib/config-schema.js",
+  "title": "微信插话：让着你（masterQuiet）要能存住",
+  "marker": "masterQuietMinutes: z.number().default(5)",
+  "old": "\t\t\t\tmaxPerHour: z.number().default(3),\n\t\t\t\tkeywords: z.array(z.string()).default([])\n\t\t\t}).default({})\n\t\t}).default({}),\n",
+  "new": "\t\t\t\tmaxPerHour: z.number().default(3),\n\t\t\t\tkeywords: z.array(z.string()).default([]),\n\t\t\t\tmasterQuiet: z.boolean().default(true), // 微信群里主人在聊时少插话\n\t\t\t\tmasterQuietMinutes: z.number().default(5)\n\t\t\t}).default({})\n\t\t}).default({}),\n",
+  "note": "QQ 那边的 interject 早就有这两个字段，微信那份漏了 → 微信设置页「让着你 / 改成不管」点了保存不生效。"
+ },
+ {
+  "id": "wechat-master-03",
+  "file": "lib/gateway.js",
+  "title": "微信运行配置里带上 masterTakeover",
+  "marker": "masterTakeover: w.masterTakeover !== false",
+  "old": "\t\t\tcallNames: list(w.callNames),\n\t\t\tinterject: interjectConfig(w.interject)\n\t\t};\n\t}\n",
+  "new": "\t\t\tcallNames: list(w.callNames),\n\t\t\t// [FS-WECHAT-MASTER-GATE] 「微信·嘉新（主人）」这条私聊要不要由 soul 接管（关掉就整条不进 soul，交给 WechatAgent 自己回）\n\t\t\tmasterTakeover: w.masterTakeover !== false,\n\t\t\tinterject: interjectConfig(w.interject)\n\t\t};\n\t}\n",
+  "note": "默认 true（不配置 = 照旧接管），关掉才 false，老配置不会因为升级突然不回主人。"
+ },
+ {
+  "id": "wechat-master-04",
+  "file": "lib/gateway.js",
+  "title": "主人私聊接管关掉时整条不进 soul（不回复、不记记忆）",
+  "marker": "master-takeover=off 丢弃主人私聊",
+  "old": "\tasync onWechatMessage(payload) {\n\t\tif (this.stopped) return;\n\t\tconst cfg = this.wechatConfig();\n\t\tif (!cfg.enabled) return;\n\t\tconst m = this.wechatToMessage(payload);\n\t\tif (m === null) return;\n",
+  "new": "\tasync onWechatMessage(payload) {\n\t\tif (this.stopped) return;\n\t\tconst cfg = this.wechatConfig();\n\t\tif (!cfg.enabled) return;\n\t\tconst m = this.wechatToMessage(payload);\n\t\tif (m === null) return;\n\t\t// [FS-WECHAT-MASTER-GATE] 平台 → 微信 → 接管开关：关掉后主人私聊不再进 soul（不回复、不记记忆，微信那边由 WechatAgent 自己处理）\n\t\tif (cfg.masterTakeover === false && m.chatType === 'private' && cfg.masterUserIds.includes(String(m.userId))) {\n\t\t\tthis.log('info', `[fish-soul][wechat-trace] master-takeover=off 丢弃主人私聊 from=${m.userId}`);\n\t\t\treturn;\n\t\t}\n",
+  "note": "放在 markSeen 之前，关掉后这条消息既不回也不写记忆，微信那边由 WechatAgent 自己回。"
+ },
+ {
+  "id": "wechat-master-05",
+  "file": "lib/gateway.js",
+  "title": "微信出站：任何静态图（含 dsh-meme 缓存的 webp）发之前先换成真动图",
+  "marker": "[FS-WECHAT-STICKER-ANIM] 微信只认 GIF",
+  "old": "\t\tconst images = [];\n\t\tfor (const g of 图) {\n\t\t\tconst seg = this.resolveImageFile(g.value, workspacePath);\n\t\t\tif (seg !== null) images.push(seg);\n\t\t}\n",
+  "new": "\t\tconst images = [];\n\t\t// [FS-WECHAT-STICKER-ANIM] 微信只认 GIF：模型挑中的静态图 —— 不管是 _stickers 里的，还是借 dsh-meme 后缓存成\n\t\t//   meme-cache\\*.webp 的 —— 出站前一律先换一张真动图。只认 _stickers 会漏掉缓存那条路，发出去就是张不动的。\n\t\t//   （换不到：严格模式这张不发；非严格照旧发，跟以前一样）\n\t\tconst wxSwap = platformOf(row.channel_id) === 'wechat' ? this.wechatStickerPrefs() : null;\n\t\tfor (const g of 图) {\n\t\t\tlet value = String(g.value ?? '');\n\t\t\tif (wxSwap !== null && /\\.(png|jpe?g|webp|bmp)$/i.test(value)) {\n\t\t\t\tconst swapped = await this.wechatAnimatedSwap(value, wxSwap);\n\t\t\t\trecordSticker({ file: swapped.file, desc: swapped.desc, fromMeme: swapped.fromMeme, reason: swapped.reason }, 'image');\n\t\t\t\tif (swapped.file === '') continue;\n\t\t\t\tvalue = swapped.file;\n\t\t\t}\n\t\t\tconst seg = this.resolveImageFile(value, workspacePath);\n\t\t\tif (seg !== null) images.push(seg);\n\t\t}\n",
+  "note": "换到的记进表情金库（recordSticker）好看得见效果；严格模式下换不到就这张不发，不再发静态图糊弄。",
+  "upgradeOld": "\t\tconst images = [];\n\t\t// [FS-WECHAT-STICKER-ANIM] 微信只认 GIF：模型自己挑中 _stickers 里的静态图，出站前先换一张真动图\n\t\t//   （换不到：严格模式这张不发；非严格照旧发，跟以前一样）\n\t\tconst wxSwap = platformOf(row.channel_id) === 'wechat' ? this.wechatStickerPrefs() : null;\n\t\tfor (const g of 图) {\n\t\t\tlet value = String(g.value ?? '');\n\t\t\tif (wxSwap !== null && /_stickers[\\\\/]/i.test(value) && /\\.(png|jpe?g|webp|bmp)$/i.test(value)) {\n\t\t\t\tconst swapped = await this.wechatAnimatedSwap(value, wxSwap);\n\t\t\t\trecordSticker({ file: swapped.file, desc: swapped.desc, fromMeme: swapped.fromMeme, reason: swapped.reason }, 'image');\n\t\t\t\tif (swapped.file === '') continue;\n\t\t\t\tvalue = swapped.file;\n\t\t\t}\n\t\t\tconst seg = this.resolveImageFile(value, workspacePath);\n\t\t\tif (seg !== null) images.push(seg);\n\t\t}\n"
+ },
+ {
+  "id": "wechat-master-06",
+  "file": "lib/gateway-media.js",
+  "title": "新增 wechatAnimatedSwap：拿文件名当\"感觉\"去图库换一张真 GIF",
+  "marker": "async wechatAnimatedSwap(filePath, prefs = {}) {",
+  "old": "\tresolveImageFile(p, workspacePath) {\n",
+  "new": "\t/**\n\t * 微信只认 GIF：模型自己挑中的那张 `_stickers` 静态图，出站前先拿文件名当\"感觉\"去图库换一张真动图。\n\t * 换不到时按严格开关决定：严格 → 这张不发（宁可没表情也不发张不动的）；非严格 → 原样发。\n\t * @returns {Promise<{file: string, desc: string, reason: string, fromMeme: boolean}>} file 为空 = 这张别发\n\t */\n\tasync wechatAnimatedSwap(filePath, prefs = {}) {\n\t\tconst strict = prefs.animatedStrict === true;\n\t\tconst base = String(filePath ?? '').split(/[\\\\/]/).pop().replace(/\\.[^.]+$/, '').trim();\n\t\t// 缓存文件名是 sha1（meme-72e90d42b9b5），拿它当「感觉」等于没给词：能用本轮挑图描述就用描述\n\t\tconst seen = String(this.lastWechatSticker?.desc ?? '').trim();\n\t\tconst feel = base === '' || /^meme-[0-9a-f]{6,}$/i.test(base) ? (seen !== '' ? seen : '日常') : base;\n\t\t// 换不到 / 出错都走这里：严格模式给个空 file（= 这张不发），非严格原样发\n\t\tconst keep = (why) => (strict\n\t\t\t? { file: '', desc: feel, reason: why + '（严格模式：这张不发）', fromMeme: false }\n\t\t\t: { file: String(filePath ?? ''), desc: feel, reason: why, fromMeme: false });\n\t\tconst meme = this.stickers?.meme ?? null;\n\t\tif (meme === null || typeof meme.pick !== 'function') return keep('没有表情包服务');\n\t\ttry {\n\t\t\tconst hit = await meme.pick({ feel, animatedFirst: true, animatedStrict: strict });\n\t\t\tconst path = String(hit?.path ?? '');\n\t\t\tif (hit?.ok === true && /\\.gif$/i.test(path) === true) {\n\t\t\t\treturn { file: path, desc: String(hit.caption ?? hit.tag ?? feel), reason: '', fromMeme: true };\n\t\t\t}\n\t\t\treturn keep(String(hit?.reason ?? '图库里没有这张的动图'));\n\t\t} catch (error) {\n\t\t\treturn keep('换动图失败：' + String(error instanceof Error ? error.message : error));\n\t\t}\n\t},\n\n\tresolveImageFile(p, workspacePath) {\n",
+  "note": "挑图走的是表情包服务（dsh-meme）的 pick()，仍然是只读、不收藏；没有表情包服务就按开关决定原样发还是不发。",
+  "upgradeOld": "\t/**\n\t * 微信只认 GIF：模型自己挑中的那张 `_stickers` 静态图，出站前先拿文件名当\"感觉\"去图库换一张真动图。\n\t * 换不到时按严格开关决定：严格 → 这张不发（宁可没表情也不发张不动的）；非严格 → 原样发。\n\t * @returns {Promise<{file: string, desc: string, reason: string, fromMeme: boolean}>} file 为空 = 这张别发\n\t */\n\tasync wechatAnimatedSwap(filePath, prefs = {}) {\n\t\tconst strict = prefs.animatedStrict === true;\n\t\tconst feel = String(filePath ?? '').split(/[\\\\/]/).pop().replace(/\\.[^.]+$/, '').trim();\n\t\t// 换不到 / 出错都走这里：严格模式给个空 file（= 这张不发），非严格原样发\n\t\tconst keep = (why) => (strict\n\t\t\t? { file: '', desc: feel, reason: why + '（严格模式：这张不发）', fromMeme: false }\n\t\t\t: { file: String(filePath ?? ''), desc: feel, reason: why, fromMeme: false });\n\t\tconst meme = this.stickers?.meme ?? null;\n\t\tif (meme === null || typeof meme.pick !== 'function') return keep('没有表情包服务');\n\t\ttry {\n\t\t\tconst hit = await meme.pick({ feel, animatedFirst: true, animatedStrict: false });\n\t\t\tconst path = String(hit?.path ?? '');\n\t\t\tif (hit?.ok === true && /\\.gif$/i.test(path) === true) {\n\t\t\t\treturn { file: path, desc: String(hit.caption ?? hit.tag ?? feel), reason: '', fromMeme: true };\n\t\t\t}\n\t\t\treturn keep(String(hit?.reason ?? '图库里没有这张的动图'));\n\t\t} catch (error) {\n\t\t\treturn keep('换动图失败：' + String(error instanceof Error ? error.message : error));\n\t\t}\n\t},\n\n\tresolveImageFile(p, workspacePath) {\n"
+ },
+ {
+  "id": "wechat-master-07",
+  "file": "lib/routes.js",
+  "title": "/state 里算出「微信·嘉新（主人）」这条会话通到哪儿（认人、工作区、活跃）",
+  "marker": "const wechatMasterSession = (masterIds) => {",
+  "old": "\t/**\n\t * 平台 → 微信的状态（[FS-WECHAT-PANE]）。\n\t * 微信的收发本身就是 WechatAgent 的 social-bridge 在干，这边只回显 soul 侧存着的那份配置，\n\t * 面板上「哪些在这儿改就生效、哪些得去 WechatAgent 改」就是照这份数据 + 静态清单渲染的。\n\t */\n",
+  "new": "\t/**\n\t * 平台 → 微信的状态（[FS-WECHAT-PANE]）。\n\t * 微信的收发本身就是 WechatAgent 的 social-bridge 在干，这边只回显 soul 侧存着的那份配置，\n\t * 面板上「哪些在这儿改就生效、哪些得去 WechatAgent 改」就是照这份数据 + 静态清单渲染的。\n\t */\n\t/**\n\t * 「微信·嘉新（主人）」这条会话到底通到哪儿（[FS-WECHAT-MASTER-GATE]）。\n\t * 面板上要能一眼看出：认人里填的主人 id 有没有对应会话、会话挂在哪个工作区（应该是「鱼」）、还活不活跃。\n\t */\n\tconst wechatMasterSession = (masterIds) => {\n\t\tconst ids = Array.isArray(masterIds) ? masterIds.map((x) => String(x).trim()).filter(Boolean) : [];\n\t\tconst blank = {\n\t\t\tlinked: false, masterId: ids[0] ?? '', title: '', channelId: '', workspacePath: '', workspaceTitle: '',\n\t\t\texpectedWorkspace: safeDedicatedWorkspace(), status: '', lastInboundAt: 0, reason: '还没填主人微信 id（认人 → 主人）'\n\t\t};\n\t\tif (ids.length === 0) return blank;\n\t\tlet row = null;\n\t\ttry {\n\t\t\tconst marks = ids.flatMap((id) => [`wechat:private:${id}`, `wechat-private:${id}`]);\n\t\t\trow = db.prepare(\n\t\t\t\t`SELECT * FROM chat_session WHERE channel = 'wechat' AND channel_id IN (${marks.map(() => '?').join(', ')}) ORDER BY COALESCE(last_inbound_at, created_at) DESC LIMIT 1`\n\t\t\t).get(...marks) ?? null;\n\t\t} catch (error) {\n\t\t\tlogger('warn', '[fish-soul] 读微信主人会话失败：' + String(error instanceof Error ? error.message : error));\n\t\t}\n\t\tif (row === null) {\n\t\t\treturn { ...blank, reason: '还没有「微信·嘉新（主人）」这条会话（主人还没在微信上跟她说过话，或者会话被归档了）' };\n\t\t}\n\t\tconst workspacePath = String(row.workspace_path ?? '');\n\t\tlet workspaceTitle = '';\n\t\ttry {\n\t\t\tconst hit = (gateway?.listWorkspaces?.() ?? []).find((one) => String(one.path ?? '').toLowerCase() === workspacePath.toLowerCase());\n\t\t\tworkspaceTitle = String(hit?.title ?? '');\n\t\t} catch { workspaceTitle = ''; }\n\t\tconst expected = safeDedicatedWorkspace();\n\t\tconst onDedicated = expected !== '' && workspacePath.toLowerCase() === expected.toLowerCase();\n\t\tconst state = {\n\t\t\tlinked: row.status === 'active' && onDedicated,\n\t\t\tmasterId: ids[0] ?? '',\n\t\t\ttitle: String(row.title ?? ''),\n\t\t\tchannelId: String(row.channel_id ?? ''),\n\t\t\tworkspacePath,\n\t\t\tworkspaceTitle: workspaceTitle !== '' ? workspaceTitle : (onDedicated ? '鱼' : ''),\n\t\t\texpectedWorkspace: expected,\n\t\t\tstatus: String(row.status ?? ''),\n\t\t\tlastInboundAt: Number(row.last_inbound_at ?? 0) || 0,\n\t\t\treason: ''\n\t\t};\n\t\tif (state.linked) return state;\n\t\tif (row.status !== 'active') state.reason = `会话状态是 ${state.status || '未知'}，不是 active（被归档 / 暂停了）`;\n\t\telse if (!onDedicated) state.reason = `会话挂在别的工作区（${workspacePath || '空'}），不是「鱼」`;\n\t\telse state.reason = '会话没联通';\n\t\treturn state;\n\t};\n",
+  "note": "面板上要能一眼看出会话有没有落到「鱼」工作区；没联通时给出原因（没填 id / 没抓到会话 / 挂在别的工作区）。"
+ },
+ {
+  "id": "wechat-master-08",
+  "file": "lib/routes.js",
+  "title": "微信表情体检：借库开没开、图库有没有 GIF、上一次挑图结果",
+  "marker": "const wechatStickerDiag = () => {",
+  "old": "\tconst wechatState = () => {\n",
+  "new": "\t/**\n\t * 微信表情的体检 + 最近一次挑图结果（[FS-WECHAT-STICKER-ANIM]）。\n\t * 「设置都开着但发出来还是静态图」只有两种可能：借库没开 / 图库里没有 GIF / 上一张挑中的就是静态图。\n\t * 这三件事都摆在面板上，就不用再猜。\n\t */\n\tconst wechatStickerDiag = () => {\n\t\tconst sc = stickerConfig(getConfig().stickers ?? {});\n\t\tlet meme = { ok: false, total: 0, animated: 0, reason: '表情包功能没起来' };\n\t\ttry { meme = gateway?.stickers?.meme?.status?.() ?? meme; } catch { /* 表情包模块没起来 */ }\n\t\treturn {\n\t\t\tmemeEnabled: sc.meme === true,\n\t\t\tlibraryOk: meme.ok === true,\n\t\t\tlibraryTotal: Number(meme.total ?? 0),\n\t\t\tlibraryAnimated: Number(meme.animated ?? 0),\n\t\t\tlibraryReason: String(meme.reason ?? ''),\n\t\t\tlast: gateway?.lastWechatSticker ?? null\n\t\t};\n\t};\n\n\tconst wechatState = () => {\n",
+  "note": "「设置全开着但还是静态图」基本只有三种原因，这三件事都摆面板上就不用猜。"
+ },
+ {
+  "id": "wechat-master-09",
+  "file": "lib/routes.js",
+  "title": "/state 回给面板：接管开关 + 主人会话状态",
+  "marker": "\t\t\tmasterSession: wechatMasterSession(list(w.masterUserIds)),\n",
+  "old": "\t\t\tmasterUserIds: list(w.masterUserIds),\n",
+  "new": "\t\t\tmasterUserIds: list(w.masterUserIds),\n\t\t\t// [FS-WECHAT-MASTER-GATE] 接管开关 + 这条会话通到哪儿\n\t\t\tmasterTakeover: w.masterTakeover !== false,\n\t\t\tmasterSession: wechatMasterSession(list(w.masterUserIds)),\n",
+  "note": ""
+ },
+ {
+  "id": "wechat-master-10",
+  "file": "lib/routes.js",
+  "title": "/state 回给面板：表情体检结果",
+  "marker": "sticker: wechatStickerDiag(),",
+  "old": "\t\t\tstickerAnimatedStrict: w.stickerAnimatedStrict === true,\n",
+  "new": "\t\t\tstickerAnimatedStrict: w.stickerAnimatedStrict === true,\n\t\t\tsticker: wechatStickerDiag(),\n",
+  "note": ""
+ },
+ {
+  "id": "wechat-master-11",
+  "file": "lib/routes.js",
+  "title": "保存微信配置时接受 masterTakeover",
+  "marker": "masterTakeover: body.masterTakeover === undefined",
+  "old": "\t\t\t\t\t\tstickerAnimatedStrict: body.stickerAnimatedStrict === undefined ? cur.stickerAnimatedStrict === true : body.stickerAnimatedStrict === true,\n",
+  "new": "\t\t\t\t\t\tstickerAnimatedStrict: body.stickerAnimatedStrict === undefined ? cur.stickerAnimatedStrict === true : body.stickerAnimatedStrict === true,\n\t\t\t\t\t\t// [FS-WECHAT-MASTER-GATE] 「微信·嘉新（主人）」接管开关：关掉后主人私聊不进 soul（不回复、不记忆，微信那边自己回）\n\t\t\t\t\t\tmasterTakeover: body.masterTakeover === undefined ? cur.masterTakeover !== false : body.masterTakeover === true,\n",
+  "note": ""
+ }
 ]
