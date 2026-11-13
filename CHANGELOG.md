@@ -534,3 +534,34 @@ node patch-fish-soul.mjs --only share   # 重跑应 0 改动（幂等）+ 冒烟
 | `0dadd6c` | P2：评论区状态按可见性判定，折叠态不再误报已展开 |
 | `8b15209` / `05f4fca` | P2：BGM 改抓推荐列表；0.15.32 适配到 `chooseMusic`（不确认不发布） |
 | `4a1d899` | P1：归档 0.15.31 的 `meme-bridge` 补丁与抖音修复，附兼容体检 |
+
+---
+
+## P10 修复：平台设置页四个子页全挂 —— `wechat-master-07` 调了一个没定义的函数
+
+**现象**：设置 → 平台，QQ / B站 / 抖音 / 微信 四个子页全部读不到数据（微信页连内容都不出来）。
+
+**根因**：`wechat-master-07` 往 `lib/routes.js` 里写了两处 `safeDedicatedWorkspace()`，但这两个符号从来没有被定义过。
+上游把工作区函数从 `dedicatedWorkspacePath` 换名、改由 `gateway.js` 导出后，补丁只跟着改了 import，
+忘了补丁自己包装的那层 helper 没有落地。于是 `wechatState()` 里 `blank` 对象一构造就抛 `ReferenceError`，
+而 `wechatState()` 挂在 `GET /channels/state` 的返回体上（`wechat: wechatState()`）——
+坏掉的正好是四个子页共用的那一个接口，所以四个页一起失效。
+
+**改了什么**
+
+| 位置 | 改动 |
+| --- | --- |
+| `assets/wechat-master-hunks.json` → `wechat-master-07` | `new` 里随补丁一起定义 `safeDedicatedWorkspace`（`try { dedicatedWorkspacePath() ?? '' } catch { '' }`，取不到就当空串，不让整条 `/channels/state` 变 500）；带 `upgradeOld`，已经打过旧版的机器自动升到新版，不会两段并存 |
+| 同上 `note` | 记下「helper 必须随补丁落地」，避免下次上游再换导出时重犯 |
+
+**验证**（stub 驱动 `registerRoutes` 的 prefix handler，真跑 `GET /channels/state`）
+
+```text
+status 200
+top keys ok,masterQqUin,qq,bili,douyin,wechat,sessions
+wechat.masterTakeover = true
+wechat.masterSession  = { masterId: "853200206", expectedWorkspace: "C:\Users\Administrator\.dsh\fish-soul\workspace", reason: "还没有「微信·嘉新（主人）」这条会话…" }
+wechat.sticker / wechat.interject 字段齐全
+```
+
+`node patch-fish-soul.mjs --check` → 已打 134 处、漂移 0、失败 0。

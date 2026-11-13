@@ -15,3 +15,5 @@ RUNBOOK.md
 DECISIONS.md
 RISKS.md
 history/
+*.bak
+*.orig
