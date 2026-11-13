@@ -47,7 +47,7 @@ const PATCH_GROUPS = [
     key: "P3",
     name: "热更新后人格卡 + 记忆块掉线",
     items: [
-      { t: "自家会话每条消息补挂人格段（热更新后人格卡 + 记忆块不再掉线）", f: "index.js", p: "if (gateway?.isOurSession(agentId) === true) mountSectionsFor(payload?.agent);", u: {"present": "gateway?.isOurSession(agentId) === true) mountSectionsFor"} },
+      { t: "自家会话每条消息补挂人格段（热更新后人格卡 + 记忆块不再掉线）", f: "index.js", p: "if (person !== null) mountSectionsFor(payload?.agent);", u: {"present": "gateway?.isOurSession(agentId) === true) mountSectionsFor"} },
       { t: "sectionsMounted 从 Set 改 Map（换 ctx 才重挂，同一 ctx 不重复注册）", f: "index.js", p: "if (id === '' || (agent?.ctx !== undefined && sectionsMounted.get(id) === agent.ctx)) return;", u: {"present": "sectionsMounted.get(id) === agent.ctx"} },
     ]
   },
@@ -143,14 +143,14 @@ const PATCH_GROUPS = [
       { t: "stickers：resolveMemeTags 按描述挑图时带上动图偏好", f: "stickers.js", p: "\t\t\tresolved.push({ desc, file: r.ok ? r.file : null, fromMeme: r.fromMeme === true, animated: r.animated === true, reason: r.ok ? null : (r.reason ?? null) });", u: null },
       { t: "stickers：pickFromMeme 借 dsh-meme 时也先挑 GIF", f: "stickers.js", p: "\tasync pickFromMeme(feel, avoid = [], { animatedFirst = false, animatedStrict = false } = {}) {", u: null },
       { t: "stickers：挑图结果带 animated 标记", f: "stickers.js", p: "\t\t\t\tanimated: r.animated === true,", u: null },
-      { t: "meme-bridge：入参说明补动图两项", f: "meme-bridge.js", p: "\t * @returns {Promise<{ok: boolean, path?: string, sourcePath?: string, tag?: string, caption?: string, packName?: string, label?: string, animated?: boolean, reason?: string}>}", u: null },
+      { t: "meme-bridge：入参说明补动图两项", f: "meme-bridge.js", p: "\t * @returns {Promise<{ok: boolean, path?: string, sourcePath?: string, tag?: string, caption?: string, packName?: string, label?: string, animated?: boolean, viaPool?: boolean, reason?: string}>}", u: null },
       { t: "meme-bridge：加 isGif / usable 判定", f: "meme-bridge.js", p: "\t\tconst isGif = (p) => extname(String(p ?? '')).toLowerCase() === '.gif';", u: null },
-      { t: "meme-bridge：要动图时多拉候选，GIF 优先、严格模式不回退", f: "meme-bridge.js", p: "\t\t\t\t? (memes.find((m) => usable(m) && isGif(m.path)) ?? (animatedStrict === true ? undefined : memes.find(usable)))", u: null },
+      { t: "meme-bridge：要动图时多拉候选，GIF 优先、严格模式不回退", f: "meme-bridge.js", p: "const gif = memes.find((m) => usable(m) && isGif(m.path));", u: null },
       { t: "meme-bridge：返回 animated 标记", f: "meme-bridge.js", p: "\t\t\t\tanimated: isGif(hit.path),", u: null },
       { t: "routes：新增 wechatState()（微信配置回显）", f: "routes.js", p: "\t\tconst list = (v) => (Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : []);", u: null },
       { t: "/channels/state 回显里加 wechat", f: "routes.js", p: "\t\t\t\t\t\twechat: wechatState(),", u: null },
       { t: "routes：新增 POST /channels/wechat-config（只存 soul 侧微信设置）", f: "routes.js", p: "\t\t\t\t\tconst list = (v, fallback) => (v === undefined ? (Array.isArray(fallback) ? fallback : []) : (Array.isArray(v) ? v : []).map((x) => String(x).trim()).filter(Boolean));", u: null },
-      { t: "client：页签短名与子页签加「微信」", f: "client.js", p: "\t\tconst TAB_KEYS = { memory: \"忆\", character: \"角\", daily: \"常\", channels: \"台\", models: \"模\", system: \"统\", guide: \"引\", retrieval: \"索\", persona: \"人\", life: \"自\", inspector: \"忆\", activity: \"动\", behavior: \"习\", qq: \"Q\", bili: \"B\", douyin: \"抖\", wechat: \"微\", version: \"版\" };", u: null },
+      { t: "client：页签短名与子页签加「微信」", f: "client.js", p: "\t\tconst TAB_KEYS = { memory: \"忆\", character: \"角\", daily: \"常\", channels: \"台\", models: \"模\", system: \"统\", guide: \"引\", retrieval: \"索\", persona: \"人\", life: \"自\", inspector: \"忆\", activity: \"动\", behavior: \"习\", qq: \"Q\", bili: \"B\", douyin: \"抖\", wechat: \"微\", version: \"版\", diag: \"志\" };", u: null },
       { t: "client：微信子页签也走 channels 轮询", f: "client.js", p: "\t\t\t\tconst fn = subtab === \"retrieval\" ? loadRetrieval : subtab === \"qq\" || subtab === \"bili\" || subtab === \"douyin\" || subtab === \"wechat\" ? loadChannels : null;", u: null },
       { t: "client：微信子页签渲染 WechatPane", f: "client.js", p: "\t\t\t\t: subtab === \"wechat\" ? h(ChunkTab, { file: \"client.wechat.js\", pick: (m) => m.WechatPane, failText: \"微信页加载失败\", data: channels, refresh: loadChannels, notify })", u: null },
     ]

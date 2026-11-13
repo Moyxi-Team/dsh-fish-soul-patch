@@ -565,3 +565,18 @@ wechat.sticker / wechat.interject 字段齐全
 ```
 
 `node patch-fish-soul.mjs --check` → 已打 134 处、漂移 0、失败 0。
+
+## P10 补记：「个人插件」清单里 4 处误报「没打」
+
+修完 `/channels/state` 后，设置 → 系统 → 个人插件 仍显示 `68/84、待打 4`，让人以为补丁漏了。
+查下来是清单自己的核对串（`routes-plugins.js` 的 `PATCH_GROUPS[].p`）跟不上代码演进，属假阴性，补丁其实都在：
+
+| 组 | 项 | 旧核对串（已对不上） | 现改 |
+| --- | --- | --- | --- |
+| P3 | 自家会话每条消息补挂人格段 | `if (gateway?.isOurSession(agentId) === true) mountSectionsFor(payload?.agent);` | `if (person !== null) mountSectionsFor(payload?.agent);` |
+| P8 | meme-bridge：入参说明补动图两项 | `@returns` 里少了 `viaPool?: boolean` | 补上 `viaPool` |
+| P8 | meme-bridge：要动图时多拉候选 | 旧三元表达式写法 | `const gif = memes.find((m) => usable(m) && isGif(m.path));` |
+| P8 | client：页签短名加「微信」 | `TAB_KEYS` 末尾当时没有 `diag: "志"` | 补上 `diag` |
+
+核对口径从「整行一字不差」放宽到「抓到该行稳定特征」，以后上游在同一行加字段不会再误报。
+改完实测：`done 72 / retired 12 / todo 0 / total 84`。
