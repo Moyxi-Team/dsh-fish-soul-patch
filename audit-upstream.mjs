@@ -119,7 +119,26 @@ function auditMeme(dir) {
  *
  * ⚠️ assets 里 hunk 的 file 字段有的带 `lib/` 前缀（P2/P3/P4 那时写的），有的只写文件名（P5/P6），
  * 所以这里统一先把 `lib/` 剥掉再拼，否则 dm/share 会整组误报 DRIFT。
+ *
+ * 「补丁在位，但整段已经不连续」—— 同一文件里几条补丁挨着打，后打的那条会插进前一条 new 的中间，
+ * 于是 `text.includes(new)` 整段匹配不上，逐行看却一句不缺、顺序也没乱。这时按已在位算，别误报漂移。
+ * 长度 ≥ 8 的行才参与比对：短行（括号、逗号）到处都有，认它会假阳性。
  */
+function spreadApplied(tpl, text) {
+	const lines = String(tpl ?? '')
+		.split('\n')
+		.map((l) => l.trim())
+		.filter((l) => l.length >= 8);
+	if (lines.length < 2) return false;
+	let at = 0;
+	for (const line of lines) {
+		const i = text.indexOf(line, at);
+		if (i === -1) return false;
+		at = i + line.length;
+	}
+	return true;
+}
+
 function auditHunks(dir, jsonName, group = jsonName) {
 	const hunksPath = join(HERE, 'assets', jsonName);
 	if (!existsSync(hunksPath)) return [{ group, id: jsonName, title: jsonName, status: 'DRIFT', detail: `缺 assets/${jsonName}` }];
@@ -155,6 +174,15 @@ function auditHunks(dir, jsonName, group = jsonName) {
 			};
 		// 本机装的是「上一版模板」：h.upgradeOld 是上一版的 new，命中也算在位（重跑 patch 会自动升级）
 		if (hasStr(h.upgradeOld)) return { group, id: h.id, title: h.title, status: 'NEEDED', detail: '补丁在位但为旧版模板（重跑 patch-fish-soul.mjs 会升到新版）' };
+		// 同上，只是整段被同一文件里别的补丁从中间插开了（逐行都在、顺序没乱）
+		if (spreadApplied(h.new, text))
+			return {
+				group,
+				id: h.id,
+				title: h.title,
+				status: 'NEEDED',
+				detail: upstreamFixedHit ? '补丁已在位（逐行都在；同时命中上游同类实现的迹象 → 判退役请以 npm 干净源码为准）' : '补丁已在位（逐行都在，中间夹了同文件其他补丁的行）'
+			};
 		if (upstreamFixedHit)
 			return { group, id: h.id, title: h.title, status: 'RETIRED', detail: `上游已自己修好（${JSON.stringify(h.upstreamFixed)}${fixRel !== rel ? ` @ lib/${fixRel}` : ''}）` };
 		if (text.includes(h.old)) return { group, id: h.id, title: h.title, status: 'NEEDED', detail: '锚点在，补丁仍有效' };

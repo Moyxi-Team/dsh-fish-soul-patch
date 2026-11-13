@@ -195,12 +195,16 @@ export function createMemeBridge({ ctx, log = () => {}, canConvertWebp = () => t
 				const packs = (svc.packs() ?? []).map((p) => ({ id: p.id, name: p.name, count: Number(p.count) || 0 }));
 				const total = packs.reduce((n, p) => n + p.count, 0);
 				const animated = gifPool().items.length;
+				// count 是宿主自己数的，个别版本不给这个字段（或算成 0）。图库目录里能扫到真图（GIF）也算能用：
+				// 否则 status().ok 一 false，微信那边连「[表情: 感觉]」这条规则都不会给她，表情功能就静默没了 ——
+				// 而这时图库里明明躺着几百张现成的动图（[FS-WECHAT-STICKER-ONLYMEME]）。
+				const usable = total > 0 || animated > 0;
 				value = {
-					ok: total > 0,
+					ok: usable,
 					packs,
 					total,
 					animated,
-					reason: total > 0 ? '' : 'dsh-meme 的图库都关着（去 dsh-meme 的设置页把图库开关打开）'
+					reason: usable ? '' : 'dsh-meme 的图库都关着（去 dsh-meme 的设置页把图库开关打开）'
 				};
 			} catch {
 				value = { ok: false, packs: [], total: 0, animated: 0, reason: 'dsh-meme 的取图服务报错了' };
