@@ -203,5 +203,41 @@
   "marker": "\t\t\t\t: subtab === \"wechat\" ? h(ChunkTab, { file: \"client.wechat.js\", pick: (m) => m.WechatPane, failText: \"微信页加载失败\", data: channels, refresh: loadChannels, notify })",
   "old": "\t\t\t\t: subtab === \"qq\" ? h(ChannelPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: subtab === \"bili\" ? h(BiliPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: h(ChunkTab, { file: \"client.douyin.js\", pick: (m) => m.DouyinPane, failText: \"抖音页加载失败\", data: channels, refresh: loadChannels, notify });\n",
   "new": "\t\t\t\t: subtab === \"qq\" ? h(ChannelPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: subtab === \"bili\" ? h(BiliPane, { data: channels, refresh: loadChannels, notify })\n\t\t\t\t: subtab === \"wechat\" ? h(ChunkTab, { file: \"client.wechat.js\", pick: (m) => m.WechatPane, failText: \"微信页加载失败\", data: channels, refresh: loadChannels, notify })\n\t\t\t\t: h(ChunkTab, { file: \"client.douyin.js\", pick: (m) => m.DouyinPane, failText: \"抖音页加载失败\", data: channels, refresh: loadChannels, notify });\n"
+ },
+ {
+  "id": "W35",
+  "file": "lib/stickers.js",
+  "title": "stickers：微信要动图时直接借 dsh-meme 图库（不再先挑本地收藏）",
+  "marker": "\t\t// [FS-WECHAT-STICKER-ONLYMEME] 要动图（微信）时一律直接去 dsh-meme 图库挑真 GIF，不再先挑本地收藏：",
+  "old": "\t\tconst wantAnim = animatedFirst === true || animatedStrict === true;\n\t\t// 先在自己的表情包里按标签向量找；没有 / 算不出来，才去借 dsh-meme 的图库 [FS-MEME-BRIDGE-PATCH]",
+  "new": "\t\tconst wantAnim = animatedFirst === true || animatedStrict === true;\n\t\t// [FS-WECHAT-STICKER-ONLYMEME] 要动图（微信）时一律直接去 dsh-meme 图库挑真 GIF，不再先挑本地收藏：\n\t\t//   本地挑中的是静态图，模型把它写进回复（DSH 里显示的就是它），出站又被换成另一张 GIF，\n\t\t//   于是「显示的和发出去的不是同一张」。图库挑中的 .gif 落一份到工作区 _stickers/，出站不换图，\n\t\t//   DSH 渲染的和微信收到的就是同一个文件。\n\t\tif (wantAnim) {\n\t\t\tconst anim = await this.pickFromMeme(want, avoid, { animatedFirst: true, animatedStrict });\n\t\t\tif (anim.ok === true && anim.animated === true) {\n\t\t\t\tconst staged = this.stageMemeGif(workspacePath, anim.file);\n\t\t\t\tif (staged !== '') return { ...anim, file: staged, absolute: false };\n\t\t\t\treturn anim;\n\t\t\t}\n\t\t\tif (animatedStrict === true) return { ok: false, reason: anim.reason || '图库里没有对得上的动图', memeReason: anim.reason };\n\t\t}\n\t\t// 先在自己的表情包里按标签向量找；没有 / 算不出来，才去借 dsh-meme 的图库 [FS-MEME-BRIDGE-PATCH]",
+  "dependsOn": [
+   "meme-bridge"
+  ],
+  "note": "锚点在 P1/W33/W34 改造过的 stickers.js 里（上游本无）"
+ },
+ {
+  "id": "W36",
+  "file": "lib/stickers.js",
+  "title": "stickers：加 stageMemeGif（图库 gif 落一份到 _stickers）",
+  "marker": "\tstageMemeGif(workspacePath, absPath) {",
+  "old": "\t/**\n\t * 她说「想发个什么感觉的」→ 找出最像的那张。\n",
+  "new": "\t/**\n\t * [FS-WECHAT-STICKER-ONLYMEME] 图库挑中的 .gif 落一份到工作区 _stickers/，返回文件名（相对 _stickers）。\n\t * 为什么要落一份：微信出站只认 .gif 是动图（png/jpg/webp 会被换成另一张），而 DSH 面板渲染的是\n\t * 回复里的 `_stickers/文件名` —— 两边指向同一个文件，显示的和发出去的才必然是同一张。\n\t * @returns {string} 落盘后的文件名；失败返回空串（调用方退回绝对路径）\n\t */\n\tstageMemeGif(workspacePath, absPath) {\n\t\tconst ws = String(workspacePath ?? '').trim();\n\t\tconst src = String(absPath ?? '').trim();\n\t\tif (ws === '' || src === '' || !existsSync(src)) return '';\n\t\ttry {\n\t\t\tconst dir = join(ws, '_stickers');\n\t\t\tmkdirSync(dir, { recursive: true });\n\t\t\tconst name = 'meme-' + createHash('sha1').update(src).digest('hex').slice(0, 10) + '.gif';\n\t\t\tconst dst = join(dir, name);\n\t\t\tif (!existsSync(dst) || statSync(dst).size === 0) writeFileSync(dst, readFileSync(src));\n\t\t\treturn name;\n\t\t} catch (error) {\n\t\t\tthis.log('warn', `[fish-soul] 把图库的动图放进 _stickers 失败：${String(error instanceof Error ? error.message : error)}`);\n\t\t\treturn '';\n\t\t}\n\t}\n\n\t/**\n\t * 她说「想发个什么感觉的」→ 找出最像的那张。\n",
+  "dependsOn": [
+   "meme-bridge"
+  ],
+  "note": "锚点是 pickByFeel 的 JSDoc 头"
+ },
+ {
+  "id": "W37",
+  "file": "lib/stickers.js",
+  "title": "stickers：面板清单忽略 meme-*.gif",
+  "marker": "\t\t\tif (/^meme-[0-9a-f]{6,}\\.gif$/i.test(name)) continue;",
+  "old": "\t\t\tif (known.has(name) || !IMAGE_EXT.has(extname(name).slice(1).toLowerCase())) continue;",
+  "new": "\t\t\t// [FS-WECHAT-STICKER-ONLYMEME] 从图库落到 _stickers 的 meme-*.gif 只负责「显示和发送同一张」，\n\t\t\t// 不进面板清单、也不喂给提示词（否则她下次会照着文件名硬点这几张）\n\t\t\tif (/^meme-[0-9a-f]{6,}\\.gif$/i.test(name)) continue;\n\t\t\tif (known.has(name) || !IMAGE_EXT.has(extname(name).slice(1).toLowerCase())) continue;",
+  "dependsOn": [
+   "meme-bridge"
+  ],
+  "note": "list() 扫 _stickers 目录的过滤条件"
  }
 ]
