@@ -176,8 +176,8 @@
 		"file": "lib/gateway.js",
 		"title": "sendReply：抖音分支把「发出去没」记到 st（主动私信要判断）",
 		"marker": "st.douyinSent = ok && delivered === true",
-		"old": "\t\t\tif (ok && dmText) this.soul.journalOut?.(row.channel_id, dmText);\n\t\t\treturn ok;",
-		"new": "\t\t\t// [FS-DM-SESSION] 主动私信那一轮要如实回报「真发出去了没」（静默 / 风控吞都算没发）\n\t\t\tif (st.douyinOutbound === true) { st.douyinText = dmText; st.douyinSent = ok && delivered === true; }\n\t\t\tif (ok && dmText) this.soul.journalOut?.(row.channel_id, dmText);\n\t\t\treturn ok;"
+		"old": "\t\t\tif (ok && dmText) this.soul.journalOut?.(row.channel_id, dmText, { ownerId: st.journalOwnerId ?? null });\n\t\t\treturn ok;\n",
+		"new": "\t\t\t// [FS-DM-SESSION] 主动私信那一轮要如实回报「真发出去了没」（静默 / 风控吞都算没发）\n\t\t\tif (st.douyinOutbound === true) { st.douyinText = dmText; st.douyinSent = ok && delivered === true; }\n\t\t\tif (ok && dmText) this.soul.journalOut?.(row.channel_id, dmText, { ownerId: st.journalOwnerId ?? null });\n\t\t\treturn ok;\n"
 	},
 	{
 		"id": "dm-session-social-field",

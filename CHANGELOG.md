@@ -5,6 +5,74 @@
 
 ---
 
+## 未编号（本机升到 0.16.6 + 幂等缺陷修复，2026-11-15）：补齐安装落地
+
+**背景**：上游 0.16.6（2026-11-14 发布）比本机 0.15.55 高一版，需要先把 0.16.6 装上、再打补丁。
+
+**上游 0.16.6 改了什么**（0.15.55 → 0.16.6，30 个文件，+1059 / -157）：
+- 新增 `lib/voice-files.js`（语音落盘）；`config-schema.js` 多三个开关，默认全关：`mentionOnly`、`saveIncoming`、`desktopTts`。
+- `gateway.js`（+329）：抖音并会话改成「先数字 uid、再昵称定位候选、绑定表确认」两级，昵称只定位不授权（堵冒充改昵称读别人私聊）；语音文件落盘、回复窗口默认 120 分钟。
+- `index.js`（+93）：老表情包补标签（看图打标，`needImages:true`，模型看不到图就返回 null 而不是编标签）；补挂人格段加守卫 —— 以前 `agent/inbox/inserted` 对每个会话都无条件补挂，用户自己开的技术对话会被注入肥鱼人格（#40 的老病换了条路复发）。
+- `channels/douyin.js`（+99）、`client.soul.js`（+62）、`stickers.js`（+72）、`douyin-bridge/douyin-dm.mjs`（+53）等；README 补了语音文件（#101）、本地 voice-out、周记派生记忆的说明。
+
+**兼容性**：与「锚点重锚 0.16.6」那轮结论一致，**无需再重锚**。
+- 干净 0.16.6 从零实打：`改了 143 / 已打过 6 / 退役 3 / 漂移 0 / 失败 0`，入口 import 冒烟通过。
+- 上游审计：`可退役 10 / 仍需 119 / 漂移 0`。
+
+**安装动作**：
+- 备份 `~/.dsh/backup/fish-soul-0.15.55-20261115-073211`；用 0.16.6 干净包覆盖 `profiles/desktop/node_modules/dsh-fish-soul`（普通目录，数据在 `~/.dsh/fish-soul/soul.db`，不受影响）。
+- `profiles/desktop/package.json` 的 `dsh-fish-soul` 声明与 `pnpm-lock.yaml`（specifier / version / integrity）同步到 0.16.6，lock 备份 `pnpm-lock.yaml.bak-fs0166-20261115-073416`。不改的话下次 `pnpm install` 会把插件按 lock 降回 0.15.55。
+
+**同时修的补丁仓缺陷（重要）**：`wechat-transport-gateway-08`（onWechatMessage + wechatToMessage）**不幂等**。
+- 根因：它的 `marker` 是插入整段（2626 字符）里含 `masterTakeover` 判断的旧版文本，而兄弟补丁 `wechat-master-04` 打完会改写这段 —— 于是 `text.includes(NEW)` 和 `text.includes(MARK)` 双双落空，判定「这条还没打」，`OLD`（一行 QQ 注释锚点）又一直在 → **每实跑一次就再插一整段**。插进来的副本是「未打 master 补丁」的旧方法体，同名方法后者覆盖前者，等于把主人私聊接管开关悄悄回退。
+- 修法：只动 `assets/wechat-transport-hunks.json` 里这条的 `marker`，从整段缩成不会被兄弟补丁改动的一行注释（`* 微信入站（来自 wechat-inbound.js，由 WechatAgent 的 social-bridge 转发）。[FS-WECHAT-TRANSPORT]`），判定即可命中。
+- 验证：干净包首跑仍是 `143 / 6 / 3 / 0 / 0`；紧接着 `--check` → `改了 0 / 已打过 149 / 漂移 0`（修复前是 `改了 1`）；本机已装那份 `--check` → `改了 0 / 已打过 149 / 漂移 0`。
+
+**踩坑备忘**：`patch-fish-soul.mjs` 对**已打过补丁的目录**再实跑，不保证幂等 —— 只有 `--check` 是安全的。升级/重打一律走「干净包解包 → 打一次」。marker 若抄了会被兄弟补丁改写的代码，就会退化成"永远重打"。
+
+**状态**：本机已跑 0.16.6，需重启 DeepSeek Harness 才生效。补丁仓改动（含本轮 marker 与 CHANGELOG）**仍未 git 提交**。
+
+---
+
+## 未编号（锚点重锚 0.16.6，2026-11-15）：13 处审计漂移
+
+**症状**：`node audit-upstream.mjs`（0.16.6）报 13 处 DRIFT —— W22、wechat-master-01~04/07~11、gw-dm-session-send、douyin-music-trace、index-remount-our-session。
+
+**根因**（三类，别混为一谈）：
+1. **真·上游改版**（4 处，锚点内容变了）：`W22` 上游在 `channel` 与 `ownerOfName` 之间插了 `const inTurn = new Set(ownerIds);`；`gw-dm-session-send` 上游 `journalOut` 多传了 `{ ownerId }`；`douyin-music-trace` 上游 `chooseMusic` 已改成返回 `{ song, duplicate }` 对象；`W35` 不是上游改的，是我们自己 `W34`（插 animPrefs）先落盘把 `W35` 的 5 行 old 打断了 —— 顺序依赖，锚点必须缩到只覆盖签名行。
+2. **兄弟补丁写入的锚点**（9 处 wechat-master-01~04/07~11）：`masterUserIds` / `masterTakeover` / `douyinOutbound` 这些标识符上游从来没有，是 `W27`、`wechat-transport-*`、`W43`、`W45` 打进去的。补丁组按序号跑，打得到；**审计脚本只看干净上游，当然找不到** → 这类噪音用 `dependsOn` 标注即可，不算漂移。
+3. **上游已自己修好**（1 处）：`index-remount-our-session`（自家会话补挂人格段）。0.16.6 的 `index.js` 已自带 `mountSectionsFor(payload?.agent)` 调用，补丁退役。
+
+**改了什么**：只动 `assets/*-hunks.json`，一行插件代码没碰。
+- `wechat-hunks.json` W22：old/new 补上 `inTurn` 行（old 6 行、new 12 行），`isWechat` 认前缀逻辑不变。
+- `dm-hunks.json` gw-dm-session-send：old/new 的 `journalOut` 调用补 `{ ownerId: st.journalOwnerId ?? null }`，`marker` 保持 `st.douyinSent = ok && delivered === true`。
+- `douyin-hunks.json` douyin-music-trace：按 0.16.6 新结构重写（`{ song, duplicate }` 返回、`counts` 去重计数），并在给模型前用 `junk` 正则滤掉「创作的原声 / 自带流量 / 纯音乐 / 伴奏 / BGM」，滤完为空才退回全量；挑中时留一条 `note('post', …配了首《X》)` 便于回溯。
+- `wechat-pane-hunks.json` W35：old/new 从 5 行收到**只覆盖签名行**，`marker` 同步换成新签名 —— 这样 `W34` 先插入 `animPrefs` 也不会再打断它（`animPrefs` 里的 `typeof animatedFirst` 守护继续留着做双保险）。
+- `index-hunks.json` index-remount-our-session：`upstreamFixed = {"present":"mountSectionsFor(payload?.agent);"}` + `dependsOn=["index-remount-map"]`，两端（干净上游 / 本机已改版）都判退役，不再刷告警。
+- `wechat-master-hunks.json`：01/02 → `W27`，03 → `wechat-transport-gateway-06`，04 → `wechat-transport-gateway-08`，07~10 → `W43`，11 → `W45`。
+
+**怎么验**（三条都过）：
+- 干净 0.16.6 全量重打（`--root <全新解包目录> --json`）：`改了 143 处、已打过 6、退役 3、漂移 0、失败 0`，P0 冒烟 import 通过。
+- 上游审计：`可退役 10 / 仍需 119 / 漂移 0`（可退役 = 原 9 处 share-* + index-remount-our-session）。
+- 本机已装那份（0.15.x 已打 149 处）：`--check` → `改了 0、已打过 149、漂移 0`，不会误重打、也不会误升。
+
+**状态**：补丁仓已固化，**尚未 git 提交**。本机 lib 不用动（这轮只是让补丁能对上 0.16.6），等真升级时直接跑 `patch-fish-soul.mjs` 即可。
+
+**踩坑备忘**：`dependsOn` 只能消 `audit` 的噪音，`patch` 的 DRIFT 判定不看它 —— 要让一份 hunk 在"新旧两代源码"上都不报警，只能靠 `upstreamFixed.present` 挑一句两代都有的代码，或用 `upgradeOld`；`upgradeOld` 只在"旧 new → 新 new"是等量替换时可用，别拿它做删行。
+
+## 未编号（meme parity，2026-11-15）：表情包两端发的不是同一张
+
+**症状**：同一句回复，DSH 会话窗里显示的表情图和 QQ / 微信 / 抖音实际发出去的不是同一张。
+
+**根因**：会话端用 dsh-meme 前端匹配（caption 精确 → 关键词 → 分词），出站另写一套（情绪桶 + 词面打分 + 随机打散 + 本地收藏优先），两端不同源。
+
+**改了什么**：`assets/meme-bridge.js` 逐字移植前端 7 个函数（`foldCaption` / `looseCaption` / `splitDescTokens` / `addIndexKey` / `buildMemeIndex` / `buildMemeSearch` / `matchDesc`）并新增 `pickByFrontendDesc`，`pick()` 先走 parity、命中即返回 `viaFrontend:true`；`stickers.js` 新增 `pickMemeParity` 并透传 `animated`；微信只认 GIF 时（wantAnim）跳过 parity 的静态图改走 GIF 通道，strict 拿不到 GIF 就不发。
+唯一允许的两端差异：索引里存的值不同——前端 `toUrl(row)`（浏览器 url），出站 `row.abs`（本地绝对路径），匹配算法本身一致。
+
+**怎么验**：`node tools/verify-meme-parity.mjs`（两端匹配算法归一化后逐字符一致，分叉即退出码 1）；`node tools/verify-meme-wechat.mjs`（QQ 发前端同款静态图 / 微信换真 GIF / strict 只认 GIF，当前 5/5 过）。
+
+**状态**：lib 已生效（需重启 DSH 加载），补丁已固化（全量 149 处、漂移 0）。动图通道返回的是 `<ws>/_stickers/` 下的文件名而不是绝对路径，写测试脚本时别直接 `existsSync(file)`。
+
 ## 未编号（voice-tone，2026-11-14）：希希一开口就是「刚刷到个 xxx」
 
 **症状**：QQ 私聊主动开口、B站/抖音动态、抖音私信分享语，反复用「刚刷到个…」起手，模板腔。

@@ -1,0 +1,50 @@
+[
+	{
+		"id": "wechat-inbound-groupname",
+		"title": "微信入站：收下 conversation_name / groupName，消息对象带上群名",
+		"file": "lib/gateway.js",
+		"marker": "conversationName ?? payload?.groupName",
+		"old": "\t\t\tnickname: String(payload?.senderName ?? payload?.nickname ?? ''),\n",
+		"new": "\t\t\tnickname: String(payload?.senderName ?? payload?.nickname ?? ''),\n\t\t\t// [FS-WECHAT-GROUPNAME] WechatAgent 入站带 conversation_name，群名跟着一起上来，标题不再只剩数字群 ID\n\t\t\ttitle: String(payload?.conversationName ?? payload?.groupName ?? payload?.title ?? '').trim(),\n"
+	},
+	{
+		"id": "wechat-dispatch-title",
+		"title": "dispatch：微信群把群名一起交给 ensureSession，建会话时标题就是群名",
+		"file": "lib/gateway.js",
+		"marker": "const agent = await this.ensureSession({ channelId, chatType: first.chatType, targetId: first.targetId, title: first.chatType === 'private' ? first.nickname : String(first.title ?? '')",
+		"old": "\t\tconst agent = await this.ensureSession({ channelId, chatType: first.chatType, targetId: first.targetId, title: first.chatType === 'private' ? first.nickname : '', userId: first.userId });",
+		"new": "\t\tconst agent = await this.ensureSession({ channelId, chatType: first.chatType, targetId: first.targetId, title: first.chatType === 'private' ? first.nickname : String(first.title ?? ''), userId: first.userId });"
+	},
+	{
+		"id": "wechat-dispatchinner-title",
+		"title": "dispatchInner：本轮 chat 也带群名（回复时的标题 / 记账都按它）",
+		"file": "lib/gateway.js",
+		"marker": "const chat = { channelId, chatType: first.chatType, targetId: first.targetId, title: first.chatType === 'private' ? first.nickname : String(first.title ?? '')",
+		"old": "\t\tconst chat = { channelId, chatType: first.chatType, targetId: first.targetId, title: first.chatType === 'private' ? first.nickname : '', userId: first.userId };",
+		"new": "\t\tconst chat = { channelId, chatType: first.chatType, targetId: first.targetId, title: first.chatType === 'private' ? first.nickname : String(first.title ?? ''), userId: first.userId };"
+	},
+	{
+		"id": "wechat-retitle-method",
+		"title": "新增 retitleWechatSession：把已建好的微信群会话标题从数字群 ID 改成真群名",
+		"file": "lib/gateway.js",
+		"marker": "async retitleWechatSession(row, chat) {",
+		"old": "\t/** 微信表情偏好：微信只认 GIF 动图，静态图发过去一定不动（平台 → 微信 → 表情）[FS-WECHAT-PANE] */\n\twechatStickerPrefs() {",
+		"new": "\t/**\n\t * [FS-WECHAT-GROUPNAME] 微信群的会话标题以前存的是数字群 ID（微信只给一串 id，不给群名）。\n\t * 入站现在带着 conversation_name，这里把 DSH 会话标题和库里的 title 一起改回真群名。\n\t */\n\tasync retitleWechatSession(row, chat) {\n\t\tif (row === null || row === undefined || chat?.chatType !== 'group') return;\n\t\tconst name = String(chat.title ?? '').trim();\n\t\tconst targetId = String(chat.targetId ?? '');\n\t\tif (name === '' || name === targetId) return;\n\t\tconst title = `微信群·${sanitizeName(name, targetId)}`;\n\t\tif (String(row.title ?? '') === title) return;\n\t\ttry {\n\t\t\tconst titles = service(this.ctx, 'sessionTitle');\n\t\t\tconst live = this.agentsService()?.get?.(row.session_id);\n\t\t\tconst target = live?.session ?? live;\n\t\t\tif (target !== undefined && target !== null) titles?.rename?.(target, title);\n\t\t} catch { /* 标题不影响功能 */ }\n\t\ttry { this.db.prepare('UPDATE chat_session SET title = ? WHERE id = ?').run(title, row.id); } catch { /* 老库没这一列就算了 */ }\n\t\trow.title = title;\n\t\tthis.log('info', `[fish-soul] 微信群会话标题改为 ${title}`);\n\t}\n\n\t/** 微信表情偏好：微信只认 GIF 动图，静态图发过去一定不动（平台 → 微信 → 表情）[FS-WECHAT-PANE] */\n\twechatStickerPrefs() {"
+	},
+	{
+		"id": "wechat-retitle-on-resume",
+		"title": "恢复已有微信群会话时，用入站群名把标题改回真名",
+		"file": "lib/gateway.js",
+		"marker": "await this.retitleWechatSession(row, owner);",
+		"old": "\t\t\t\t\tthis.log('info', `[fish-soul] 已恢复会话 ${row.title || key}`);",
+		"new": "\t\t\t\t\t// [FS-WECHAT-GROUPNAME] 群名到手就把旧标题（数字群 ID）改回来\n\t\t\t\t\tawait this.retitleWechatSession(row, owner);\n\t\t\t\t\tthis.log('info', `[fish-soul] 已恢复会话 ${row.title || key}`);"
+	},
+	{
+		"id": "wechat-no-outbound-swap",
+		"title": "微信出站不再偷偷把静态图换成另一张动图（两边看到的表情才对得上）",
+		"file": "lib/gateway.js",
+		"marker": "this.wechatConfig().stickerOutboundSwap === true",
+		"old": "\t\tconst wxSwap = platformOf(row.channel_id) === 'wechat' ? this.wechatStickerPrefs() : null;",
+		"new": "\t\t// [FS-WECHAT-GROUPNAME] 出站换图默认关：换过之后 DSH 里看到的那张和微信里真发出去的不是同一张，对不上账。\n\t\t//   要换把配置 wechat.stickerOutboundSwap 设成 true。\n\t\tconst wxSwap = platformOf(row.channel_id) === 'wechat' && this.wechatConfig().stickerOutboundSwap === true ? this.wechatStickerPrefs() : null;"
+	}
+]

@@ -7,7 +7,7 @@
  */
 import http from 'node:http';
 
-const MAX_BODY = 1 << 20; // 1MB：入站消息只带文本和元信息，够用
+const MAX_BODY = 8 << 20; // [FS-WECHAT-INBOUND-IMAGE] 8MB：微信图片以 data URL 进站，1MB 装不下
 
 function json(res, status, body) {
 	const text = JSON.stringify(body);

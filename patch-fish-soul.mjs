@@ -267,20 +267,25 @@ function patchMeme() {
 		return;
 	}
 	const bridgePath = join(lib, 'meme-bridge.js');
-	if (existsSync(bridgePath) && readFileSync(bridgePath, 'utf8').includes(MARK_MEME)) {
-		log('  ＝ lib/meme-bridge.js 已经存在');
+	// 与补丁源逐字比对：内容不一致就按补丁源覆盖。
+	// 以前是「文件存在 + 带标记就跳过」，于是有人手工改了运行版（或改了补丁源没重跑），
+	// 两边就会悄悄分叉 —— 表情两端不一致的坑有一部分就出在这。现在谁改了都被拉齐。
+	const bridgeWant = existsSync(MEME_BRIDGE_SRC) ? readFileSync(MEME_BRIDGE_SRC, 'utf8') : '';
+	const bridgeNow = existsSync(bridgePath) ? readFileSync(bridgePath, 'utf8') : '';
+	if (bridgeWant !== '' && bridgeNow === bridgeWant) {
+		log('  ＝ lib/meme-bridge.js 与补丁源逐字一致');
 		skipped += 1;
 	} else {
-		if (!existsSync(MEME_BRIDGE_SRC)) {
+		if (bridgeWant === '') {
 			log(`  × 缺 assets/meme-bridge.js（应该在补丁包根目录下）`);
 			failed += 1;
 			return;
 		}
 		if (!CHECK) {
 			mkdirSync(dirname(bridgePath), { recursive: true });
-			writeFileSync(bridgePath, readFileSync(MEME_BRIDGE_SRC, 'utf8'), 'utf8');
+			writeFileSync(bridgePath, bridgeWant, 'utf8');
 		}
-		log('  ✓ lib/meme-bridge.js（新文件）');
+		log(bridgeNow === '' ? '  ✓ lib/meme-bridge.js（新文件）' : '  ↻ lib/meme-bridge.js（与补丁源不一致，按补丁源覆盖）');
 		changed += 1;
 	}
 
@@ -500,6 +505,32 @@ function patchMeme() {
 	replaceOnce('stickers.js',
 		'\t/**\n\t * 借 dsh-meme 的只读取图服务挑一张',
 		`\t/**
+\t * [FS-MEME-PARITY] 出站配图走 dsh-meme **前端**同一套规则：caption 精确 → 关键词精确 → 分词包含。
+\t * 为什么：前端按描述配的那张、和出站另挑的那张以前是两套逻辑（出站还带随机打散、本地收藏优先），
+\t * 于是 DSH 会话里显示的和对方收到的不是同一张。这里直接借 meme-bridge 的前端同款匹配。
+\t * @returns {Promise<object|null>} null = 这套路用不了（没开借库 / 没有取图服务），调用方退回旧逻辑。
+\t */
+\tasync pickMemeParity(workspacePath, desc, { animatedFirst = false, animatedStrict = false } = {}) {
+\t\tconst cfg = this.getConfig();
+\t\tif (cfg.meme !== true) return null;
+\t\tif (!this.meme || typeof this.meme.pick !== 'function') return null;
+\t\ttry {
+\t\t\tconst r = await this.meme.pick({ feel: desc, animatedFirst: false, animatedStrict: false });
+\t\t\tif (!r?.ok) return { ok: false, reason: r?.reason ?? 'dsh-meme 那边没挑到' };
+\t\t\t// [FS-WECHAT-STICKER-ANIM] 微信只认 GIF：前端配的那张若是静态图，发过去也不会动 ——
+\t\t\t// 这时不能拿它交差，得交回下游的动图逻辑（strict 时干脆不发）。
+\t\t\tif ((animatedFirst === true || animatedStrict === true) && r.animated !== true) return null;
+\t\t\tif (r.animated === true) {
+\t\t\t\tconst staged = this.stageMemeGif(workspacePath, r.path);
+\t\t\t\tif (staged !== '') return { ok: true, file: staged, absolute: false, fromMeme: true, animated: true, label: r.label ?? '', packName: r.packName ?? '' };
+\t\t\t}
+\t\t\treturn { ok: true, file: r.path, absolute: true, fromMeme: true, animated: r.animated === true, label: r.label ?? '', packName: r.packName ?? '' };
+\t\t} catch (error) {
+\t\t\tthis.log('warn', '[fish-soul] 按「前端同款」规则挑表情失败：' + String(error instanceof Error ? error.message : error));
+\t\t\treturn null;
+\t\t}
+\t}
+\t/**
 \t * 回复里的 [表情: 描述]：dsh-meme 教给模型的写法，Web 会话靠它的前端按描述配图。
 \t * IM 出站（QQ / 微信 / 抖音）不走那个前端，方括号原样发出去就是一串文字 ——
 \t * 这里按描述挑一张（先自己的库，再借 dsh-meme），换成真图片引用；挑不到就把标记删掉。
@@ -507,6 +538,12 @@ function patchMeme() {
 \t */
 \tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2 } = {}) {
 \t\tconst src = String(text ?? '');
+\t\t// [FS-WECHAT-STICKER-ANIM] 动图偏好（微信只认 GIF 才需要）：用 typeof 守护，
+\t\t// 万一这个函数还停在「没有 animated 参数」的老版本，也不会因为未定义变量炸掉。
+\t\tconst animPrefs = {
+\t\t\tanimatedFirst: typeof animatedFirst !== 'undefined' && animatedFirst === true,
+\t\t\tanimatedStrict: typeof animatedStrict !== 'undefined' && animatedStrict === true
+\t\t};
 \t\tconst hits = [...src.matchAll(/\\[表情\\s*[:：]\\s*([^\\]\\n]{1,80})\\]/g)];
 \t\tif (hits.length === 0) return { text, resolved: [] };
 \t\tlet out = src;
@@ -518,10 +555,10 @@ function patchMeme() {
 \t\t\t// 一次最多换 max 张，多出来的只把标记剥掉，绝不留成文字
 \t\t\tif (i >= max) { out = out.split(whole).join(''); continue; }
 \t\t\tlet r = { ok: false, reason: '没写要什么表情' };
-\t\t\tif (desc !== '') r = await this.pickByFeel(workspacePath, desc, embedder, { model, avoid: used, top: 5 });
+\t\t\tif (desc !== '') {\n\t\t\t\t// [FS-MEME-PARITY] 方案 A：出站照抄前端那套描述匹配 —— DSH 会话里配哪张，这里就发哪张。\n\t\t\t\tconst parity = await this.pickMemeParity(workspacePath, desc, animPrefs);\n\t\t\t\tr = parity ?? await this.pickByFeel(workspacePath, desc, embedder, { model, avoid: used, top: 5, ...animPrefs });\n\t\t\t}
 \t\t\tif (r.ok) used.push(r.file);
 \t\t\tconst ref = r.ok ? (r.absolute === true ? imageRef(r.file) : '_stickers/' + r.file) : '';
-\t\t\tresolved.push({ desc, file: r.ok ? r.file : null, fromMeme: r.fromMeme === true, reason: r.ok ? null : (r.reason ?? null) });
+\t\t\tresolved.push({ desc, file: r.ok ? r.file : null, fromMeme: r.fromMeme === true, animated: r.animated === true, reason: r.ok ? null : (r.reason ?? null) });
 \t\t\tout = out.split(whole).join(r.ok ? '![' + desc.replace(/[[\\]]/g, '') + '](' + ref + ')' : '');
 \t\t}
 \t\treturn { text: out.replace(/[ \\t]+\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim(), resolved };
@@ -1024,6 +1061,8 @@ try {
 		patchHunks({ tag: 'P11 behavior-tone', label: '提示词 —— 希希语气变软（允许关心）+ 护主但不提“主人”', jsonName: 'behavior-tone-hunks.json' });
 	if (ONLY === '' || ONLY === 'anti-template')
 		patchHunks({ tag: 'P12 anti-template', label: '主动说话去模板 —— 别再用“刚看到个/刚刷到”起头', jsonName: 'anti-template-hunks.json' });
+	if (ONLY === '' || ONLY === 'wechat-groupname')
+		patchHunks({ tag: 'P13 wechat-groupname', label: '微信 —— 群名标题（不再是数字群 ID）+ 出站不再换图', jsonName: 'wechat-groupname-hunks.json' });
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;

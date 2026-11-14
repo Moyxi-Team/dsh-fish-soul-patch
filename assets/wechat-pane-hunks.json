@@ -84,8 +84,8 @@
   "file": "lib/stickers.js",
   "title": "stickers：resolveMemeTags 收 animatedFirst / animatedStrict",
   "marker": "\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2, animatedFirst = false, animatedStrict = false } = {}) {",
-  "old": "\t * [FS-MEME-BRIDGE-PATCH]\n\t */\n\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2 } = {}) {\n\t\tconst src = String(text ?? '');\n\t\tconst hits = [...src.matchAll(/\\[表情\\s*[:：]\\s*([^\\]\\n]{1,80})\\]/g)];",
-  "new": "\t * [FS-MEME-BRIDGE-PATCH]\n\t */\n\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2, animatedFirst = false, animatedStrict = false } = {}) {\n\t\tconst src = String(text ?? '');\n\t\tconst hits = [...src.matchAll(/\\[表情\\s*[:：]\\s*([^\\]\\n]{1,80})\\]/g)];",
+  "old": "\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2 } = {}) {",
+  "new": "\tasync resolveMemeTags(text, workspacePath, embedder, { model = '', max = 2, animatedFirst = false, animatedStrict = false } = {}) {",
   "dependsOn": [
    "meme-bridge"
   ],
