@@ -28,6 +28,10 @@
  *                     POST 进来）与 lib/channels/wechat.js（出站通道，打回 WechatAgent），再打 20 处锚点
  *                     （gateway.js 14、index.js 6）：构造参数 / 方法 / 判定 / 出站全部按 channel_id 选通道。
  *                     见 assets/wechat-transport-hunks.json。P7 只管「认人 + 记忆」，消息怎么进出靠这一组。
+ *   P12 anti-template：主动找人说话别再「刚看到个 / 刚刷到」开头（太模板、没真人感）——
+ *                     behavior.js 提示词新增 [别交代来源]；gateway.js 两处「主动开口」提示词换成
+ *                     「开头三条死规矩」；life.js 分享由头改中性措辞；social.js 套话正则扩容到
+ *                     刚看到个 / 看了个 / 瞅见 / 听说。见 assets/anti-template-hunks.json。
  *
  * 为什么会丢：node_modules 下的第三方插件被 pnpm 整体重写，升级 / 重装就没了。
  * 改之前把原文件备份到 ~/.dsh/backup/。
@@ -1018,6 +1022,8 @@ try {
 		patchHunks({ tag: 'P10 wechat-master', label: '微信 —— 主人接管开关 + 静态表情换动图 + 面板状态', jsonName: 'wechat-master-hunks.json' });
 	if (ONLY === '' || ONLY === 'behavior-tone')
 		patchHunks({ tag: 'P11 behavior-tone', label: '提示词 —— 希希语气变软（允许关心）+ 护主但不提“主人”', jsonName: 'behavior-tone-hunks.json' });
+	if (ONLY === '' || ONLY === 'anti-template')
+		patchHunks({ tag: 'P12 anti-template', label: '主动说话去模板 —— 别再用“刚看到个/刚刷到”起头', jsonName: 'anti-template-hunks.json' });
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;
