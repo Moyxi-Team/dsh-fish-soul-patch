@@ -670,8 +670,8 @@ const shareRowJs = (name) => `(() => {
   const btnOk = (e) => {
     const r = e.getBoundingClientRect();
     if (r.width < 16 || r.height < 12 || r.bottom <= 0 || r.top >= window.innerHeight) return false;
-    if (clean(e.innerText) !== '分享') return false;
-    return ![...e.children].some((c) => clean(c.innerText) === '分享');
+    if (!/^(分享|发送)$/.test(clean(e.innerText))) return false;
+    return ![...e.children].some((c) => /^(分享|发送)$/.test(clean(c.innerText)));
   };
   const hitKey = (t) => t !== '' && t.length <= 120 && (t.includes(KEY) || t.includes(NAME));
   const center = (e) => { const r = e.getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; };
@@ -680,24 +680,54 @@ const shareRowJs = (name) => `(() => {
   //   老写法「找名字节点 → 往上爬 6 层找按钮」会爬到面板外，抓到页面上别处的「分享」
   //   （实测抓到 (710,98)，真正按钮在 (710,394)），点下去当然没反应。
   //   现在反过来：以带 data-userid 的按钮为准，往上 4 层看这一行里有没有她。
-  const uidBtns = [...document.querySelectorAll('[data-userid]')].filter((e) => {
+  // [FS-SHARE-ROW-STRICT] 只认面板里、且只认「单个好友那一行」。
+  //   老写法两个致命点：
+  //   ① 按钮取自 document（全文档）而不是面板，页面上别处的 [data-userid] 也参与；
+  //   ② 固定往上爬 4 层 —— 第 3/4 层就是面板容器，容器文本里装着**所有人**的名字，
+  //      hitKey 恒为真 → 永远命中 DOM 里第一个按钮 = 面板第一行（最近的聊天对象，通常就是主人）。
+  //   结果就是「文字按名字发对了，卡片却一直发给列表第一个人」。
+  //   现在：爬到「该层只含 1 个 data-userid、且文本还短」的最外层为止，行名必须真的等于/前缀等于目标名。
+  const uidBtns = [...sc.querySelectorAll('[data-userid]')].filter((e) => {
     const r = e.getBoundingClientRect();
     return r.width >= 16 && r.height >= 12 && r.bottom > 0 && r.top < window.innerHeight;
   });
-  let ready = null;
-  let sent = false;
-  for (const btn of uidBtns) {
+  const rowOf = (btn) => {
     let node = btn;
-    let rowHit = false;
-    let rowSent = false;
-    for (let i = 0; i < 4 && node; i += 1) {
+    let row = null;
+    for (let i = 0; i < 5 && node && node !== sc.parentElement; i += 1) {
       const t = clean(node.innerText);
-      if (hitKey(t)) rowHit = true;
-      if (hitKey(t) && t.includes('捎句话')) rowSent = true;
+      if (node.querySelectorAll('[data-userid]').length > 1 || t.length > 60) break;
+      row = node;
       node = node.parentElement;
     }
-    if (rowSent && !sent) sent = true;
-    if (rowHit && !rowSent && btnOk(btn) && !ready) ready = center(btn);
+    return row;
+  };
+  const rowRows = [];
+  for (const btn of uidBtns) {
+    const row = rowOf(btn);
+    if (!row) continue;
+    let nm = clean(row.innerText);
+    const bt = clean(btn.innerText);
+    if (bt !== '') nm = clean(nm.split(bt).join(' '));
+    rowRows.push({ btn: btn, row: row, uid: String(btn.getAttribute('data-userid') || ''), nm: nm.slice(0, 60) });
+  }
+  const nameHit = (t) => {
+    if (t === '') return false;
+    const at = t.indexOf(NAME);
+    if (at < 0) return false;
+    // 名字前面的部分只允许极短的前缀（序号/小图标残留），后面只允许 emoji/备注/时长
+    if (t.slice(0, at).length > 2) return false;
+    return clean(t.slice(at + NAME.length)).length <= 10;
+  };
+  const mine = rowRows.filter((r) => nameHit(r.nm)).sort((a, b) => a.nm.length - b.nm.length)[0] || null;
+  const others = rowRows.filter((r) => mine == null || r.uid !== mine.uid).map((r) => r.nm).slice(0, 8);
+  let ready = null;
+  let sent = false;
+  let targetUid = '';
+  if (mine) {
+    targetUid = mine.uid;
+    sent = clean(mine.row.innerText).includes('捎句话');
+    if (!sent && btnOk(mine.btn)) ready = center(mine.btn);
   }
   // 兜底：面板里没有 data-userid（旧版面板）时，退回名字节点往上爬
   if (!ready && !sent) {
@@ -725,8 +755,44 @@ const shareRowJs = (name) => `(() => {
     ok: !!ready || sent,
     sent: sent,
     ready: ready,
+    uid: targetUid,
+    name: mine ? mine.nm : '',
+    rows: rowRows.length,
+    others: others,
     text: clean(sc.innerText).slice(0, 160)
   });
+})()`;
+
+/**
+ * 只校验「她自己那一行」有没有变成「捎句话」。
+ * 点击之后必须是这一行变，才叫发给了她；顺带把「变成捎句话的其他 uid」也带回来，
+ * 用来识别「卡片发到别人身上」这种串行。
+ */
+const shareTargetSentJs = (uid) => `(() => {
+  const clean = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();
+  const UID = ${JSON.stringify(String(uid ?? ''))};
+  const sc = document.querySelector('[data-e2e="video-share-container"]') || document.querySelector('[data-e2e="video-share-icon-container"]');
+  if (!sc) return JSON.stringify({ panel: false, found: false, sent: false, othersSent: [] });
+  const rowOf = (btn) => {
+    let node = btn;
+    let row = btn;
+    for (let i = 0; i < 5 && node && node !== sc.parentElement; i += 1) {
+      if (node.querySelectorAll('[data-userid]').length > 1 || clean(node.innerText).length > 60) break;
+      row = node;
+      node = node.parentElement;
+    }
+    return row;
+  };
+  const all = [...sc.querySelectorAll('[data-userid]')];
+  const btn = all.find((e) => String(e.getAttribute('data-userid') || '') === UID);
+  const othersSent = all
+    .filter((e) => String(e.getAttribute('data-userid') || '') !== UID)
+    .filter((e) => clean(rowOf(e).innerText).includes('捎句话'))
+    .map((e) => String(e.getAttribute('data-userid') || ''))
+    .slice(0, 5);
+  if (!btn) return JSON.stringify({ panel: true, found: false, sent: false, othersSent: othersSent });
+  const t = clean(rowOf(btn).innerText);
+  return JSON.stringify({ panel: true, found: true, sent: t.includes('捎句话'), text: t.slice(0, 60), othersSent: othersSent });
 })()`;
 
 /** 她不在面板的「最近分享」里时，用面板搜索框搜一下。 */
@@ -1388,11 +1454,23 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 		}
 		await cdpClick(browser, pt.x, pt.y);
 		await sleep(2600);
+		const targetUid = String(fresh?.uid ?? '');
+		// [FS-SHARE-VERIFY-ROW] 只认「她自己那一行」变成「捎句话」才算发出去。
+		//   老写法是「面板里任意一行变捎句话 + 某层文本含名字」就算成功 —— 点到第一行（主人）也照样报成功，
+		//   于是文字发给了选中的人、卡片发给了主人，日志还一路写「已分享」。
+		if (targetUid !== '') {
+			const v = parseJson(await browser.eval(shareTargetSentJs(targetUid)).catch(() => null));
+			if (v?.sent === true) { sent = true; break; }
+			if (Array.isArray(v?.othersSent) && v.othersSent.length > 0) {
+				social.log?.('error', `[fish-soul] 抖音：点「分享」把卡片发到了别人（uid=${v.othersSent.join(',')}），目标「${name}」是 uid=${targetUid}；这一轮停手，避免重复发`);
+				return { ok: false, error: `卡片发错人了：实际发到 uid=${v.othersSent.join(',')}，不是「${name}」（uid=${targetUid}）` };
+			}
+		}
 		const after = parseJson(await browser.eval(shareRowJs(name)).catch(() => null));
-		if (after?.sent === true) { sent = true; break; }
+		if (targetUid === '' && after?.sent === true) { sent = true; break; }
 		const now = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
 		lastText = String(now?.text ?? '').slice(0, 120);
-		if (/已发送|发送成功|分享成功/.test(lastText)) { sent = true; break; }
+		if (/已发送|发送成功|分享成功/.test(lastText) && targetUid === '') { sent = true; break; }
 		social.log?.('warn', `[fish-soul] 抖音：第 ${attempt} 次点「分享」没发出去（${name}），再来一次`);
 		await sleep(1500);
 	}
