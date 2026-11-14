@@ -1,3 +1,14 @@
+---
+AIGC:
+    Label: "1"
+    ContentProducer: 001191440300708461136T1XGW3
+    ProduceID: c3040d704551dfa25d47107616a7e32f_c9fa60d4e03211f18c5752540024e231
+    ReservedCode1: Pczd3kgZTCv1T72Bnulq3zEuQv8zzwjeTgT0yzHNeW6XW5em0rRPGnMJ/kSIbIryv0ihY7cbDa8XSafC07lUXVbnphc2kVhlAnCH591iIU4r6/z79aD+vAPK8EudjXmWDXY9CV2q6Wenl65HNFzuo5fy3iXqMb0TgJ2+4av+hf/k4CUoR+sZH+5fbkU=
+    ContentPropagator: 001191440300708461136T1XGW3
+    PropagateID: c3040d704551dfa25d47107616a7e32f_c9fa60d4e03211f18c5752540024e231
+    ReservedCode2: Pczd3kgZTCv1T72Bnulq3zEuQv8zzwjeTgT0yzHNeW6XW5em0rRPGnMJ/kSIbIryv0ihY7cbDa8XSafC07lUXVbnphc2kVhlAnCH591iIU4r6/z79aD+vAPK8EudjXmWDXY9CV2q6Wenl65HNFzuo5fy3iXqMb0TgJ2+4av+hf/k4CUoR+sZH+5fbkU=
+---
+
 # P12 anti-template：主动说话别再「刚看到个」起头
 
 - 日期：2026-11-14
@@ -46,3 +57,4 @@ pass  你这会儿在干嘛
 ## 生效
 
 改的是 `node_modules/dsh-fish-soul/lib/`，**需要重启 DSH 才生效**。上游升级 / 重装会整包覆盖，重跑 `node patch-fish-soul.mjs` 即可重放（`verify-install.mjs` 可体检三处版本是否一致）。
+*（内容由AI生成，仅供参考）*
