@@ -22,9 +22,184 @@
  * 剩下唯一会退回静态图的情况是：图库里一张 GIF 都没有（这时 strict 就干脆不发）。
  */
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { extname, join } from 'node:path';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
+import { dirname, extname, join } from 'node:path';
 import { fishSoulDir } from './db.js';
+
+// ─────────────────────── [FS-MEME-PARITY] 与 dsh-meme 前端同一套配图规则 ───────────────────────
+// 要解决的问题：同一句回复里带 `[表情: 描述]`，DSH 会话里显示的那张是 dsh-meme **前端**配的，
+// 真正发到 QQ / 微信 / 抖音的那张是这里挑的 —— 两套规则各挑各的，主人就会看到「显示的」和
+// 「对方收到的」不是同一张。这里改成：出站也走前端那一套（caption 精确 → 关键词精确 → 分词包含），
+// 同一批 row、同一个顺序、不随机、不掺本地收藏，于是两端必然同图。
+// 语料来源：直接只读各图库的 index.db（和前端 `/dsh-memes-api?packId=all` 是同一份数据）。
+// 读不到（没装 dsh-meme / 运行时没有 node:sqlite / 图库还没建索引）就返回 unavailable，
+// 由调用方退回原来的语义检索，不至于因为一致性改造把表情功能整个弄挂。
+const nodeRequire = createRequire(import.meta.url);
+const PARITY_TTL_MS = 5 * 60_000;
+const PARITY_ROWS_SQL = "SELECT path, tag, file_name, caption, COALESCE(keywords, '') AS keywords FROM memes";
+
+// 下面这 7 个函数逐字照抄 dsh-meme 的 client.js（foldCaption / looseCaption / splitDescTokens /
+// addIndexKey / buildMemeIndex / buildMemeSearch / matchDesc），只把「行 → URL」换成「行 → 磁盘绝对路径」。
+// 上游改版时这几个函数可能跟着变，那时两端就会重新不一致 —— 所以升级 dsh-meme 后要回来对一遍。
+const foldCaption = (s) => String(s || '').trim()
+	.replace(/[\u201c\u201d\u2018\u2019\u300c\u300d\u300e\u300f«»]/g, '"')
+	.replace(/\s+/g, ' ');
+const looseCaption = (s) => foldCaption(s).replace(/["'\s]/g, '');
+const splitDescTokens = (s) => foldCaption(s).split(/[\s,.!?;:、，。！？；：""''()（）\[\]【】《》…·～~\-]+/)
+	.map((t) => t.replace(/["']/g, ''))
+	.filter((t) => t.length >= 2)
+	.sort((a, b) => b.length - a.length);
+const addIndexKey = (map, key, abs) => {
+	const raw = String(key || '').trim();
+	if (!raw) return;
+	for (const form of new Set([raw, foldCaption(raw), looseCaption(raw)])) {
+		if (form && !map.has(form)) map.set(form, abs);
+	}
+};
+const buildMemeIndex = (rows) => {
+	const captions = new Map();
+	const keywords = new Map();
+	for (const row of rows || []) {
+		const abs = row.abs;
+		addIndexKey(captions, row.caption, abs);
+		addIndexKey(captions, row.file_name, abs);
+		addIndexKey(captions, String(row.caption || '').slice(0, 80), abs);
+		addIndexKey(captions, String(row.caption || '').slice(0, 100), abs);
+		const kw = String(row.keywords || '');
+		addIndexKey(keywords, kw, abs);
+		for (const word of kw.split(/\s+/)) addIndexKey(keywords, word, abs);
+	}
+	return { caption: captions, keyword: keywords };
+};
+const buildMemeSearch = (rows) => (rows || []).map((row) => {
+	const hay = [];
+	const parts = [];
+	for (const s of [row.caption, row.keywords, row.file_name]) {
+		const f = foldCaption(s);
+		if (!f) continue;
+		const l = looseCaption(s);
+		hay.push(f, ...(l && l !== f ? [l] : []));
+		parts.push(s);
+	}
+	const tokens = [...new Set(splitDescTokens(parts.join(' ')))];
+	return { hay, tokens, abs: row.abs };
+});
+const matchDesc = (desc, index, search) => {
+	const captionIndex = index && typeof index.get === 'function'
+		? index
+		: (index && index.caption && typeof index.caption.get === 'function' ? index.caption : null);
+	const keywordIndex = index && index.keyword && typeof index.keyword.get === 'function' ? index.keyword : null;
+	const raw = String(desc || '').trim();
+	const forms = [raw, foldCaption(raw), looseCaption(raw)];
+	for (const map of [captionIndex, keywordIndex]) {
+		if (!map) continue;
+		for (const form of forms) {
+			const exact = map.get(form);
+			if (exact) return exact;
+		}
+	}
+	const needles = [...new Set(splitDescTokens(desc).map(looseCaption).filter(Boolean))];
+	let best = null;
+	let bestLength = 0;
+	let bestCount = 0;
+	for (const row of search || []) {
+		let longest = 0;
+		let count = 0;
+		for (const needle of needles) {
+			let length = row.hay.some((hay) => hay.includes(needle)) ? needle.length : 0;
+			for (const token of row.tokens || []) {
+				const t = looseCaption(token);
+				if (t && (needle.includes(t) || t.includes(needle))) length = Math.max(length, Math.min(needle.length, t.length));
+			}
+			if (length) { longest = Math.max(longest, length); count++; }
+		}
+		if (longest > bestLength || (longest === bestLength && count > bestCount)) {
+			best = row.abs;
+			bestLength = longest;
+			bestCount = count;
+		}
+	}
+	return best;
+};
+
+let parityCache = { at: 0, sig: '', corpus: null };
+
+/** dsh-meme 的安装目录（拿它的内置图库）。装成插件时就是 node_modules/dsh-meme。 */
+function memePackageDir() {
+	try { return dirname(nodeRequire.resolve('dsh-meme/package.json')); } catch { return ''; }
+}
+
+/**
+ * 图库根目录清单，顺序对齐前端 listAllPacks()：内置图库 → 用户导入的 → memeRoot。
+ * 只认「目录里真有 index.db」的，坏库/空目录直接跳过。
+ */
+function parityPackRoots() {
+	const roots = [];
+	const push = (dir) => {
+		try {
+			if (dir !== '' && statSync(dir).isDirectory() && existsSync(join(dir, 'index.db')) && !roots.includes(dir)) roots.push(dir);
+		} catch { /* 读不到就当没这个库 */ }
+	};
+	const pkg = memePackageDir();
+	const bundled = pkg === '' ? '' : join(pkg, 'memes');
+	if (bundled !== '') {
+		try { for (const name of readdirSync(bundled).sort()) push(join(bundled, name)); } catch { /* 没有内置图库 */ }
+	}
+	const home = process.env.DSH_MEME_HOME || homedir();
+	let settings = {};
+	try { settings = JSON.parse(readFileSync(join(home, '.dsh', 'dsh-expression.json'), 'utf8')) || {}; } catch { settings = {}; }
+	const packsDir = typeof settings.packsDir === 'string' && settings.packsDir !== '' ? settings.packsDir : join(home, '.dsh', 'meme-packs');
+	try {
+		for (const name of readdirSync(packsDir).sort()) {
+			if (name.startsWith('.')) continue;
+			push(join(packsDir, name));
+		}
+	} catch { /* 主人没导入过图库 */ }
+	if (typeof settings.memeRoot === 'string' && settings.memeRoot !== '') push(settings.memeRoot);
+	else if (bundled !== '') push(join(bundled, 'dafeiyu-001'));
+	return roots;
+}
+
+/** 读全部图库的索引行 → 建两份索引（和前端同一个 buildMemeIndex / buildMemeSearch）。5 分钟缓存。 */
+function parityCorpus() {
+	const roots = parityPackRoots();
+	if (roots.length === 0) return null;
+	const sig = roots.join('|');
+	if (parityCache.corpus && parityCache.sig === sig && Date.now() - parityCache.at < PARITY_TTL_MS) return parityCache.corpus;
+	let DatabaseSync = null;
+	try { ({ DatabaseSync } = nodeRequire('node:sqlite')); } catch { return null; }
+	const rows = [];
+	for (const root of roots) {
+		let db = null;
+		try {
+			try { db = new DatabaseSync(join(root, 'index.db'), { readOnly: true }); } catch { db = new DatabaseSync(join(root, 'index.db')); }
+			for (const row of db.prepare(PARITY_ROWS_SQL).all()) {
+				const abs = join(root, String(row.path ?? ''));
+				if (existsSync(abs)) rows.push({ ...row, abs, root });
+			}
+		} catch { /* 坏库跳过 */ } finally { try { if (db) db.close(); } catch { /* 已经关了 */ } }
+	}
+	if (rows.length === 0) return null;
+	const corpus = { index: buildMemeIndex(rows), search: buildMemeSearch(rows), total: rows.length };
+	parityCache = { at: Date.now(), sig, corpus };
+	return corpus;
+}
+
+/**
+ * 前端同款匹配：给一句描述，回它在 DSH 会话里会被配上的是哪张。
+ * @returns {{ok: boolean, path?: string, animated?: boolean, unavailable?: boolean, reason?: string}}
+ */
+function pickByFrontendDesc(desc) {
+	const want = String(desc ?? '').trim();
+	if (want === '') return { ok: false, reason: '没写要什么表情' };
+	const corpus = parityCorpus();
+	if (!corpus) return { ok: false, unavailable: true, reason: '读不到 dsh-meme 的图库索引' };
+	const hit = matchDesc(want, corpus.index, corpus.search);
+	if (!hit) return { ok: false, reason: '图库里没有对得上「' + want + '」的表情' };
+	return { ok: true, path: hit, animated: extname(hit).toLowerCase() === '.gif' };
+}
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
 /** 缓存目录最多留多少张（超过就按最后访问时间删最旧的）。 */
@@ -274,6 +449,18 @@ export function createMemeBridge({ ctx, log = () => {}, canConvertWebp = () => t
 				label: ['dsh-meme', packName, caption || hit.tag || want].filter((x) => x !== '').join(' / ')
 			};
 		};
+		// [FS-MEME-PARITY] 先走前端同一套规则：DSH 会话里配的是哪张，出站就发哪张。
+		// 注意这里连「前端没配上图」也照抄 —— 那时前端只显示描述文字，出站就不该偷偷发别的图。
+		// [FS-WECHAT-STICKER-ANIM] 例外：微信只认 GIF，要动图的时候别照抄前端那张（多半是静态图），
+		// 直接下去挑真 GIF —— 前端配的那张静态图发到微信上根本不会动。
+		const parity = wantAnim ? { ok: false, unavailable: true } : pickByFrontendDesc(want);
+		if (parity.ok === true) {
+			const same = finish({ path: parity.path, tag, caption: '', packName: '' }, false);
+			if (same) return { ...same, viaFrontend: true, animated: parity.animated === true };
+			return { ok: false, reason: '挑中的那张缓存不出可发的副本' };
+		}
+		if (parity.unavailable !== true) return { ok: false, reason: parity.reason };
+		// 索引读不到（没装 dsh-meme / 运行时没 node:sqlite / 图库没建索引）→ 退回语义检索。
 		// 三轮检索：① 感觉词 + 情绪桶（最准）② 只按情绪桶（认得出情绪但没这词）③ 只按感觉词
 		let fallback = null;
 		for (const q of [{ query: want, tag }, { query: '', tag }, { query: want, tag: '' }]) {
