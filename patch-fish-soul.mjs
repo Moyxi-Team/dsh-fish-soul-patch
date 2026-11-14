@@ -1016,6 +1016,8 @@ try {
 	if (ONLY === '' || ONLY === 'wechat-transport') patchWechatTransport();
 	if (ONLY === '' || ONLY === 'wechat-master')
 		patchHunks({ tag: 'P10 wechat-master', label: '微信 —— 主人接管开关 + 静态表情换动图 + 面板状态', jsonName: 'wechat-master-hunks.json' });
+	if (ONLY === '' || ONLY === 'behavior-tone')
+		patchHunks({ tag: 'P11 behavior-tone', label: '提示词 —— 希希语气变软（允许关心）+ 护主但不提“主人”', jsonName: 'behavior-tone-hunks.json' });
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;

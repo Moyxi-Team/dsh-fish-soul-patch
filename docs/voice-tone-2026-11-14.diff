@@ -1,0 +1,152 @@
+--- a/lib/social.js
++++ b/lib/social.js
+@@ -181,6 +181,28 @@
+ 			.map((r) => ({ id: r.post_id, content: r.content, at: r.created_real_at }));
+ 	}
+ 
++	/**
++	 * 开头是不是套话（"刚刷到个…""刷到一个…"这类）：命中就重写一次。
++	 * 跟 openingClash 不同，这个不需要跟历史撞车——第一次用也是模板腔，直接判不合格。
++	 */
++	bannedOpening(text) {
++		const head = String(text ?? '').replace(/^[\s，。,.!！?？、；;:：~～\-—…"'“”「」『』()（）]+/, '').slice(0, 12);
++		return /^(我)?(刚才|刚刚|刚|今天|最近)?(刷到|刷了一个|刷了个|看到一?个|看到一个|翻到一?个|发现一?个|分享一?个|给你看个)/.test(head)
++			|| /^(我)?(刚|刚刚|刚才)?刷(到|完|了)/.test(head);
++	}
++
++	/**
++	 * 开头是不是跟最近发过的撞了（撞了就重写一次）。
++	 * 只比前 4 个字：口头的开场白往往就前两个字重复（"刚刷到…""刚刷到个…"），
++	 * 全文比对太松（后面内容本来就不会一样），抓不住这种套话。
++	 */
++	openingClash(text, limit = 8) {
++		const head = (s) => String(s ?? '').replace(/[\s，。,.!！?？、；;:：~～\-—…"'“”「」『』()（）]/g, '').slice(0, 4);
++		const mine = head(text);
++		if (mine.length < 2) return false;
++		return this.recentPosts(limit).some((r) => head(r.content) === mine);
++	}
++
+ 	/** 平台特有的写法要求（抖音图文会把正文印成卡片）。 */
+ 	postStyle() {
+ 		return '像真人发的那种动态，口语、有网感，像跟朋友发消息，不要端着。';
+@@ -212,21 +234,34 @@
+ 
+ 	postPrompt({ parts, slot, mood }) {
+ 		const p = this.persona();
++		// 把「我在B站刷到《…》：」这层壳剥掉，只留她当时的印象——否则模型照着壳写，每条都从"刚刷到个…"开始
++		const strip = (s) => {
++			const t = String(s ?? '');
++			const cut = t.search(/[：:]/);
++			return cut > 0 && /^我在.{0,14}刷到/.test(t) ? t.slice(cut + 1) : t;
++		};
+ 		// 只拿她自己经历的事（刷到的视频、自己的动态），不拿别人的私事
+-		const mine = this.db.prepare("SELECT content FROM memory WHERE owner_id = 'self' AND status = 'active' AND kind = 'event' ORDER BY created_at DESC LIMIT 6").all().map((r) => `- ${oneLine(r.content, 80)}`);
+-		// 单独挑几条「刷到的视频」当题材供她自己发挥：不照抄文案、不刻意视频本身
+-		const watched = this.db.prepare("SELECT content FROM memory WHERE owner_id = 'self' AND status = 'active' AND kind = 'event' AND content LIKE '我在%刷到%' ORDER BY created_at DESC LIMIT 3").all().map((r) => `- ${oneLine(r.content, 80)}`);
+-		const posts = this.recentPosts(5).map((r) => `- ${oneLine(r.content, 80)}`);
++		const mine = this.db.prepare("SELECT content FROM memory WHERE owner_id = 'self' AND status = 'active' AND kind = 'event' ORDER BY created_at DESC LIMIT 6").all().map((r) => `- ${oneLine(strip(r.content), 80)}`);
++		// 单独挑几条「看过的视频」当题材供她自己发挥：不照抄文案、不刻意视频本身
++		const watched = this.db.prepare("SELECT content FROM memory WHERE owner_id = 'self' AND status = 'active' AND kind = 'event' AND content LIKE '我在%刷到%' ORDER BY created_at DESC LIMIT 3").all()
++			.map((r) => `- ${oneLine(strip(r.content), 80)}`);
++		const recent = this.recentPosts(8);
++		const posts = recent.slice(0, 5).map((r) => `- ${oneLine(r.content, 80)}`);
++		// 只取每条动态的第一个短语：模型看见"最近的开头长什么样"才会换，光说"别重复"没用
++		const openings = recent.map((r) => oneLine(String(r.content ?? '').split(/[。！？!?\n，,；;]/)[0], 10)).filter((s) => s !== '');
+ 		const time = parts ? `${parts.dateStr} ${String(parts.hour).padStart(2, '0')}:${String(parts.minute ?? 0).padStart(2, '0')}` : '';
+ 		return [
+ 			`你是「${p.name}」。${p.brief ?? ''}`.trim(),
+ 			`现在是${this.timeHint(parts)}（${time}）${mood ? `，今天整体心情：${mood}` : ''}${slot?.activity ? `，你正在：${oneLine(slot.activity, 40)}` : ''}。`,
+ 			mine.length > 0 ? `你最近的经历：\n${mine.join('\n')}` : '',
+-			watched.length > 0 ? `你刚刷到过这些（可以从里面挑一条当题材，别逐字照抄别人的文案，说说你自己的感受就行）：\n${watched.join('\n')}` : '',
+-			posts.length > 0 ? `你最近发过的动态（别重复）：\n${posts.join('\n')}` : '',
++			watched.length > 0 ? `你最近看过的视频（最多当个题材，只取里面的具体细节，别复述别人的说法，也别把"刷到/看到"这类词写进正文）：\n${watched.join('\n')}` : '',
++			posts.length > 0 ? `你最近发过的动态：\n${posts.join('\n')}` : '',
++			openings.length > 0 ? `上面这几条的开头分别是：${openings.map((s) => `「${s}」`).join('、')}。这次的第一句必须和它们都不一样，连开头两个字都别重。` : '',
+ 			'',
+ 			`这条的方向：${this.postTopic()}。${this.postStyle()}`,
+-			'第一人称、口语，一般 15～80 字，不要话题标签、不要 @ 人、不要链接、不要"大家好"之类的开场，不要提到任何具体的人（包括主人）的私事，不要说自己是 AI 或模型。说人话，别端着，别每条都用"今天"开头。',
++			'第一人称、口语，一般 15～80 字，不要话题标签、不要 @ 人、不要链接，不要提到任何具体的人（包括主人）的私事，不要说自己是 AI 或模型。',
++			'开头规矩：直接从具体的东西、动作、一句话或者一个念头起头（比如"楼下那家店""洗到一半""想吃冰的""这套衣服"），不许用这些起手——刚刷到、刚刚刷到、刷到个、刷到一个、刷了、今天、最近、刚刚、我发现、突然觉得、突然想、分享一个、说起来、老实说、说真的、感觉。',
++			'也别写成推荐语或汇报，就像随手打给自己看的两句话。',
+ 			'现在没什么想发的，就只输出 [不发]。只输出动态正文。'
+ 		].filter((l) => l !== '').join('\n');
+ 	}
+@@ -244,7 +279,15 @@
+ 		if (!force) setKv(this.db, `${this.platform}.post.day`, { ...st, tries: st.tries + 1, lastVirtual: this.clock.now() });
+ 		let jobId = null;
+ 		try {
+-			const raw = String((await this.callLlm(this.postPrompt({ parts: p, slot, mood }))) ?? '').trim();
++			let raw = String((await this.callLlm(this.postPrompt({ parts: p, slot, mood }))) ?? '').trim();
++			// 开头不合格（套话"刚刷到个…" / 跟最近发过的撞了）：当场带着要求重写一次。
++			// 只重写一次，第二次还不合格就先发——宁可有条像样的旧开头，也别把这条动态吞掉。
++			const bad = raw !== '' && !/\[不发\]/.test(raw) && this.bannedOpening(raw);
++			if (raw !== '' && !/\[不发\]/.test(raw) && (bad || this.openingClash(raw))) {
++				const why = bad ? '是套话（"刚刷到…""刷到一个…"这种），谁都能这么起手' : '跟你最近发过的撞了';
++				const again = String((await this.callLlm(`${this.postPrompt({ parts: p, slot, mood })}\n\n上一版是「${oneLine(raw, 30)}」，开头${why}。同一个意思重写，第一句就说具体那件事本身，别交代你是怎么知道的。`)) ?? '').trim();
++				if (again !== '' && !/\[不发\]/.test(again)) raw = again;
++			}
+ 			if (raw === '' || /\[不发\]/.test(raw)) {
+ 				this.note('post', { title: this.label, reason: raw === '' ? '想发条动态，但没写出来' : '想了想，今天先不发动态' });
+ 				return { ok: false, skipped: true, error: raw === '' ? '模型没写出来' : '她说先不发' };
+--- a/lib/life.js
++++ b/lib/life.js
+@@ -628,8 +628,10 @@
+ 		const waiting = this.db.prepare("SELECT 1 FROM pending WHERE character_id = 'feiyu' AND status = 'pending' AND origin = 'share' LIMIT 1").get();
+ 		if (waiting) return { ok: false, error: '上一条分享还没发出去' };
+ 		const clean = (x, n) => String(x ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+-		const reason = `你刚在${platform}刷到一个视频《${clean(title, 60) || '没写标题'}》${author ? `（${clean(author, 20)}）` : ''}，链接 ${url} 。` +
+-			`你看完觉得：${clean(impression, 120)}。很想发给对方看看：把链接原样发出去，再用一两句话说说你为什么想给 ta 看（像随手转给朋友，别写成推荐语、别复述标题）`;
++		const reason = `素材（不是让你复述这段，是给你开口用的）：${platform} 上一条视频《${clean(title, 60) || '没写标题'}》${author ? `，作者 ${clean(author, 20)}` : ''}，链接 ${url} 。` +
++			`你当时的反应：${clean(impression, 120)}。` +
++			'你要把这个链接发给对方，顺手说一两句。开口别用"刷到、看到、刚发现、给你分享、分享个"这类起头，也别复述标题、别写成推荐语；' +
++			'直接说这条里最戳你的那一处细节，或者它让你想起对方的什么（像随手转给熟人，不用铺垫）。';
+ 		const owner = p.targets?.masterCanonicalId ?? 'user:master';
+ 		const r = this.db.prepare(`
+ 			INSERT INTO pending (character_id, owner_id, channel, channel_id, due_at, reason, status, created_at, origin)
+@@ -789,6 +791,8 @@
+ 				(writeProfile ? `,"profileFields":{${PROFILE_FIELDS.map(([k, l]) => `"${k}":"${l}（≤30 字，不知道就空）"`).join(',')}}` : '') +
+ 				',"outdated":[{"id":旧记忆编号,"by":推翻它的新记忆编号,"reason":"..."}]}。' +
+ 				'outdated 只填被更新的记忆明确推翻的旧事实（比如搬家、换工作、分手），拿不准就空着。' +
++				'missedPending 的 reason 写「到时候想说的那件事或那个由头」，写成一句具体的话点（比如问她那盆绿萝活了没、吐槽楼下换了招牌）；' +
++				'别写"刷到个视频给他看""看到个东西分享一下"这类空壳，也别写成推荐语。' +
+ 				(profile ? `现在的印象：${profile.text}。` : '') +
+ 				(writeProfile && profile?.lockedFields?.length ? `（${profile.lockedFields.map((k) => PROFILE_FIELDS.find(([f]) => f === k)?.[1] ?? k).join('、')}是主人写的，不用填）` : '') +
+ 				`近期记忆：${recent.map((m) => `#${m.id}[${day(m.created_at)}] ${m.content}`).join('；')}` +
+--- a/lib/browse.js
++++ b/lib/browse.js
+@@ -286,7 +286,7 @@
+ 		const p = this.persona?.() ?? { name: '鱼', brief: '' };
+ 		return [
+ 			`你是「${p.name}」。${p.brief}`.trim(),
+-			'你刚在 B站刷到一个视频：',
++			'素材（B站信息流里的一条，你正在往下划）：',
+ 			`标题：${oneLine(v.title, 80)}`,
+ 			`UP主：${oneLine(v.owner, 30) || '未知'}${v.tname ? `；分区：${v.tname}` : ''}`,
+ 			v.desc ? `简介：${oneLine(v.desc, 200)}` : '',
+@@ -296,6 +296,7 @@
+ 			(v.danmaku ?? []).length > 0 ? `弹幕（按时间抽了几条）：${v.danmaku.map((d) => oneLine(d, 30)).join(' / ')}` : '',
+ 			'',
+ 			'用第一人称、口语化写一两句你看完的感受（大概讲了什么 + 你怎么看），不超过 80 字，不要照抄标题。',
++			'别用"刚刷到、刷到一个、看到个、这个视频、这部、忍不住"开头，直接从里面的内容、画面或某个具体点说起——这句以后会被你当成自己的印象反复想起。',
+ 			'完全没兴趣、划走了就只输出 [划走]。' + (like ? '特别喜欢的话在末尾加 [点赞]。' : '') + (share ? '特别有意思、很想发给朋友看的，在末尾加 [分享]（大多数视频不用）。' : '') +
+ 				(favorite ? '以后还想再看、值得存起来的（教程、攻略、菜谱、特别喜欢的），在末尾加 [收藏]（大多数视频不用）。' : '')
+ 		].filter((l) => l !== '').join('\n');
+--- a/lib/douyin-browse.js
++++ b/lib/douyin-browse.js
+@@ -339,7 +339,7 @@
+ 		const p = this.persona?.() ?? { name: '鱼', brief: '' };
+ 		return [
+ 			`你是「${p.name}」。${p.brief}`.trim(),
+-			'你刚在抖音刷到一个视频：',
++			'素材（抖音信息流里的一条，你正在往下划）：',
+ 			`文案：${oneLine(v.desc || v.title, 200) || '（没有文案）'}`,
+ 			`作者：${oneLine(v.author, 30) || '未知'}`,
+ 			v.tags?.length > 0 ? `话题：${v.tags.slice(0, 6).map((t) => oneLine(t, 20)).join(' ')}` : '',
+@@ -348,6 +348,7 @@
+ 			v.comments?.length > 0 ? `热评：\n${v.comments.slice(0, 4).map((c) => `- ${oneLine(c.text ?? c, 80)}`).join('\n')}` : '',
+ 			'',
+ 			'用第一人称、口语化写一两句你看完的感受（大概是什么 + 你怎么看），不超过 80 字，不要照抄文案。',
++			'别用"刚刷到、刷到一个、看到个、这个视频、这个、忍不住"开头，直接从里面的内容、画面或某个具体点说起——这句以后会被你当成自己的印象反复想起。',
+ 			'完全没兴趣、划走了就只输出 [划走]。' + (like ? '特别喜欢的话在末尾加 [点赞]。' : '')
+ 				+ (this.cfg().collect ? '想留着以后再看的话在末尾加 [收藏]（少数几条就行）。' : '')
+ 				+ (share ? '特别有意思、很想发给朋友看的，在末尾加 [分享]（大多数视频不用）。' : '')
