@@ -1,0 +1,66 @@
+[
+ {
+  "id": "proactive-norepeat-consts",
+  "title": "跨条复读守卫常量 —— 6 小时窗口 / 短句也拦 / 记录留 400 条",
+  "file": "lib/gateway.js",
+  "marker": "const REPEAT_GUARD_WINDOW_MS = 6 * 3600_000;",
+  "old": "const PROACTIVE_TURN_TIMEOUT_MS = 5 * 60_000;",
+  "new": "const PROACTIVE_TURN_TIMEOUT_MS = 5 * 60_000;\n/** [FS-REPEAT-GUARD] 跨条复读守卫窗口：同一频道 6 小时内发过的一字不差内容都拦。 */\nconst REPEAT_GUARD_WINDOW_MS = 6 * 3600_000;\n/** [FS-REPEAT-GUARD] 守卫最少字数：1 = 短句也拦（原来 12 字以下豁免，正是连发短句漏网的原因）。 */\nconst REPEAT_GUARD_MIN_LEN = 1;\n/** [FS-REPEAT-GUARD] 「最近发过的话」最多留多少条（6 小时窗口留得下，原来 50 条不够）。 */\nconst REPEAT_GUARD_KEEP = 400;"
+ },
+ {
+  "id": "proactive-norepeat-drop",
+  "title": "dropRepeats —— 窗口 2 分钟 → 6 小时，取消 12 字以下短句豁免（A）",
+  "file": "lib/gateway.js",
+  "marker": "{ now, windowMs: REPEAT_GUARD_WINDOW_MS, minLen: REPEAT_GUARD_MIN_LEN }",
+  "old": "\t\tconst hist = (store.get(row.channel_id) ?? []).filter((h) => now - h.at <= 120000);\n\t\tconst dups = new Set(findRepeatedParagraphs(hist, paragraphs, { now }));",
+  "new": "\t\t// [FS-REPEAT-GUARD] 窗口 2 分钟 → 6 小时、取消「短句豁免」：2 分钟只挡得住「隔十几秒又发一遍」，\n\t\t// 挡不住十几分钟一轮的自发连发（2026-11-15 私聊「这会儿有点饿，想煮个面吃」连发 11 遍）。\n\t\t// 有对方新消息时 onEvent 会清掉该频道的记录，所以扩大窗口不会误杀「用户再问一遍、她再答一遍」。\n\t\tconst hist = (store.get(row.channel_id) ?? []).filter((h) => now - h.at <= REPEAT_GUARD_WINDOW_MS);\n\t\tconst dups = new Set(findRepeatedParagraphs(hist, paragraphs, { now, windowMs: REPEAT_GUARD_WINDOW_MS, minLen: REPEAT_GUARD_MIN_LEN }));"
+ },
+ {
+  "id": "proactive-norepeat-note-window",
+  "title": "noteSent —— 记录窗口同步 6 小时",
+  "file": "lib/gateway.js",
+  "marker": "while (hist.length > REPEAT_GUARD_KEEP) hist.shift();",
+  "old": "\t\tconst hist = (store.get(row.channel_id) ?? []).filter((h) => now - h.at <= 120000);\n\t\tfor (const p of paragraphs) {\n\t\t\tconst n = normSentText(p);\n\t\t\tif (n !== '') hist.push({ at: now, norm: n });\n\t\t}\n\t\twhile (hist.length > 50) hist.shift();",
+  "new": "\t\tconst hist = (store.get(row.channel_id) ?? []).filter((h) => now - h.at <= REPEAT_GUARD_WINDOW_MS);\n\t\tfor (const p of paragraphs) {\n\t\t\tconst n = normSentText(p);\n\t\t\tif (n !== '') hist.push({ at: now, norm: n });\n\t\t}\n\t\twhile (hist.length > REPEAT_GUARD_KEEP) hist.shift();"
+ },
+ {
+  "id": "proactive-norepeat-avoid",
+  "title": "主动开口 —— 把最近自己说过的话摘给模型并要求换话题（C）",
+  "file": "lib/gateway.js",
+  "marker": "const avoidLine = recentSelf.length === 0",
+  "old": "\t\tconst msgId = randomUUID();\n\t\tconst done = new Promise((resolveDone) => {\n\t\t\tconst timer = setTimeout(() => {\n\t\t\t\tmeta.timedOut = true;",
+  "new": "\t\tconst msgId = randomUUID();\n\t\t// [FS-PROACTIVE-NOREPEAT] 光靠「不许把理由原句搬过来」挡不住复读：理由固定时模型会照着同一情形\n\t\t// 编出同一句话。把最近自己在这个频道说过的话摘给它看，明确要求换话题（C）。\n\t\tconst recentSelf = (this.recentSent?.get(channelId) ?? [])\n\t\t\t.slice(-3).map((h) => String(h?.norm ?? '')).filter((t) => t !== '');\n\t\tconst avoidLine = recentSelf.length === 0\n\t\t\t? ''\n\t\t\t: `你最近在这个聊天里已经说过：${recentSelf.map((t) => `「${t.slice(0, 40)}」`).join('')}——这次别再聊这些，换个话题、换种说法。`;\n\t\tconst done = new Promise((resolveDone) => {\n\t\t\tconst timer = setTimeout(() => {\n\t\t\t\tmeta.timedOut = true;"
+ },
+ {
+  "id": "proactive-norepeat-prompt",
+  "title": "主动开口提示词 —— 末尾拼上「别撞车」那句",
+  "file": "lib/gateway.js",
+  "marker": "' + avoidLine",
+  "old": "\t\t\t\t\t\t'别提\"系统\"\"提醒任务\"\"主动开口\"这些字眼。'\n\t\t\t\t}],\n\t\t\t\tsource: { kind: SOURCE_PROACTIVE, channelId, reason: String(reason), origin }",
+  "new": "\t\t\t\t\t\t'别提\"系统\"\"提醒任务\"\"主动开口\"这些字眼。' + avoidLine\n\t\t\t\t}],\n\t\t\t\tsource: { kind: SOURCE_PROACTIVE, channelId, reason: String(reason), origin }"
+ },
+ {
+  "id": "proactive-norepeat-life-const",
+  "title": "空闲兜底常量 —— 两次主动开口至少隔 3 真实小时",
+  "file": "lib/life.js",
+  "marker": "export const DEFAULT_IDLE_MIN_REAL_GAP_HOURS = 3;",
+  "old": "export const DEFAULT_IDLE_REAL_GAP_MIN = 30;",
+  "new": "export const DEFAULT_IDLE_REAL_GAP_MIN = 30;\n/** [FS-IDLE-REAL-GAP] 两次「自己主动开口」之间至少隔多少真实小时（虚拟钟加速不再放大频次）。 */\nexport const DEFAULT_IDLE_MIN_REAL_GAP_HOURS = 3;"
+ },
+ {
+  "id": "proactive-norepeat-life-gap",
+  "title": "空闲兜底 —— 距上次主动开口不足 3 小时不发 + 理由带扰动（B/C）",
+  "file": "lib/life.js",
+  "marker": "this.idleProactiveReason(), { origin: 'idle' }",
+  "old": "\t\tconst platform = platformOf(target);\n\t\tthis.lastProactiveReal.set(platform, Date.now());\n\t\tlet ok = false;\n\t\ttry {\n\t\t\tok = (await this.deliver(target, '好久没说话了，随便聊聊', { origin: 'idle' })) === true;",
+  "new": "\t\tconst platform = platformOf(target);\n\t\t// [FS-IDLE-REAL-GAP] 距自己上次主动开口的真实时间不足 3 小时就不发（B）：虚拟钟加速时\n\t\t// 1 小时的虚拟间隔折算成真实时间只有几分钟，同一句话能在几十分钟里连发十几次。\n\t\tconst idleMinRealGapMs = Number(p.idleMinRealGapHours ?? DEFAULT_IDLE_MIN_REAL_GAP_HOURS) * 3600_000;\n\t\tif (Number.isFinite(idleMinRealGapMs) && idleMinRealGapMs > 0 &&\n\t\t\tDate.now() - (this.lastProactiveReal.get(platform) ?? 0) < idleMinRealGapMs) {\n\t\t\tthis.log('info', `[fish-soul] 距上次主动开口还没到 ${Math.round(idleMinRealGapMs / 3600_000)} 小时，这轮空闲兜底跳过`);\n\t\t\treturn;\n\t\t}\n\t\tthis.lastProactiveReal.set(platform, Date.now());\n\t\tlet ok = false;\n\t\ttry {\n\t\t\tok = (await this.deliver(target, this.idleProactiveReason(), { origin: 'idle' })) === true;"
+ },
+ {
+  "id": "proactive-norepeat-life-reason",
+  "title": "空闲兜底理由 —— 按钟点 + 随机角度生成，不再固定同一句（C）",
+  "file": "lib/life.js",
+  "marker": "idleProactiveReason() {",
+  "old": "\t/**\n\t * 下一条「能主动投递」的待办离现在还有多久（虚拟 ms），没有就 null。",
+  "new": "\t/**\n\t * [FS-PROACTIVE-VARY] 空闲兜底的理由不能固定成一句「好久没说话了，随便聊聊」（C）：理由不变，\n\t * 模型就照着同一情形编同一句话（2026-11-15「这会儿有点饿，想煮个面吃」连发 11 遍）。\n\t * 每次按真实钟点 + 随机切入角度给一个不同的理由，让它有新的东西可说。\n\t */\n\tidleProactiveReason() {\n\t\tconst now = new Date();\n\t\tconst hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;\n\t\tconst angles = [\n\t\t\t'手边正在做的事、这会儿在忙什么',\n\t\t\t'刚吃到的东西、忽然想吃的',\n\t\t\t'外面的天气、光线、声音',\n\t\t\t'白天碰到的一件小事、想吐槽的一句',\n\t\t\t'突然想起的、关于对方的一件旧事',\n\t\t\t'最近在追的剧、在玩的游戏、在听的东西',\n\t\t\t'自己身上的一点小状况：困、饿、冷、酸',\n\t\t\t'想去但一直没去的地方'\n\t\t];\n\t\tconst pick = angles[Math.floor(Math.random() * angles.length)];\n\t\treturn `好久没说话了（现在 ${hhmm}）。这次从一个新角度开口：${pick}。换个话题，别跟之前主动说过的话撞车`;\n\t}\n\n\t/**\n\t * 下一条「能主动投递」的待办离现在还有多久（虚拟 ms），没有就 null。"
+ }
+]

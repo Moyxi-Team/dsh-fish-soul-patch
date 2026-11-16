@@ -1,0 +1,58 @@
+[
+	{
+		"id": "share-queue-args",
+		"title": "queueShare 收下热评 / 画面 / 现成分享语",
+		"file": "lib/life.js",
+		"old": "\tqueueShare({ platform, title, author, url, impression }) {",
+		"new": "\tqueueShare({ platform, title, author, url, impression, shareLine = '', visual = '', comments = [] }) {"
+	},
+	{
+		"id": "share-reason-content",
+		"title": "分享理由带上热评、画面和她自己想好的那句话",
+		"file": "lib/life.js",
+		"old": "\t\tconst reason = `你刚在${platform}刷到一个视频《${clean(title, 60) || '没写标题'}》${author ? `（${clean(author, 20)}）` : ''}，链接 ${url} 。` +\n\t\t\t`你看完觉得：${clean(impression, 120)}。很想发给对方看看：把链接原样发出去，再用一两句话说说你为什么想给 ta 看（像随手转给朋友，别写成推荐语、别复述标题）`;",
+		"new": "\t\t// 热评 / 画面 / 她自己想好的那句话：都塞进理由里，模型才知道这条视频「具体说了什么」\n\t\tconst hot = (Array.isArray(comments) ? comments : []).map((c) => clean(c, 60)).filter((c) => c !== '').slice(0, 3);\n\t\tconst hotLine = hot.length > 0 ? `评论区热评：${hot.map((c) => `「${c}」`).join(' ')}` : '';\n\t\tconst visualLine = clean(visual, 100) !== '' ? `视频画面：${clean(visual, 100)}。` : '';\n\t\tconst saidLine = clean(shareLine, 60) !== '' ? `你自己本来想说的是：「${clean(shareLine, 60)}」。` : '';\n\t\tconst reason = `你在${platform}上刷到一个视频《${clean(title, 60) || '没写标题'}》${author ? `（${clean(author, 20)}）` : ''}，链接 ${url} 。` +\n\t\t\t`你看完觉得：${clean(impression, 120)}。${visualLine}${hotLine}${saidLine}` +\n\t\t\t`很想发给对方看看：把链接原样发出去，再用一两句话说说你为什么想给 ta 看。` +\n\t\t\t`说话要落在**具体的某一处**（画面里那个细节、视频里那句话、或者评论区那句让你有反应的），别概括整条视频、别复述标题；` +\n\t\t\t`可以顺手提一句评论区的反应（\"底下都在说…\"这种），但只挑你真的觉得有意思的那句，别把热评念一遍。` +\n\t\t\t`开口别用\"刚看到、看到、刷到、刚刷到、刚发现、给你分享、分享个\"这类起头，也别交代你是怎么知道的；直接把最戳你的那一处细节甩出来（像随手转给熟人，别写成推荐语、别复述标题）。`;"
+	},
+	{
+		"id": "share-intent-caption",
+		"title": "分享意图存下现成分享语与热评，卡片后面那句话不再空",
+		"file": "lib/life.js",
+		"old": "\t\tif (dyChannel !== '') setKv(this.db, `share.intent.${id}`, { videoId, caption: clean(impression, 120), title: clean(title, 60) });\n\t\tsetKv(this.db, 'share.day', { date: dateStr, count: count + 1 });",
+		"new": "\t\tif (dyChannel !== '') setKv(this.db, `share.intent.${id}`, {\n\t\t\tvideoId,\n\t\t\t// 卡片后面跟着的那句话：优先用她看视频时想好的「分享语」，没有才退回感受\n\t\t\tcaption: clean(shareLine, 60) !== '' ? clean(shareLine, 60) : clean(impression, 120),\n\t\t\ttitle: clean(title, 60),\n\t\t\timpression: clean(impression, 120),\n\t\t\tshareLine: clean(shareLine, 60),\n\t\t\tvisual: clean(visual, 100),\n\t\t\tcomments: hot\n\t\t});"
+	},
+	{
+		"id": "share-browse-pass",
+		"title": "B站/通用浏览分享时把热评、画面、分享语一起传下去",
+		"file": "lib/browse.js",
+		"old": "\t\tconst r = self.share({ platform: label, ...pick(s), url: s.url, impression: s.impression });",
+		"new": "\t\t// 热评 / 画面 / 现成的一句分享语一起带过去：光靠一句「感受」发出去的话很空，\n\t\t// 到主人那边就成了复读标题的废话。\n\t\tconst r = self.share({\n\t\t\tplatform: label,\n\t\t\t...pick(s),\n\t\t\turl: s.url,\n\t\t\timpression: s.impression,\n\t\t\tshareLine: s.shareLine ?? '',\n\t\t\tvisual: s.visual ?? '',\n\t\t\tcomments: Array.isArray(s.comments) ? s.comments.map((c) => String(c?.text ?? c ?? '')).filter(Boolean).slice(0, 5) : []\n\t\t});"
+	},
+	{
+		"id": "share-dy-shareline-watch",
+		"title": "抖音 watch：[分享语] 单独取出来，别混进感受",
+		"file": "lib/douyin-browse.js",
+		"old": "\t\tconst wantCollect = !skipped && this.cfg().collect && /\\[收藏\\]/.test(raw);\n\t\tconst impression = oneLine(raw.replace(/\\[(划走|点赞|分享|收藏)\\]/g, ''), 120);",
+		"new": "\t\t// 收藏是独立开关（默认关）：模型说了 [收藏] 且开着才收\n\t\tconst wantCollect = !skipped && this.cfg().collect && /\\[收藏\\]/.test(raw);\n\t\t// 分享语是「发给熟人的那句话」，和给自己记的感受分开取，别混进 impression\n\t\tconst shareLine = oneLine(String((raw.match(/分享语[：:]\\s*([^\\n]+)/) ?? [])[1] ?? '').replace(/\\[[^\\]]*\\]/g, ''), 60);\n\t\tconst impression = oneLine(raw.replace(/分享语[：:][^\\n]*/g, '').replace(/\\[(划走|点赞|分享|收藏)\\]/g, ''), 120);"
+	},
+	{
+		"id": "share-dy-result-watch",
+		"title": "抖音 watch 结果带回 topComments 与 shareLine",
+		"file": "lib/douyin-browse.js",
+		"old": "\t\treturn { id: v.id, title: v.title || v.desc, author: v.author, impression, skipped, liked, collected, visual: v.visual ?? '', share: wantShare && impression !== '', url: `https://www.douyin.com/video/${v.id}` };",
+		"new": "\t\treturn { id: v.id, title: v.title || v.desc, author: v.author, impression, skipped, liked, collected, visual: v.visual ?? '', comments: topComments(v), shareLine, share: wantShare && impression !== '', url: `https://www.douyin.com/video/${v.id}` };"
+	},
+	{
+		"id": "share-dy-shareline-loop",
+		"title": "抖音自动刷：同一套 shareLine 取法",
+		"file": "lib/douyin-browse.js",
+		"old": "\t\tconst wantCollect = !skipped && this.cfg().collect && /\\[收藏\\]/.test(raw);\n\t\tconst impression = oneLine(raw.replace(/\\[(划走|点赞|分享|收藏)\\]/g, ''), 120);",
+		"new": "\t\tconst wantCollect = !skipped && this.cfg().collect && /\\[收藏\\]/.test(raw);\n\t\t// 分享语是「发给熟人的那句话」，和给自己记的感受分开取，别混进 impression\n\t\tconst shareLine = oneLine(String((raw.match(/分享语[：:]\\s*([^\\n]+)/) ?? [])[1] ?? '').replace(/\\[[^\\]]*\\]/g, ''), 60);\n\t\tconst impression = oneLine(raw.replace(/分享语[：:][^\\n]*/g, '').replace(/\\[(划走|点赞|分享|收藏)\\]/g, ''), 120);"
+	},
+	{
+		"id": "share-dy-result-loop",
+		"title": "抖音自动刷结果也带回 topComments 与 shareLine",
+		"file": "lib/douyin-browse.js",
+		"old": "\t\treturn { id: v.id, title: v.title || v.desc, author: v.author, impression, skipped, liked, collected, share: wantShare && impression !== '', url: `https://www.douyin.com/video/${v.id}` };",
+		"new": "\t\treturn { id: v.id, title: v.title || v.desc, author: v.author, impression, skipped, liked, collected, visual: v.visual ?? '', comments: topComments(v), shareLine, share: wantShare && impression !== '', url: `https://www.douyin.com/video/${v.id}` };"
+	}
+]

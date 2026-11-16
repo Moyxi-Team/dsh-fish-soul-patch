@@ -15,11 +15,12 @@
 | P5 | `dm` | 抖音 —— 主动给互关好友发私信 | 22 | `assets/douyin-proactive.js` → 插件 `lib/` | `assets/dm-hunks.json` |
 | P6 | `share` | 刷到有意思的就发给你 → 视频卡片 | 9 | — | `assets/share-hunks.json` |
 | P7 | `wechat` | 微信（WechatAgent）↔ 人格记忆互通 | 26 | — | `assets/wechat-hunks.json` |
-| P8 | `wechat-pane` | 平台 → 微信设置页 + 表情只发动图 | 20 | `assets/client.wechat.js` → 插件 `lib/` | `assets/wechat-pane-hunks.json` |
-| P9 | `wechat-transport` | 微信运输层 —— 出站通道 / 入站口 / 网关挂载 | 20 | `assets/wechat-inbound.js` → 插件 `lib/`<br>`assets/channels/wechat.js` → 插件 `lib/` | `assets/wechat-transport-hunks.json` |
+| P8 | `wechat-pane` | 平台 → 微信设置页 + 表情只发动图 | 25 | `assets/client.wechat.js` → 插件 `lib/` | `assets/wechat-pane-hunks.json` |
+| P9 | `wechat-transport` | 微信运输层 —— 出站通道 / 入站口 / 网关挂载 | 21 | `assets/wechat-inbound.js` → 插件 `lib/`<br>`assets/channels/wechat.js` → 插件 `lib/` | `assets/wechat-transport-hunks.json` |
 | P10 | `wechat-master` | 微信 —— 主人接管开关 + 静态表情换动图 + 面板状态 | 11 | — | `assets/wechat-master-hunks.json` |
+| P18 | `proactive-norepeat` | 主动开口别复读 —— 守卫 6 小时 + 主动间隔 3 真实小时 + 理由扰动 | 8 | — | `assets/proactive-norepeat-hunks.json` |
 
-合计锚点 **121 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
+合计锚点 **135 处**，另有整文件模块 `meme-bridge.js` / `plugins-route.js` / `douyin-proactive.js`。
 
 每处补丁在运行时按四种判定之一处理：`PATCHED` 打上 / `ALREADY` 跳过 / `UPSTREAM` 上游已原生实现则自动退役 / `DRIFT` 锚点没了停手报错（见 README「用法」）。
 
@@ -98,7 +99,7 @@ FS-DOUYIN-SOCIAL-PATCH
 
 | # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |
 | --- | --- | --- | --- | --- |
-| 1 | `index-remount-our-session` | `lib/index.js` | 自家会话每条消息补挂人格段（热更新后人格卡 + 记忆块不再掉线） | `gateway?.isOurSession(agentId) === true) mountSectionsFor` |
+| 1 | `index-remount-our-session` | `lib/index.js` | 自家会话每条消息补挂人格段（热更新后人格卡 + 记忆块不再掉线） | `mountSectionsFor(payload?.agent);` |
 | 2 | `index-remount-map` | `lib/index.js` | sectionsMounted 从 Set 改 Map（换 ctx 才重挂，同一 ctx 不重复注册） | `sectionsMounted.get(id) === agent.ctx` |
 | 3 | `index-remount-set` | `lib/index.js` | sectionsMounted 换成 Map 后，登记改成 set(id, ctx)（原来 Set 的 add 在 Map 上会 TypeError） | — |
 
@@ -423,7 +424,7 @@ if (replyIsWechat) {
 
 </details>
 
-## P8 · 平台 → 微信设置页 + 表情只发动图（`--only wechat-pane`，20 处）
+## P8 · 平台 → 微信设置页 + 表情只发动图（`--only wechat-pane`，25 处）
 
 另有整文件模块：`assets/client.wechat.js` → 插件 `lib/`（内容变了要同步升脚本里的版本戳，见维护约定）。
 
@@ -449,6 +450,11 @@ if (replyIsWechat) {
 | 18 | `W46` | `lib/client.js` | client：页签短名与子页签加「微信」 | — |
 | 19 | `W47` | `lib/client.js` | client：微信子页签也走 channels 轮询 | — |
 | 20 | `W48` | `lib/client.js` | client：微信子页签渲染 WechatPane | — |
+| 21 | `W49` | `lib/stickers.js` | stickers：微信要动图时直接借 dsh-meme 图库（不再先挑本地收藏） | — |
+| 22 | `W50` | `lib/stickers.js` | stickers：加 stageMemeGif（图库 gif 落一份到 _stickers） | — |
+| 23 | `W51` | `lib/stickers.js` | stickers：面板清单忽略 meme-*.gif | — |
+| 24 | `wechat-pane-moments-fields` | `lib/routes.js` | 微信设置页 —— /channels/wechat-config 接受朋友圈 / 群点名 / 出站换图三个新字段 | — |
+| 25 | `W52` | `lib/routes.js` | routes：新增 GET /channels/wechat-groups（微信设置页群名单可视化） | — |
 
 <details><summary>锚点原文（marker）</summary>
 
@@ -505,7 +511,7 @@ wechat: wechatState(),
 const list = (v, fallback) => (v === undefined ? (Array.isArray(fallback) ? fallback : []) : (Array.isArray(v) ? v : []).map((x) => String(x).trim()).filter(Boolean));
 
 # W46
-const TAB_KEYS = { memory: "忆", character: "角", daily: "常", channels: "台", models: "模", system: "统", guide: "引", retrieval: "索", persona: "人", life: "自", inspector: "忆", activity: "动", behavior: "习", qq: "Q", bili: "B", douyin: "抖", wechat: "微", version: "版" };
+const TAB_KEYS = { memory: "忆", character: "角", daily: "常", channels: "台", models: "模", system: "统", guide: "引", retrieval: "索", persona: "人", life: "自", inspector: "忆", activity: "动", behavior: "习", qq: "Q", bili: "B", douyin: "抖", wechat: "微", version: "版", diag: "志" };
 
 # W47
 const fn = subtab === "retrieval" ? loadRetrieval : subtab === "qq" || subtab === "bili" || subtab === "douyin" || subtab === "wechat" ? loadChannels : null;
@@ -513,11 +519,26 @@ const fn = subtab === "retrieval" ? loadRetrieval : subtab === "qq" || subtab ==
 # W48
 : subtab === "wechat" ? h(ChunkTab, { file: "client.wechat.js", pick: (m) => m.WechatPane, failText: "微信页加载失败", data: channels, refresh: loadChannels, notify })
 
+# W49
+// [FS-WECHAT-STICKER-ONLYMEME] 要动图（微信）时一律直接去 dsh-meme 图库挑真 GIF，不再先挑本地收藏：
+
+# W50
+stageMemeGif(workspacePath, absPath) {
+
+# W51
+if (/^meme-[0-9a-f]{6,}\.gif$/i.test(name)) continue;
+
+# wechat-pane-moments-fields
+FS-WECHAT-PANE-2
+
+# W52
+// ── 微信群名单（设置页「群里怎么接话」的可视化数据源）──
+
 ```
 
 </details>
 
-## P9 · 微信运输层 —— 出站通道 / 入站口 / 网关挂载（`--only wechat-transport`，20 处）
+## P9 · 微信运输层 —— 出站通道 / 入站口 / 网关挂载（`--only wechat-transport`，21 处）
 
 另有整文件模块：`assets/wechat-inbound.js` / `assets/channels/wechat.js` → 插件 `lib/`（内容变了要同步升脚本里的版本戳，见维护约定）。
 
@@ -543,12 +564,13 @@ const fn = subtab === "retrieval" ? loadRetrieval : subtab === "qq" || subtab ==
 | 18 | `wechat-transport-index-04` | `lib/index.js` | index 建 WechatChannel 实例 | — |
 | 19 | `wechat-transport-index-05` | `lib/index.js` | index 把 wechat 通道注入 ChatGateway 参数 | — |
 | 20 | `wechat-transport-index-06` | `lib/index.js` | index 启动微信通道 + 入站服务 + 卸载清理 | — |
+| 21 | `wechat-transport-gateway-15` | `lib/gateway.js` | 语音段带上原文：微信语音网关（WhaleLauncher 桥）要靠它合成 | — |
 
 <details><summary>锚点原文（marker）</summary>
 
 ```text
 # wechat-transport-gateway-01
-constructor({ ctx, db, clock, getConfig, log, channel, wechat = null, bili = null, browser = null, douyin = null, douyinBrowser = null, canvasConvert = null, soul, voice = null, stickers = null, slang = null, agentSections = null, groupAdmin = null, embedder = null, embeddingCfg = null }) {
+constructor({ ctx, db, clock, getConfig, log, channel, wechat = null, bili = null, browser = null, douyin = null, douyinBrowser = null, canvasConvert = null, soul, voice = null, stickers = null, slang = null, agentSections = null, groupAdmin = null, embedder = null, embeddingCfg = null, diag = null }) {
 
 # wechat-transport-gateway-02
 this.channel = channel;
@@ -631,65 +653,7 @@ async chatTitle(chat) {
 		if (platformOf(chat.channelId) === 'douyin') {
 
 # wechat-transport-gateway-08
-/**
-	 * 微信入站（来自 wechat-inbound.js，由 WechatAgent 的 social-bridge 转发）。[FS-WECHAT-TRANSPORT]
-	 * 判定 / 会话 / 记忆 / 发言全部复用 decide 那套，与 QQ 唯一的区别是通道和认人口径。
-	 */
-	async onWechatMessage(payload) {
-		if (this.stopped) return;
-		const cfg = this.wechatConfig();
-		if (!cfg.enabled) return;
-		const m = this.wechatToMessage(payload);
-		if (m === null) return;
-		if (m.messageId !== '' && !this.markSeen(`${m.channelId}#${m.messageId}`)) return;
-		this.advanceCursor(m.channelId, m.timeMs, m.messageId);
-		this.recentSent?.delete(m.channelId);
-		if (m.chatType === 'group' && !this.groupAllowed(m.groupId, cfg)) return;
-		if (m.chatType === 'group') {
-			this.slang?.observe(m.channelId, m.nickname || m.userId, m.text);
-			this.heatTracker().observe(m.channelId, m.userId);
-		} else if (this.wechat?.isFriend(m.userId) === true) {
-			this.slang?.observe(m.channelId, m.nickname || m.userId, m.text);
-		}
-		const person = this.soul.resolvePerson(m);
-		await this.decide(m, person, cfg);
-	}
-
-	/** 微信原始 payload → 与 normalizeMessageEvent 同形的消息对象。 */
-	wechatToMessage(payload) {
-		const kind = String(payload?.chatType ?? payload?.kind ?? 'private').toLowerCase() === 'group' ? 'group' : 'private';
-		const userId = String(payload?.senderId ?? payload?.userId ?? '').trim();
-		const targetId = String(payload?.targetId ?? payload?.conversationId ?? (kind === 'private' ? userId : '')).trim();
-		if (userId === '' || targetId === '') return null;
-		const text = String(payload?.text ?? '');
-		const images = Array.isArray(payload?.images) ? payload.images.map((x) => ({ url: String(x?.url ?? ''), file: String(x?.file ?? x?.path ?? '') })).filter((x) => x.url !== '' || x.file !== '') : [];
-		const self = String(this.wechat?.selfId ?? '');
-		const timeMs = Number.isFinite(Number(payload?.timeMs)) && Number(payload.timeMs) > 0 ? Number(payload.timeMs) : Date.now();
-		return {
-			channel: 'wechat',
-			chatType: kind,
-			channelId: kind === 'group' ? `wechat:group:${targetId}` : `wechat:private:${targetId}`,
-			targetId,
-			groupId: kind === 'group' ? targetId : null,
-			userId,
-			nickname: String(payload?.senderName ?? payload?.nickname ?? ''),
-			// 微信没有"好友/临时会话"的区分，白名单由通道 isFriend 判断，这里一律标 friend 让判定走「回」
-			subType: kind === 'private' ? 'friend' : '',
-			messageId: String(payload?.messageId ?? ''),
-			mentioned: kind === 'private' ? true : payload?.mentioned === true,
-			replyId: '',
-			text: text.trim() === '' && images.length > 0 ? '【图片】' : text,
-			images,
-			links: [],
-			records: [],
-			forwards: [],
-			files: [],
-			timeMs,
-			...(self !== '' ? { selfId: self } : {})
-		};
-	}
-
-	/** QQ 入站消息（真消息和戳一戳共用）：回 / 只记 / 不理 / 插话。 */
+* 微信入站（来自 wechat-inbound.js，由 WechatAgent 的 social-bridge 转发）。[FS-WECHAT-TRANSPORT]
 
 # wechat-transport-gateway-09
 this.trackMasterActivity(m); // [FS-WECHAT-TRANSPORT] QQ 主人号 + 微信主人，一并记
@@ -729,6 +693,8 @@ const qqCfg = () => currentConfig.qq ?? {};
 
 # wechat-transport-index-03
 let groupAdmin = null;
+	/** @type {GroupList|null} */
+	let groupList = null;
 	/** @type {WechatChannel|null} */
 	let wechatChannel = null;
 	/** @type {WechatInboundServer|null} */
@@ -757,6 +723,9 @@ ctx.effect(() => () => channel.stop(), 'dsh-fish-soul: qq channel');
 	}
 	ctx.effect(() => () => { wechatInbound?.stop(); wechatChannel?.stop(); }, 'dsh-fish-soul: wechat channel');
 	if (biliCfg().enabled === true) bili.start();
+
+# wechat-transport-gateway-15
+if (bytes) voiced[i] = { type: 'record', data: { file: `base64://${bytes.toString('base64')}`, text: paragraphs[i] } }; // [FS-WECHAT-VOICE] 带原文，供微信语音网关合成
 
 ```
 
@@ -806,13 +775,57 @@ const wechatMasterSession = (masterIds) => {
 const wechatStickerDiag = () => {
 
 # wechat-master-09
-masterSession: wechatMasterSession(masterIds),
+masterSession: wechatMasterSession(list(w.masterUserIds)),
 
 # wechat-master-10
 sticker: wechatStickerDiag(),
 
 # wechat-master-11
 masterTakeover: body.masterTakeover === undefined
+
+```
+
+</details>
+
+## P18 · 主动开口别复读 —— 守卫 6 小时 + 主动间隔 3 真实小时 + 理由扰动（`--only proactive-norepeat`，8 处）
+
+| # | 锚点名 | 文件 | 改了什么 | 上游接管判定 |
+| --- | --- | --- | --- | --- |
+| 1 | `proactive-norepeat-consts` | `lib/gateway.js` | 跨条复读守卫常量 —— 6 小时窗口 / 短句也拦 / 记录留 400 条 | — |
+| 2 | `proactive-norepeat-drop` | `lib/gateway.js` | dropRepeats —— 窗口 2 分钟 → 6 小时，取消 12 字以下短句豁免（A） | — |
+| 3 | `proactive-norepeat-note-window` | `lib/gateway.js` | noteSent —— 记录窗口同步 6 小时 | — |
+| 4 | `proactive-norepeat-avoid` | `lib/gateway.js` | 主动开口 —— 把最近自己说过的话摘给模型并要求换话题（C） | — |
+| 5 | `proactive-norepeat-prompt` | `lib/gateway.js` | 主动开口提示词 —— 末尾拼上「别撞车」那句 | — |
+| 6 | `proactive-norepeat-life-const` | `lib/life.js` | 空闲兜底常量 —— 两次主动开口至少隔 3 真实小时 | — |
+| 7 | `proactive-norepeat-life-gap` | `lib/life.js` | 空闲兜底 —— 距上次主动开口不足 3 小时不发 + 理由带扰动（B/C） | — |
+| 8 | `proactive-norepeat-life-reason` | `lib/life.js` | 空闲兜底理由 —— 按钟点 + 随机角度生成，不再固定同一句（C） | — |
+
+<details><summary>锚点原文（marker）</summary>
+
+```text
+# proactive-norepeat-consts
+const REPEAT_GUARD_WINDOW_MS = 6 * 3600_000;
+
+# proactive-norepeat-drop
+{ now, windowMs: REPEAT_GUARD_WINDOW_MS, minLen: REPEAT_GUARD_MIN_LEN }
+
+# proactive-norepeat-note-window
+while (hist.length > REPEAT_GUARD_KEEP) hist.shift();
+
+# proactive-norepeat-avoid
+const avoidLine = recentSelf.length === 0
+
+# proactive-norepeat-prompt
+' + avoidLine
+
+# proactive-norepeat-life-const
+export const DEFAULT_IDLE_MIN_REAL_GAP_HOURS = 3;
+
+# proactive-norepeat-life-gap
+this.idleProactiveReason(), { origin: 'idle' }
+
+# proactive-norepeat-life-reason
+idleProactiveReason() {
 
 ```
 
@@ -831,9 +844,10 @@ masterTakeover: body.masterTakeover === undefined
 | P5 | 23 | 12 | 少 11 条（合并成功能项） |
 | P6 | 9 | 10 | 多 1 条（一处拆成多项） |
 | P7 | 26 | 23 | 少 3 条（合并成功能项） |
-| P8 | 21 | 22 | 多 1 条（一处拆成多项） |
-| P9 | 22 | — | 页面未覆盖该组 |
+| P8 | 26 | 22 | 少 4 条（合并成功能项） |
+| P9 | 23 | — | 页面未覆盖该组 |
 | P10 | 11 | — | 页面未覆盖该组 |
+| P18 | 8 | — | 页面未覆盖该组 |
 
 页面上某一组显示「已打 N / M」，N 是按探针数出来的；锚点数以本文件为准。探针漏了某处时，页面会少报，但补丁器 `--check` 仍然会管到那一处。
 

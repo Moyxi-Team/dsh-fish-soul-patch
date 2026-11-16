@@ -33,6 +33,7 @@ const GROUPS = [
   { tag: 'P8', only: 'wechat-pane', label: '平台 → 微信设置页 + 表情只发动图', json: 'wechat-pane-hunks.json', whole: 'client.wechat.js' },
   { tag: 'P9', only: 'wechat-transport', label: '微信运输层 —— 出站通道 / 入站口 / 网关挂载', json: 'wechat-transport-hunks.json', whole: ['wechat-inbound.js', 'channels/wechat.js'] },
   { tag: 'P10', only: 'wechat-master', label: '微信 —— 主人接管开关 + 静态表情换动图 + 面板状态', json: 'wechat-master-hunks.json', whole: null },
+	{ tag: 'P18', only: 'proactive-norepeat', label: '主动开口别复读 —— 守卫 6 小时 + 主动间隔 3 真实小时 + 理由扰动', json: 'proactive-norepeat-hunks.json', whole: null },
 ];
 
 const esc = (s) => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ');

@@ -82,6 +82,14 @@ Copy-Item .\services\fish-stack-watchdog.ps1 C:\Users\<你>\.dsh\fish-stack-watc
 
 **回滚**：每次打补丁前脚本会把原文件备份到 `~/.dsh/backup/whalegirl-patch-<时间戳>/`，拷回去重启鲸鱼即可。
 
+## 桥自愈（G1：微信出站桥掉线自动拉起）
+
+- 问题：鲸鱼 exe 更新或异常退出会让 `python bridge\__main__.py`（8899 出站）一起消失；微信栈看守只盯 DSH，桥挂了没人拉，入站出站同时中断。
+- 做法：`services/fish-stack-watchdog.ps1` 每 8s tick、30s 节流探 8787 / 8899；任一不通就 spawn `wechat-bridge-guard.vbs`（wscript 无窗口）。守卫按 `WhaleLauncher.exe → node server.js → runtime\python\python.exe bridge\__main__.py` 顺序补缺，端口恢复即退出；连续失败按 60s / 2min / 4min / 8min 退避（上限 10 分钟），全部恢复自动清零。
+- 日志：`~/.dsh/wechat-bridge-guard.log`（2MB 轮转）、`~/.dsh/fish-stack-watchdog.log`（`bridge-guard:` 前缀行）。
+- 实测：kill 掉 8899 的 python 桥，18 秒内自动恢复监听（2026-11-16 12:01）。
+- 边界：DSH 退出满 5 分钟看守整体退场，桥不再被拉，符合「关宿主不残留」约定；守卫只补进程、不补文件，鲸鱼更新替换 `bridge/*.py` 仍靠 `patch-whalegirl.mjs` 每 10 分钟重放。
+
 ## 用法
 
 ```bash
@@ -185,6 +193,7 @@ services/
   boot-hooks/          cordis 插件本体（住在 node_modules 外，pnpm 更新删不掉）
   fish-stack-watchdog.*  常驻循环：voice-rotate-proxy 17890 / SnowLuma 3001（QQ 在才起）/ 抖音 sink 8791
   wechat-stack-watchdog.*  常驻循环：微信桥 11229 + 11234，并定时重打 WechatAgent 的 social-bridge 接线
+wechat-bridge-guard.*   一次性修复器：8787 / 8899 掉线时按「WhaleLauncher → server.js → python 桥」补拉起（由看护 30s 探活触发，跑完即退）
   wechat-bridge-start.*  微信桥的隐藏启动器（挑能 require node:sqlite 的 node，读 token 文件）
 ```
 

@@ -73,6 +73,20 @@ window.__ModuleLoader__.load({
 			const [grpErr, setGrpErr] = react.useState(null);
 			// [FS-WECHAT-GROUPS-ERR] 再记一个「上一次到底什么时候读的」，否则点重读后界面没变化，用户没法判断到底读没读。
 			const [grpAt, setGrpAt] = react.useState(null);
+			// [FS-WECHAT-SERVICES] 服务状态单独拉一次，别拖慢整页（要探三个端口 + 翻进程表）
+			const [svc, setSvc] = react.useState(null);
+			const [svcBusy, setSvcBusy] = react.useState(false);
+			const loadSvc = async () => {
+				setSvcBusy(true);
+				try {
+					const r = await api("GET", "/channels/wechat-services");
+					setSvc(r && typeof r === "object" ? r : { ok: false, error: "状态接口没返回内容" });
+				} catch (error) {
+					setSvc({ ok: false, error: String(error instanceof Error ? error.message : error) });
+				}
+				setSvcBusy(false);
+			};
+			react.useEffect(() => { void loadSvc(); }, []);
 			const loadGroups = async () => {
 				setGrpLoading(true);
 				try {
@@ -419,6 +433,63 @@ window.__ModuleLoader__.load({
 					desc: "鲸鱼设置里 moments.publishFeatureEnabled 必须为 true（发表总开关），moments.publishEnabled 应为 false（关掉它自己写文案，否则会出现第二个人的口吻），publishMaxPerDay 不要设得比这里小。这三项在鲸鱼里改，soul 看不到也改不了。"
 				}, Muted("对不上就会静默跳过")));
 
+			// [FS-WECHAT-SERVICES] 微信服务：这几个进程以前要自己去命令行拉，现在面板上点一下
+			const startSvc = async () => {
+				if (svcBusy) return;
+				setSvcBusy(true);
+				let r = null;
+				try {
+					r = await api("POST", "/channels/wechat-services/start", {});
+				} catch (error) {
+					notify("启动请求没发出去：" + String(error instanceof Error ? error.message : error));
+					setSvcBusy(false);
+					return;
+				}
+				if (r?.ok === true) notify("微信服务已拉起来");
+				else notify(String(r?.error ?? "启动没全成，看下面每行状态"));
+				if (r?.state) setSvc(r.state);
+				else await loadSvc();
+				setSvcBusy(false);
+				}
+			const svcPort = svc?.ports ?? {};
+			const svcActions = Array.isArray(svc?.actions) ? svc.actions : [];
+			const svcLine = (title, up, desc) => Row({
+				title,
+				desc,
+				meta: Tag(up === true ? "在跑" : "没起来", up === true ? undefined : "outline")
+			}, Muted(up === true ? "已就绪" : "点下面「一键启动」"));
+			const paneServices = Group({
+				title: "微信服务",
+				aside: Tag(svc === null ? "读取中" : (svc.allUp === true ? "全部在跑" : "有服务没起来"), svc?.allUp === true ? undefined : "outline"),
+				tip: "这一页只管「进程和端口在不在」。DSH 重启之后鲸鱼那边不会自己回来：8787 是鲸鱼 web（桥从这儿拿登录态），8899 是希希往微信发，11233 是微信往希希送。三个都在才算通；哪一行写着「没起来」，点「一键启动」，它会按启动器 → server.js → 桥的顺序把缺的补上，已经在跑的不动。"
+			},
+			svcLine("鲸鱼启动器 WhaleLauncher", svc?.launcher, "微信登录和收发都靠它，它没跑，后面两个也起不来。"),
+			svcLine("鲸鱼服务 8787", svcPort.web, "桥从这里拿登录态；没它桥会一直报连不上鲸鲸服务。"),
+			svcLine("出站通道 8899", svcPort.outbound, "希希的话从这儿交给鲸鱼发出去；没它就是能想不能发。"),
+			svcLine("入站端口 11233", svcPort.inbound, "微信消息从这儿进 DSH；没它就是收不到消息，自然也不会回话。"),
+			Row({
+				title: "最后一次收到微信消息",
+				desc: "桥日志里最后一条「收到」。你刚发完消息这里没动，说明消息根本没进来（入站或桥断了），别去怀疑人格和记忆。",
+				meta: Tag(svc?.lastInbound?.at ?? "今天还没有", svc?.lastInbound ? undefined : "outline")
+			}, Muted(svc?.lastInbound ? "（" + svc.lastInbound.ago + "）" + svc.lastInbound.line : "日志里没有今天的记录")),
+			Row({
+				title: "最后一次发到微信",
+				desc: "桥日志里最后一条「后台通道发送成功」。上面那行动了、这行没动，问题就在 DSH 这边（她不接话），不在鲸鱼。",
+				meta: Tag(svc?.lastOutbound?.at ?? "还没有", svc?.lastOutbound ? undefined : "outline")
+			}, Muted(svc?.lastOutbound ? "（" + svc.lastOutbound.ago + "）" + svc.lastOutbound.line : "日志里没有今天的记录")),
+			Row({
+				title: "启动 / 刷新",
+				desc: svc?.error ? "上一次启动没全成：" + svc.error : "「一键启动」只补没起来的那些，起完自己重读一遍状态，不用手动刷新。",
+				meta: Muted(svc?.root ?? "")
+			}, Button({ disabled: svcBusy, onClick: () => void startSvc() }, svcBusy ? "处理中…" : "一键启动"),
+				Button({ variant: "ghost", disabled: svcBusy, onClick: () => void loadSvc() }, "刷新状态")),
+			svcActions.length
+				? Row({
+					title: "上一次点了什么",
+					desc: svcActions.map((a) => a.step + "：" + (a.state === "started" ? "已拉起" : a.state === "skip" ? "本来就在跑" : a.state === "fail" ? "失败" : a.state) + (a.detail ? "（" + a.detail + "）" : "")).join("；")
+				}, Muted("顺序：启动器 → server.js → 桥"))
+				: null
+			);
 			const paneLink = Group({
 				title: "连接",
 				aside: Tag(w.bridge === true ? "bridge 在线" : "bridge 没连上", w.bridge === true ? undefined : "outline"),
@@ -448,7 +519,7 @@ window.__ModuleLoader__.load({
 				Row({ title: "表情还是不动", desc: "① 先看「上一张挑的」是不是静图；② 「图库体检」里动图是 0 的话，把「借 dsh-meme 的表情库」打开或者往 dsh-meme 里加几张 GIF；③ 已经只在发 GIF 还不动，就去鲸鱼桥的日志里看这张有没有被当成普通图片发、或者转码失败 —— 那一段 soul 看不到。" }, Muted("看 ①②③")),
 				Row({ title: "她没走到「鱼」工作区", desc: "① 上面「接管我的私聊」是不是被关了；② 「这条会话通到哪儿」的悬停里写了原因；③ 工作区对不上时，去 DSH 的会话列表把这条微信私聊指到「鱼」。" }, Muted("看 ①②③")));
 
-			return h(react.Fragment, null, paneHead, paneWho, paneGroup, paneRhythm, paneInterject, paneSticker, paneMoments, paneLink, paneHelp);
+			return h(react.Fragment, null, paneHead, paneServices, paneWho, paneGroup, paneRhythm, paneInterject, paneSticker, paneMoments, paneLink, paneHelp);
 		}
 
 		/** 一行脚注：为空就不渲染，省版面 */

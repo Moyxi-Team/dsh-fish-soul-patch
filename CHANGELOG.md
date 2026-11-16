@@ -1,4 +1,56 @@
+## 未编号（P18 proactive-norepeat，2026-11-16）：主动发言连着复读同一句
+
+**症状**：QQ 上希希自己主动开口，隔十几分钟就发一条一模一样的话。`chat-archive.db` 里 `private:412205303` 在 11-15 一天内把「这会儿有点饿，想煮个面吃」发了 11 遍，句子一字不差。
+
+**根因（三处叠加，都在插件本体，pnpm 重装即丢）**：
+1. `lib/gateway.js` 的 `dropRepeats()` 只用 2 分钟窗口比对「刚发过的」、且规整化后 **<12 字的短句直接豁免** —— 十几分钟一轮的自发连发完全漏网（`behavior.js` 的 `findRepeatedParagraphs` 默认 `windowMs=120000 / minLen=12`），记录上限 50 条也存不住 6 小时的量。
+2. `lib/life.js` 的 `idleProactive()` 用固定的理由「好久没说话了，随便聊聊」，且**只看虚拟钟间隔**（`PROACTIVE_MIN_GAP_VIRTUAL_MS=60min`）。自走层虚拟钟加速时，1 小时虚拟间隔折算成真实时间只有几分钟，同一情形同一句话就能连发十几次。
+3. `lib/gateway.js` 的 `triggerProactive()` 只把固定 `reason` 塞给模型（提示词里已有「不许把理由原句搬过来」，但理由不变时模型照样照着同一情形编同一句），**没有给它看自己刚说过什么**。
+
+**新增**：`patch-fish-soul.mjs` 第六组 `P18 proactive-norepeat`（`assets/proactive-norepeat-hunks.json`，8 处锚点，`--only proactive-norepeat` 可单跑）：
+- **A 跨条复读守卫**：新增常量 `REPEAT_GUARD_WINDOW_MS=6h` / `REPEAT_GUARD_MIN_LEN=1` / `REPEAT_GUARD_KEEP=400`，`dropRepeats()` 与 `noteSent()` 改用之 —— 窗口 2 分钟 → 6 小时，取消 12 字以下豁免，记录留 400 条。有对方新消息时 `onEvent` 仍会清掉该频道记录，所以「用户再问一遍、她再答一遍」不会被误杀。
+- **B 真实间隔**：`life.js` 新增 `DEFAULT_IDLE_MIN_REAL_GAP_HOURS=3`，`idleProactive()` 里按**真实时间**判定「距自己上次主动开口不足 3 小时就不发」（可用 `idleMinRealGapHours` 覆盖），虚拟钟加速不再放大频次；跳过时打一行 `这轮空闲兜底跳过`。
+- **C 理由扰动 + 别撞车**：`life.js` 新增 `idleProactiveReason()`，按真实钟点 + 8 个随机切入角度生成理由（不再固定一句）；`gateway.js` 的 `triggerProactive()` 取出该频道最近 3 条自己说过的话，拼成 `avoidLine` 追加到提示词末尾，要求换话题、换说法。
+
+**验证（本机实测）**：
+- 覆盖演练：先把两个文件按 hunk 反向还原成上游原文 → `node patch-fish-soul.mjs --only proactive-norepeat --check` 输出 **8 处 PATCHED / 0 漂移**；实跑 → 8 处全打 + 冒烟 `插件入口 import 通过`；再 `--check` → **8 处 ALREADY**（幂等）。
+- 产物核对：脚本打出来的 `lib/gateway.js` / `lib/life.js` 与此前手改版本逐字节一致；`node --check` 两文件均通过。
+- 运行效果要重启 DSH（或重载插件）后才生效。
+
+**状态**：代码已打、补丁已固化、幂等已验证；补丁仓改动仍未 git 提交（按惯例等确认后统一提交）。
+
+## 未编号（W6 outbound-image，2026-11-16）：微信图片 / 表情一条也发不出去
+
+**症状**：微信里希希发文字正常，一发图片或表情就失败，桥日志 `outbound_failed` / `text_failed`。
+
+**根因**：`bridge/outbound_api.py` 的图片分支调用 `send_outbound_image()`，而鲸鱼运行时根本没有这个函数（鲸鱼更新把图片出站入口整块换掉了）→ `AttributeError`，图片与表情全挂。
+
+**新增**：`patch-whalegirl.mjs` 第六组 `W6 outbound-image`——新增 `bridge/outbound_image.py`（标记 `WHALE-OUTBOUND-IMAGE`）：补齐鲸鱼运行时缺失的图片 / 表情出站实现，走与文字同款的发送通道；`bridge/app.py` 里挂 `attach` 让 `outbound_api` 能调到它，并把图片确认超时提到 25s（`WHALE-IMAGE-CONFIRM`）。`--only image` 可单跑。
+
+**验证（本机实测）**：`node patch-whalegirl.mjs --check` **六组全 ALREADY**；模拟鲸鱼整文件覆盖后重跑自动重建，微信端真实收到图片与表情。
+
+**状态**：本机已验证通过；补丁仓改动仍未 git 提交（按惯例等确认后统一提交）。
+
 # 变更说明（补丁仓，非插件本体）
+
+## 未编号（W4 voice-local + P17 微信服务面板，2026-11-16）：微信语音全挂、DSH 重启后鲸鱼侧不会自己回来
+
+**症状**：微信里希希只发文字，语音一条都出不来；桥日志 `自动语音接口：HTTP=None 首响应=None 总耗时=0ms` → `自动语音：failed 参数错误。`，之后连报错也被吞成 `record:failed`。
+
+**根因（同一文件里两处，都是鲸鱼更新整份替换掉的）**：
+1. `bridge/voice_mixin.py` 的 `send_voice_reply` 缺 `audio=None` 形参，而 `bridge/outbound_api.py` 的 `record` 分支固定传 `audio=`，直接 `TypeError` → 失败列表只有 `record:TypeError`。
+2. 补上形参后仍走到 exe 的语音发送，而本机 exe 4.1.2 打不开播放设备、恒报「参数错误。」；V-1b 的「桥内本地录音」分支同样被更新冲掉了，于是没有任何兜底路径。
+
+**新增**：`patch-whalegirl.mjs` 第四组 `W4 voice-local`——恢复 `audio` 形参，并在 `voice_reply.deliver(...)` 之前插入本地录音分支（`voice_local.enabled()` 为真时：有 dsh 送来的 mp3 就用，没有就用 `voice_local.synthesize()` 现合成 → `voice_local.deliver()` 转 WAV、热键录音、发送；本地路径失败才回退 exe）。标记 `WHALE-VOICE-LOCAL`，`--only voicelocal` 可单跑。
+
+**验证（本机实测）**：
+- `node patch-whalegirl.mjs --check` → W1/W2/W3/W4 四组全 `ALREADY`。
+- 重启 python 桥后 `POST 8899/outbound`（`kind=record`，只给 text 不给音频）→ `{"ok":true,"sent":1}`，桥日志 `V-1b 兜底合成完成 32952 字节` → `V-1b 已转 WAV` → 发送成功，微信真实收到语音。
+- 注意：`prepare` 用会话名精确匹配开会话，`chatName` 必须与微信侧备注一致（含零宽字符），传 `wxid` 或去掉零宽的裸名会得到 `record:local:no-chat`。
+
+**同时**：插件侧 `P17 wechat-services`（`lib/wechat-services.js` + `lib/routes.js` 的 `/channels/wechat-services`）给微信设置页加了「服务状态 + 一键拉起」：8787 / 8899 / 11233 三个端口探活、最后收到微信消息的时间、按「鲸鱼启动器 → server.js → python 桥」顺序补缺拉起。DSH 重启后面板才会加载新代码。
+
+**状态**：语音链路与面板均已本机验证通过。补丁仓改动仍未 git 提交（按惯例等确认后统一提交）。
 ## 未编号（W3 probe-clean + 微信群放行 P16，2026-11-16）：入站通了、出站被探测草稿堵死
 
 **症状**：群里 @希希 有反应（dsh 侧 07:34:05 已生成「在呢」并写进 `chat-archive.db`），但微信里一个字都没出来；桥日志停在 `input_not_empty`。
@@ -709,3 +761,25 @@ wechat.sticker / wechat.interject 字段齐全
 
 核对口径从「整行一字不差」放宽到「抓到该行稳定特征」，以后上游在同一行加字段不会再误报。
 改完实测：`done 72 / retired 12 / todo 0 / total 84`。
+
+## W5 发送残留自愈（鲸鱼侧 bridge/bg_sender.py）
+
+现象：群里希希既不插话也不回复，私聊也哑火；桥日志是 `delivery failed reason=input_not_empty` +
+`发送暂停：目标输入框已有草稿`。
+
+根因：点完发送按钮后正文仍留在输入框（这次点击没生效），`send()` 直接 `return False, "residue_left"`
+收工；正文就此变成草稿，下一次发送在入口被判脏框 `input_not_empty` 永久拒发 —— 该会话从此一条也发不出去。
+W3 probe-clean 只认「鲸」这一种探测残留，覆盖不到「本条正文自己变成残留」这条路径。
+
+修法（两段替换，标记 `WHALE-RESIDUE-CLEAN`）：
+
+| 段 | 位置 | 行为 |
+| --- | --- | --- |
+| W5a | `send()` 点发送后的校验循环 | `residue_left` 前按框内内容分流：空框（UIA 慢一拍）算已发；框内就是本条正文 → `_clear_composer` 后重打重发一次，仍失败报 `send_not_effective`；框内是别人打的字 → 照旧 `residue_left` |
+| W5b | `send()` 入口非空判定 | 残留正文 strip 后等于本条待发正文 → 清框继续发，不再 `input_not_empty`；清不掉才报 `input_dirty` |
+
+固化：`assets/whalegirl/residue-send-{old,new}.py`、`residue-in-{old,new}.py`，
+`node patch-whalegirl.mjs --only residue` 一键重放。已验证：用「W3 已打 / W5 未打」的构造文件跑一遍，
+重放结果与现网 `bridge/bg_sender.py` 逐字节一致。
+
+生效需重启鲸鱼 python 桥（8899 出站口由它开）。

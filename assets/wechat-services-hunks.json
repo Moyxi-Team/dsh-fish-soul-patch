@@ -1,0 +1,18 @@
+[
+  {
+    "id": "wechat-services-import",
+    "title": "微信服务 —— routes.js 引入服务开关路由",
+    "file": "lib/routes.js",
+    "marker": "import { handleWechatServicesRoute }",
+    "old": "import { handlePluginsRoute } from './routes-plugins.js'; // [FS-PLUGINS-PANEL-PATCH]",
+    "new": "import { handlePluginsRoute } from './routes-plugins.js'; // [FS-PLUGINS-PANEL-PATCH]\nimport { handleWechatServicesRoute } from './wechat-services.js'; // [FS-WECHAT-SERVICES]"
+  },
+  {
+    "id": "wechat-services-dispatch",
+    "title": "微信服务 —— routes.js 把 /channels/wechat-services 转给服务开关模块",
+    "file": "lib/routes.js",
+    "marker": "handleWechatServicesRoute({ method, path, req, send",
+    "old": "\t\t\t\tif (await handleSoulRoute({ method, path, url, req, res, send, readBody: readBodyLogged, sameOrigin, deps })) return;",
+    "new": "\t\t\t\t// [FS-WECHAT-SERVICES] 微信服务开关：/channels/wechat-services（GET 看状态 / POST start 拉起来）\n\t\t\t\tif (await handleWechatServicesRoute({ method, path, req, send, readBody: readBodyLogged, sameOrigin, deps })) return;\n\t\t\t\tif (await handleSoulRoute({ method, path, url, req, res, send, readBody: readBodyLogged, sameOrigin, deps })) return;"
+  }
+]

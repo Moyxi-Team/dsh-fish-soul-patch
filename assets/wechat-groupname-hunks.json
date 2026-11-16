@@ -1,11 +1,11 @@
 [
 	{
 		"id": "wechat-inbound-groupname",
-		"title": "微信入站：收下 conversation_name / groupName，消息对象带上群名",
+		"title": "微信入站：收下 conversation_name / groupName / chat_title，消息对象带上名字",
 		"file": "lib/gateway.js",
 		"marker": "conversationName ?? payload?.groupName",
 		"old": "\t\t\tnickname: String(payload?.senderName ?? payload?.nickname ?? ''),\n",
-		"new": "\t\t\tnickname: String(payload?.senderName ?? payload?.nickname ?? ''),\n\t\t\t// [FS-WECHAT-GROUPNAME] WechatAgent 入站带 conversation_name，群名跟着一起上来，标题不再只剩数字群 ID\n\t\t\ttitle: String(payload?.conversationName ?? payload?.groupName ?? payload?.title ?? '').trim(),\n"
+		"new": "\t\t\tnickname: String(payload?.senderName ?? payload?.nickname ?? ''),\n\t\t\t// [FS-WECHAT-GROUPNAME] WechatAgent 入站带 conversation_name，群名跟着一起上来，标题不再只剩数字群 ID\n\t\t\ttitle: String(payload?.conversationName ?? payload?.groupName ?? payload?.chat_title ?? payload?.title ?? '').trim(),\n"
 	},
 	{
 		"id": "wechat-dispatch-title",
@@ -25,11 +25,11 @@
 	},
 	{
 		"id": "wechat-retitle-method",
-		"title": "新增 retitleWechatSession：把已建好的微信群会话标题从数字群 ID 改成真群名",
+		"title": "新增 retitleWechatSession：群与私聊的会话标题都改成真名字（群名 / 好友备注）",
 		"file": "lib/gateway.js",
 		"marker": "async retitleWechatSession(row, chat) {",
 		"old": "\t/** 微信表情偏好：微信只认 GIF 动图，静态图发过去一定不动（平台 → 微信 → 表情）[FS-WECHAT-PANE] */\n\twechatStickerPrefs() {",
-		"new": "\t/**\n\t * [FS-WECHAT-GROUPNAME] 微信群的会话标题以前存的是数字群 ID（微信只给一串 id，不给群名）。\n\t * 入站现在带着 conversation_name，这里把 DSH 会话标题和库里的 title 一起改回真群名。\n\t */\n\tasync retitleWechatSession(row, chat) {\n\t\tif (row === null || row === undefined || chat?.chatType !== 'group') return;\n\t\tconst name = String(chat.title ?? '').trim();\n\t\tconst targetId = String(chat.targetId ?? '');\n\t\tif (name === '' || name === targetId) return;\n\t\tconst title = `微信群·${sanitizeName(name, targetId)}`;\n\t\tif (String(row.title ?? '') === title) return;\n\t\ttry {\n\t\t\tconst titles = service(this.ctx, 'sessionTitle');\n\t\t\tconst live = this.agentsService()?.get?.(row.session_id);\n\t\t\tconst target = live?.session ?? live;\n\t\t\tif (target !== undefined && target !== null) titles?.rename?.(target, title);\n\t\t} catch { /* 标题不影响功能 */ }\n\t\ttry { this.db.prepare('UPDATE chat_session SET title = ? WHERE id = ?').run(title, row.id); } catch { /* 老库没这一列就算了 */ }\n\t\trow.title = title;\n\t\tthis.log('info', `[fish-soul] 微信群会话标题改为 ${title}`);\n\t}\n\n\t/** 微信表情偏好：微信只认 GIF 动图，静态图发过去一定不动（平台 → 微信 → 表情）[FS-WECHAT-PANE] */\n\twechatStickerPrefs() {"
+		"new": "\t/**\n\t * [FS-WECHAT-GROUPNAME] 微信的会话标题以前存的是数字群 ID / wxid（微信压根不给名字）。\n\t * 入站现在带着 conversation_name（群名或好友备注），这里把 DSH 会话标题和库里的 title\n\t * 一起改成看得懂的名字 —— 群和私聊都改。\n\t */\n\tasync retitleWechatSession(row, chat) {\n\t\tif (row === null || row === undefined) return;\n\t\tconst isGroup = chat?.chatType === 'group';\n\t\tconst name = String(chat.title ?? '').trim();\n\t\tconst targetId = String(chat.targetId ?? '');\n\t\tif (name === '' || name === targetId) return;\n\t\t// 群和私聊都要改：群以前只剩数字群号，私聊只剩 wxid —— 两种主人那边看都是「没名字」\n\t\tconst title = isGroup ? `微信群·${sanitizeName(name, targetId)}` : await this.chatTitle({ ...chat, title: name });\n\t\tif (String(row.title ?? '') === title) return;\n\t\ttry {\n\t\t\tconst titles = service(this.ctx, 'sessionTitle');\n\t\t\tconst live = this.agentsService()?.get?.(row.session_id);\n\t\t\tconst target = live?.session ?? live;\n\t\t\tif (target !== undefined && target !== null) titles?.rename?.(target, title);\n\t\t} catch { /* 标题不影响功能 */ }\n\t\ttry { this.db.prepare('UPDATE chat_session SET title = ? WHERE id = ?').run(title, row.id); } catch { /* 老库没这一列就算了 */ }\n\t\trow.title = title;\n\t\tthis.log('info', `[fish-soul] 微信会话标题改为 ${title}`);\n\t}\n\n\t/** 微信表情偏好：微信只认 GIF 动图，静态图发过去一定不动（平台 → 微信 → 表情）[FS-WECHAT-PANE] */\n\twechatStickerPrefs() {"
 	},
 	{
 		"id": "wechat-retitle-on-resume",
@@ -46,5 +46,13 @@
 		"marker": "this.wechatConfig().stickerOutboundSwap === true",
 		"old": "\t\tconst wxSwap = platformOf(row.channel_id) === 'wechat' ? this.wechatStickerPrefs() : null;",
 		"new": "\t\t// [FS-WECHAT-GROUPNAME] 出站换图默认关：换过之后 DSH 里看到的那张和微信里真发出去的不是同一张，对不上账。\n\t\t//   要换把配置 wechat.stickerOutboundSwap 设成 true。\n\t\tconst wxSwap = platformOf(row.channel_id) === 'wechat' && this.wechatConfig().stickerOutboundSwap === true ? this.wechatStickerPrefs() : null;"
+	},
+	{
+		"id": "wechat-retitle-per-inbound",
+		"title": "每条微信入站都对一次标题（群名 / 好友备注迟到也能刷新）",
+		"file": "lib/gateway.js",
+		"marker": "[FS-WECHAT-TITLE] 每条入站都对一次标题",
+		"old": "\t\tconst person = this.soul.resolvePerson(m);\n\t\tawait this.decide(m, person, cfg);\n\t}",
+		"new": "\t\tconst person = this.soul.resolvePerson(m);\n\t\tawait this.decide(m, person, cfg);\n\t\t// [FS-WECHAT-TITLE] 每条入站都对齐一次标题：微信群名 / 好友备注常常在会话建好之后才拿得到，\n\t\t// 老会话标题就一直停在数字群号或 wxid 上（主人那边看就是「不显示名字」）。\n\t\ttry {\n\t\t\tconst row = findChatSession(this.db, platformOf(m.channelId), m.channelId);\n\t\t\tif (row !== null) await this.retitleWechatSession(row, m);\n\t\t} catch { /* 标题不影响功能 */ }\n\t}"
 	}
 ]

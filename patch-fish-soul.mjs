@@ -28,6 +28,10 @@
  *                     POST 进来）与 lib/channels/wechat.js（出站通道，打回 WechatAgent），再打 20 处锚点
  *                     （gateway.js 14、index.js 6）：构造参数 / 方法 / 判定 / 出站全部按 channel_id 选通道。
  *                     见 assets/wechat-transport-hunks.json。P7 只管「认人 + 记忆」，消息怎么进出靠这一组。
+ *   P18 proactive-norepeat：主动开口别复读——跨条复读守卫窗口 2 分钟 → 6 小时、取消 12 字以下短句
+ *                     豁免；两次「自己主动开口」至少隔 3 真实小时（虚拟钟加速不再放大频次）；空闲兜底
+ *                     理由按钟点 + 随机角度生成，并把最近自己说过的话摘给模型要求换话题。
+ *                     见 assets/proactive-norepeat-hunks.json。
  *   P12 anti-template：主动找人说话别再「刚看到个 / 刚刷到」开头（太模板、没真人感）——
  *                     behavior.js 提示词新增 [别交代来源]；gateway.js 两处「主动开口」提示词换成
  *                     「开头三条死规矩」；life.js 分享由头改中性措辞；social.js 套话正则扩容到
@@ -40,7 +44,7 @@
  *   node patch-fish-soul.mjs                       # 自动找 ~/.dsh/profiles/<profile>/node_modules/dsh-fish-soul
  *   node patch-fish-soul.mjs --root <插件目录>      # 指定插件目录（含 package.json 的那层）
  *   node patch-fish-soul.mjs --check               # 只报告状态，不改文件
- *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm / share / wechat / wechat-pane / wechat-transport）
+ *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm / share / wechat / wechat-pane / wechat-transport / proactive-norepeat）
  *   node patch-fish-soul.mjs --json                # 结尾额外打印一段机器可读汇总（CI / audit 用）
  *   node patch-fish-soul.mjs --force               # 忽略「已打过」判断，按文件内容重算（谨慎）
  *   node patch-fish-soul.mjs --smoke               # 额外冒烟：真 import 一次插件入口（改了就会自动跑）
@@ -941,6 +945,53 @@ function patchWechatPane() {
 	patchHunks({ tag: 'P8 wechat-pane', label: '平台 → 微信设置页 + 微信表情只发动图', jsonName: 'wechat-pane-hunks.json' });
 }
 
+// ───────────────────────── P17：微信服务开关（面板上把链路拉起来） ─────────────────────────
+
+/**
+ * 微信这套是「鲸鱼（WhaleGirl）+ soul」两半拼起来的：
+ *   鲸鱼启动器 → 8787 鲸鱼 web（桥从这儿拿登录态）→ 8899 出站 → 11233 soul 入站。
+ * DSH 重启、机器重开、鲸鱼被关掉之后，这三段**不会自己回来**，以前只能靠人去任务管理器/
+ * 命令行把 WhaleLauncher.exe、server.js、python 桥一个个点起来，远程指挥时尤其费劲。
+ *
+ * 这条补丁在「平台 → 微信」页面顶部加一块「微信服务」：
+ *   ① 状态：鲸鱼启动器在不在、8787/8899/11233 通不通、最后一次收到/发出微信消息几点；
+ *   ② 一键拉起：按下后按「鲸鱼 → server.js → python 桥」补缺，已在跑的不重复拉，
+ *      每个端口等最多 ~25s 再报成败。只启动，不关闭（关掉链路=她当场失联，不敢做成一键）；
+ *   ③ 新增 lib/wechat-services.js（整文件落地）+ routes.js 两处锚点（import 与路由转发）。
+ *      见 assets/wechat-services-hunks.json，页面部分在 assets/client.wechat.js 里（P8 整文件）。
+ */
+function patchWechatServices() {
+	log('\n[P17 wechat-services] 微信服务开关（面板上看状态 / 一键拉起）');
+	const tpl = join(HERE, 'assets', 'wechat-services.js');
+	const target = join(lib, 'wechat-services.js');
+	if (!existsSync(tpl)) {
+		failed += 1;
+		note('P17 wechat-services', 'DRIFT', '仓库里缺 assets/wechat-services.js');
+		log('  × 缺 assets/wechat-services.js');
+		return;
+	}
+	const body = readFileSync(tpl, 'utf8');
+	if (existsSync(target) && sameText(readFileSync(target, 'utf8'), body)) {
+		skipped += 1;
+		note('P17 wechat-services', 'ALREADY', 'lib/wechat-services.js 已是当前版本');
+		log('  · lib/wechat-services.js 已是最新，跳过');
+	} else if (CHECK) {
+		log('  [check] 会写 lib/wechat-services.js');
+		note('P17 wechat-services', 'DRIFT', '[check] 待写 lib/wechat-services.js');
+	} else {
+		if (existsSync(target)) {
+			mkdirSync(backupDir, { recursive: true });
+			const bak = join(backupDir, 'wechat-services.js');
+			if (!existsSync(bak)) copyFileSync(target, bak);
+		}
+		writeFileSync(target, body, 'utf8');
+		changed += 1;
+		note('P17 wechat-services', 'PATCHED', '新增 lib/wechat-services.js');
+		log('  ✓ 新增 lib/wechat-services.js');
+	}
+	patchHunks({ tag: 'P17 wechat-services', label: '微信服务 —— routes 接入 /channels/wechat-services', jsonName: 'wechat-services-hunks.json' });
+}
+
 // ───────────────────────── P9：微信运输层（消息怎么进出） ─────────────────────────
 
 /**
@@ -1089,12 +1140,36 @@ function smokeLoad() {
 	log(`\n× 冒烟失败：补丁写进去了但插件加载不了（宿主会报 "did not activate"）\n${tail}`);
 }
 
+function patchStickerTaggedImg() {
+	const id = 'P21 sticker-tagged-img';
+	// 模型有时把表情写成 `![表情: 描述](_stickers/x.gif)`——标签和路径都写全了。
+	// 原逻辑会把 `[表情: 描述]` 当成占位符单独换掉，markdown 于是碎成 `!(_stickers/x.gif)`：
+	// 微信侧靠自己的换图逻辑还能糊过去，QQ 侧认不出这是图片，直接把 `_stickers/x.gif` 当文字发，
+	// 用户看到的就是一条 gif 文件名。这里先把这种写法改成正经的 `![描述](_stickers/x.gif)`。
+	replaceOnce(
+		'stickers.js',
+		'\t\tconst hits = [...src.matchAll(/\\[表情\\s*[:：]\\s*([^\\]\\n]{1,80})\\]/g)];\n' +
+			'\t\tif (hits.length === 0) return { text, resolved: [] };\n' +
+			'\t\tlet out = src;',
+		'\t\t// [FS-MEME-TAGGED-IMG] 标签和路径都写全了：只把标签改成正经 alt，别把中括号那段剥掉。\n' +
+			'\t\t// 剥掉以后 markdown 会碎成 `!(_stickers/x.gif)`，IM 出站认不出是图，QQ 就显示成文件名。\n' +
+			'\t\tlet pre = src.replace(/!\\[表情\\s*[:：]\\s*([^\\]\\n]{1,80})\\]\\(\\s*([^)\\s]+)\\s*\\)/g,\n' +
+			"\t\t\t(_w, _d, _p) => '![' + String(_d).trim().replace(/[[\\]]/g, '') + '](' + _p + ')');\n" +
+			'\t\tconst hits = [...pre.matchAll(/\\[表情\\s*[:：]\\s*([^\\]\\n]{1,80})\\]/g)];\n' +
+			'\t\tif (hits.length === 0) return { text: pre, resolved: [] };\n' +
+			'\t\tlet out = pre;',
+		'表情标签自带图片路径时只改名、不剥标记（QQ 端不再显示成 gif 文件名）',
+		'FS-MEME-TAGGED-IMG',
+	);
+}
+
 // ───────────────────────────── 主流程 ─────────────────────────────
 
 log(`dsh-fish-soul ${pkg.version} → ${root}`);
 if (CHECK) log('（--check：只看状态，不改文件）');
 try {
 	if (ONLY === '' || ONLY === 'meme') patchMeme();
+	if (ONLY === '' || ONLY === 'sticker-tagged-img') patchStickerTaggedImg();
 	if (ONLY === '' || ONLY === 'douyin')
 		patchHunks({ tag: 'P2 douyin', label: 'douyin-social —— 回评论发不出 / 图文无 BGM', jsonName: 'douyin-hunks.json' });
 	if (ONLY === '' || ONLY === 'remount')
@@ -1117,7 +1192,15 @@ try {
 		patchHunks({ tag: 'P15 wechat-voice', label: '微信 —— 能发语音（补语音指令 + 平台支持语音）', jsonName: 'wechat-voice-hunks.json' });
 	if (ONLY === '' || ONLY === 'wechat-groupmatch')
 		patchHunks({ tag: 'P16 wechat-groupmatch', label: '微信 —— 群白名单匹配归一化（@chatroom 与纯数字群号同一个群）', jsonName: 'wechat-groupmatch-hunks.json' });
+	if (ONLY === '' || ONLY === 'proactive-norepeat')
+		patchHunks({ tag: 'P18 proactive-norepeat', label: '主动开口别复读 —— 守卫 6 小时 + 主动间隔 3 真实小时 + 理由扰动', jsonName: 'proactive-norepeat-hunks.json' });
+	if (ONLY === '' || ONLY === 'share-talking')
+		patchHunks({ tag: 'P19 share-talking', label: '分享视频别说得那么空 —— 热评 / 画面 / 现成分享语一起进提示词', jsonName: 'share-talking-hunks.json' });
+	if (ONLY === '' || ONLY === 'wechat-consecutive')
+		patchHunks({ tag: 'P20 wechat-consecutive', label: '微信 —— 同人连发文字合并成一组再回（不再只答其中一句）', jsonName: 'wechat-consecutive-hunks.json' });
+	if (ONLY === '' || ONLY === 'wechat-services') patchWechatServices();
 	if (ONLY === '' || ONLY === 'moments') patchMoments();
+if (ONLY === '' || ONLY === 'sticker-action') patchShortAction();
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;
@@ -1148,5 +1231,51 @@ if (has('--json')) {
 				null,
 				2
 			)
+	);
+}
+
+var A_OLD = "const ACTION_HEAD = /^(?:她|鱼|小鱼)?(?:轻轻|微微|默默|悄悄|偷偷|慢慢|缓缓|小声地?|低声|歪|眨|揉|摸|拍|笑|叹|挠|托|抱|蹭|戳|探|翻|撇|嘟|鼓|眯|伸|扭|撅|捂|捏|晃|摇|点了点|点点|低下|抬起|抬头|低头|转身|转过|凑|靠|躺|趴|打了个|打个|吐了吐|吐吐|咬|舔|皱|瞪|红着|脸红|脸一红|耳朵|尾巴|双手|一边|眼睛|眼神|声音|嘴角|嘟囔|嘀咕|扶额|捂脸|叉腰|耸肩|摊手|托腮)/;\nfunction looksLikeAction(inner) {";
+var A_NEW = "const ACTION_HEAD = /^(?:她|鱼|小鱼)?(?:轻轻|微微|默默|悄悄|偷偷|慢慢|缓缓|小声地?|低声|歪|眨|揉|摸|拍|笑|叹|挠|托|抱|蹭|戳|探|翻|撇|嘟|鼓|眯|伸|扭|撅|捂|捏|晃|摇|点了点|点点|低下|抬起|抬头|低头|转身|转过|凑|靠|躺|趴|打了个|打个|吐了吐|吐吐|咬|舔|皱|瞪|红着|脸红|脸一红|耳朵|尾巴|双手|一边|眼睛|眼神|声音|嘴角|嘟囔|嘀咕|扶额|捂脸|叉腰|耸肩|摊手|托腮)/;\n// [FS-BRACKET-SHORT] 只有身体动作才认（\"歪头\"\"戳屏幕\"\"揉眼睛\"）——\n// \"（笑死）\"\"（笑哭）\"\"（bushi）\"这类网上常见的短括号不删。\nconst BODY_HEAD = /^(?:她|鱼|小鱼)?(?:歪|戳|揉|摸|拍|挠|托|抱|蹭|探|翻|撇|嘟|鼓|眯|伸|扭|撅|捂|捏|晃|摇|点|低|抬|转|凑|靠|躺|趴|咬|舔|皱|瞪|叹|咳|搓|叉腰|耸肩|摊手|托腮|眨眼|扶额|捂脸)/;\nfunction looksLikeAction(inner) {";
+var B_OLD = "\tif (han >= 4 && (ACTION_HEAD.test(s) || (/[了着]/.test(s) && !/[我你]/.test(s)))) return true;";
+var B_NEW = "\tif (han >= 4 && (ACTION_HEAD.test(s) || (/[了着]/.test(s) && !/[我你]/.test(s)))) return true;\n\t// 2~3 个汉字的短动作（歪头 / 戳屏幕 / 揉眼睛）：以前因为字数不够被放行，\n\t// 现场就是她一条回复里带「（歪头）（戳屏幕）」，看着特别不自然。\n\tif (/^笑死|^笑哭|^大笑/.test(s)) return false;\n\treturn BODY_HEAD.test(s);";
+var C_OLD = "\t\t\tlines.push(...voiceLines({ v: voiceConfig(currentConfig.voice, currentConfig.embedding), ttsReady: voice.readyFor('tts'), session, speakers, where: 'QQ' }));";
+var C_NEW = "\t\t\t// [FS-STICKER-UNKNOWN] QQ 侧表情包只传过来「【表情图】」四个字、没有画面描述，\n\t\t\t// 以前她会硬猜那是什么表情（\"这个表情好怪啊\"），或者反问对方什么意思。\n\t\t\tlines.push('[看不到的表情] 对方发来「【表情图】」「【图片】」这类你看不到画面的消息时，别猜画面里是什么、也别让对方解释；随口接一句、或者也发个自己的表情就行。同一句里要是还有对方打的字，就按字回。');\n\t\t\tlines.push(...voiceLines({ v: voiceConfig(currentConfig.voice, currentConfig.embedding), ttsReady: voice.readyFor('tts'), session, speakers, where: 'QQ' }));";
+var D_OLD = "\t\t\t\tlines.push(`[上网] 遇到你不知道或者可能过时的事（新闻、比赛、新出的东西、没听过的梗），可以先用 ${webToolName()} 查；回复里别贴链接、别用 markdown，像聊天一样用自己的话说。`);";
+var D_NEW = "\t\t\t\tlines.push(`[上网] 遇到你不知道或者可能过时的事（新闻、比赛、新出的东西、没听过的梗），可以先用 ${webToolName()} 查；回复里别贴链接、别用 markdown，像聊天一样用自己的话说。`);\n\t\t\t\t// [FS-STICKER-LOOKUP] 对方发的表情包，你只拿到一段画面描述。形象不认识、\n\t\t\t\t// 梗或画面文字看不懂时，先查一下它是什么、平时用来表达什么情绪，再顺着接话。\n\t\t\t\tlines.push(`[看不懂的表情包] 对方发来表情包时，你手上只有画面描述。要是描述里的形象你不认识、或者看不出这表情想表达什么（不知道是\"无语\"\"嘲讽\"还是\"撒娇\"），可以先用 ${webToolName()} 查一下（比如搜「XX 表情包 什么意思」「这个梗 出处」）；查到就顺着意思自然接一句、或者也回个表情，别反问对方\"你发的这是什么意思\"让人家解释；查不到就随口应一句，别编里面的内容。`);";
+
+// P22：QQ/微信上「（歪头）（戳屏幕）」这种两三个字的括号动作、看不懂的表情包
+function patchShortAction() {
+	const id = 'P22 sticker-action';
+	// 1) behavior.js 去 AI 味：两三个字的身体动作也算动作描写，发出去前删掉。
+	// 以前只认 4 个汉字以上的（"（揉了揉眼睛）"），"（歪头）""（戳屏幕）"因为字数不够被放行，
+	// 现场就是一条回复里挂俩括号动作，看着特别假。
+	replaceOnce(
+		'behavior.js',
+		A_OLD,
+		A_NEW,
+		'新增 BODY_HEAD：只把身体动作（歪头 / 戳屏幕 / 揉眼睛）认成动作描写，笑死 / 笑哭 / bushi 这类短括号不动',
+		'FS-BRACKET-SHORT',
+	);
+	replaceOnce(
+		'behavior.js',
+		B_OLD,
+		B_NEW,
+		'2~3 个汉字的短动作也删（歪头 / 戳屏幕），不再因为字数不够被放行',
+		'BODY_HEAD.test(s)',
+	);
+	// 2) index.js：QQ 侧表情包只传「【表情图】」四个字，别硬猜画面；微信侧看不懂的表情包先上网查含义。
+	replaceOnce(
+		'index.js',
+		C_OLD,
+		C_NEW,
+		'QQ 侧提示词：看不到画面的表情包别猜、别让对方解释',
+		'FS-STICKER-UNKNOWN',
+	);
+	replaceOnce(
+		'index.js',
+		D_OLD,
+		D_NEW,
+		'微信侧提示词：不认识的表情包先联网查它表达什么，别反问对方',
+		'FS-STICKER-LOOKUP',
 	);
 }

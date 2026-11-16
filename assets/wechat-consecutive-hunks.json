@@ -1,0 +1,26 @@
+[
+	{
+		"id": "wechat-consecutive-buffer",
+		"title": "微信入站：同人连发文字先在窗口内攒成一组，到点只决策一次",
+		"file": "lib/gateway.js",
+		"marker": "bufferWechatText(m, person, cfg)",
+		"old": "\t\tconst person = this.soul.resolvePerson(m);\n\t\tawait this.decide(m, person, cfg);\n\t\t// [FS-WECHAT-TITLE]",
+		"new": "\t\tconst person = this.soul.resolvePerson(m);\n\t\tawait this.decide(m, person, cfg);\n\t\t// [FS-WECHAT-TITLE]"
+	},
+	{
+		"id": "wechat-consecutive-method",
+		"title": "微信入站：新增 bufferWechatText（连发合并窗口 + 合并后统一 decide + 记录条数）",
+		"file": "lib/gateway.js",
+		"marker": "bufferWechatText(m, person, cfg) {",
+		"old": "\t/** 微信原始 payload → 与 normalizeMessageEvent 同形的消息对象。 */\n",
+		"new": "\t/**\n\t * [FS-WECHAT-CONSECUTIVE] 微信连发合并窗口。\n\t *\n\t * 同一个会话里同一个人连着发的纯文本，先在窗口内攒成一组，到点只走一次 decide：\n\t * 这一组算「一条主消息」，里面每句都完整进模型，一起理解、一起回，而不是逐条掷概率\n\t * 造成「回了一句、漏了两句」。图片 / 语音 / 文件 / 合并转发不进缓冲，遇到就先放行\n\t * 已攒的那组，保证消息顺序不错位。\n\t *\n\t * 窗口取 batchMs（默认 800），夹在 2 秒到 8 秒之间：太短合不上连发，太长整个微信都变慢。\n\t * 窗口不因后续消息重置——按第一条起算，延迟可预期。\n\t *\n\t * @returns {boolean} true 表示这条已进缓冲，调用方不要再 decide。\n\t */\n\tbufferWechatText(m, person, cfg) {\n\t\tconst wait = Math.max(2000, Math.min(Number(cfg?.batchMs) || 0, 8000));\n\t\tthis.wechatTextBuf ??= new Map();\n\t\tconst key = m.channelId;\n\t\tconst flushKey = () => {\n\t\t\tconst buf = this.wechatTextBuf.get(key);\n\t\t\tif (buf === undefined) return;\n\t\t\tthis.wechatTextBuf.delete(key);\n\t\t\tif (buf.timer !== null) clearTimeout(buf.timer);\n\t\t\tconst items = buf.items;\n\t\t\tconst last = items[items.length - 1];\n\t\t\tif (last === undefined) return;\n\t\t\tconst merged = { ...last.m };\n\t\t\tif (items.length > 1) {\n\t\t\t\tmerged.text = items.map((x) => String(x.m.text ?? '')).filter((t) => t.trim() !== '').join('\\n');\n\t\t\t\tmerged.mentioned = items.some((x) => x.m.mentioned === true);\n\t\t\t\t// 记下这一组到底几句：下游据此提醒模型「每句都要接」，别再只挑一句回\n\t\t\t\tmerged.batchCount = items.length;\n\t\t\t\t// 一组里后面有人 @ 过，整组就当点名处理；时间戳取最后一条，别被首条的旧时间误判成过期\n\t\t\t\tmerged.timeMs = last.m.timeMs;\n\t\t\t\tthis.log('info', `[fish-soul][wechat-merge] 合并 ${items.length} 条连发文字一起处理 channel=${key}`);\n\t\t\t}\n\t\t\tPromise.resolve()\n\t\t\t\t.then(() => this.decide(merged, last.person, this.wechatConfig()))\n\t\t\t\t.catch((error) => this.log('warn', `[fish-soul][wechat-merge] decide 失败：${String(error)}`));\n\t\t};\n\t\tconst pureText = (m.images ?? []).length === 0 && (m.records ?? []).length === 0\n\t\t\t&& (m.files ?? []).length === 0 && (m.forwards ?? []).length === 0;\n\t\tif (!pureText) {\n\t\t\t// 非文本（图片 / 语音 / 文件）先让前面攒的文字走完，再处理自己，顺序不乱\n\t\t\tflushKey();\n\t\t\treturn false;\n\t\t}\n\t\tconst buf = this.wechatTextBuf.get(key);\n\t\tif (buf !== undefined) {\n\t\t\tbuf.items.push({ m, person });\n\t\t\treturn true;\n\t\t}\n\t\tconst next = { items: [{ m, person }], timer: null };\n\t\tthis.wechatTextBuf.set(key, next);\n\t\tnext.timer = setTimeout(flushKey, wait);\n\t\tnext.timer.unref?.();\n\t\treturn true;\n\t}\n\n\t/** 微信原始 payload → 与 normalizeMessageEvent 同形的消息对象。 */\n"
+	},
+	{
+		"id": "wechat-consecutive-hint",
+		"title": "微信入站：合并多条时提示模型「每句都要接」，别只挑一句答",
+		"file": "lib/gateway.js",
+		"marker": "上面 ${batched} 句是连着发过来的",
+		"old": "\t\t\tlines.push(chat.chatType === 'group' ? `${sanitizeName(m.nickname || m.userId, m.userId)}：${flat}` : body);\n\t\t}\n",
+		"new": "\t\t\tlines.push(chat.chatType === 'group' ? `${sanitizeName(m.nickname || m.userId, m.userId)}：${flat}` : body);\n\t\t}\n\t\t// [FS-WECHAT-CONSECUTIVE] 微信同一个人连发多句被攒成一条时，把「每句都要接」说清楚：\n\t\t// 只说「合并成一条」模型会当成一句话，挑信息量大的答，撒娇或想念那类就被丢了。\n\t\tif (platform === 'wechat') {\n\t\t\tconst batched = items.reduce((sum, { m }) => sum + (Number(m.batchCount) || 1), 0);\n\t\t\tif (batched > 1) {\n\t\t\t\tlines.push(`（上面 ${batched} 句是连着发过来的，一句都不能漏：问的要答，撒娇、想念这类话也要回应；自然地说成一段，别一句一句机械复述）`);\n\t\t\t}\n\t\t}\n"
+	}
+]

@@ -138,7 +138,7 @@ function Remove-Sink {
 
 # A hashtable, not a PSCustomObject: ConvertFrom-Json hands back an object that rejects
 # assignment to any property it did not already have ("在此对象上找不到属性…").
-$state = @{ voiceUp = $null; snowUp = $null; sinkUp = $null; qqMissingLogged = $false; snowFails = 0; lastTokenRefresh = ''; lastSessionCheck = ''; lastWhalegirlPatch = ''; hostGoneSince = '' }
+$state = @{ voiceUp = $null; snowUp = $null; sinkUp = $null; qqMissingLogged = $false; snowFails = 0; lastTokenRefresh = ''; lastSessionCheck = ''; lastBridgeGuard = ''; bridgeGuardFails = 0; lastWhalegirlPatch = ''; hostGoneSince = '' }
 try {
   if (Test-Path $stateFile) {
     $loaded = Get-Content $stateFile -Raw | ConvertFrom-Json
@@ -344,6 +344,36 @@ while ($true) {
   } catch {
     Write-Log ("tick error: " + $_.Exception.Message)
   }
+  # --- 8787 whale web / 8899 outbound bridge: dead port -> one-shot repair pass ---
+  try {
+    $bgFails = 0
+    if ($state.bridgeGuardFails) { $bgFails = [int]$state.bridgeGuardFails }
+    $bgInterval = 30
+    if ($bgFails -ge 2) { $bgInterval = [Math]::Min(60 * [Math]::Pow(2, [Math]::Min($bgFails, 5) - 2), 600) }
+    $bgDue = $true
+    if ($state.lastBridgeGuard) {
+      try { $bgDue = ((Get-Date).ToUniversalTime() - [datetime]::Parse($state.lastBridgeGuard, $null, 'RoundtripKind')).TotalSeconds -ge $bgInterval } catch { $bgDue = $true }
+    }
+    if ($bgDue) {
+      $state.lastBridgeGuard = (Get-Date).ToUniversalTime().ToString('o')
+      $webDead = -not (Test-Port 8787)
+      $outDead = -not (Test-Port 8899)
+      if ($webDead -or $outDead) {
+        $which = @()
+        if ($webDead) { $which += '8787' }
+        if ($outDead) { $which += '8899' }
+        $state.bridgeGuardFails = [Math]::Min($bgFails + 1, 6)
+        Write-Log ('bridge-guard: port dead -> ' + ($which -join '+') + ', spawning repair pass (fail ' + $state.bridgeGuardFails + ', next check in ' + $bgInterval + 's)')
+        $null = Start-Hidden 'C:\Users\Administrator\.dsh\wechat-bridge-guard.vbs'
+      } elseif ($bgFails -ne 0) {
+        $state.bridgeGuardFails = 0
+        Write-Log 'bridge-guard: all ports healthy again, backoff reset'
+      }
+    }
+  } catch {
+    Write-Log ("bridge-guard error: " + $_.Exception.Message)
+  }
+
   Start-Sleep -Seconds 8
 }
 
