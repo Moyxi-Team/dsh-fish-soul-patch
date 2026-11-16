@@ -51,6 +51,37 @@
 
 状态取自 [`reports/upstream-compatibility.md`](reports/upstream-compatibility.md)（对着 npm 最新版自动体检生成，每周更新一次）。带 `douyin-` / `index-` / `client-` / `routes-` 前缀的都是小块锚点：抖音五处看 [`assets/douyin-hunks.json`](assets/douyin-hunks.json)，人格段两处看 [`assets/index-hunks.json`](assets/index-hunks.json)，个人插件页五处看 [`assets/plugins-hunks.json`](assets/plugins-hunks.json)（外加新文件 [`assets/plugins-route.js`](assets/plugins-route.js)），刷到的分享改卡片九处看 [`assets/share-hunks.json`](assets/share-hunks.json)，微信互通二十二处看 [`assets/wechat-hunks.json`](assets/wechat-hunks.json)，平台 → 微信设置页二十二处看 [`assets/wechat-pane-hunks.json`](assets/wechat-pane-hunks.json)（外加新文件 [`assets/client.wechat.js`](assets/client.wechat.js)），微信运输层二十处看 [`assets/wechat-transport-hunks.json`](assets/wechat-transport-hunks.json)（外加新文件 [`assets/wechat-inbound.js`](assets/wechat-inbound.js) / [`assets/channels.wechat.js`](assets/channels.wechat.js)），逐处替换、不再整文件覆盖。每一处的 id / 目标文件 / 改了什么 / 锚点原文，见 [`docs/patches.md`](docs/patches.md)（`tools/gen-patch-docs.mjs` 从上述 JSON 生成，不手写）。
 
+## 鲸鱼侧补丁（WhaleLauncher 桥，W1 / W2 / W3）
+
+> 这一组不打在 dsh 插件上，而是打在**本机 WhaleLauncher（WhaleGirl）**的运行目录，用来把微信通道接到 dsh 的「希希」上。入口是 `patch-whalegirl.mjs`，与 `patch-fish-soul.mjs` 相互独立，可单独跑。
+
+| 组 | 改的文件 | 改了什么 | 为什么需要 |
+| --- | --- | --- | --- |
+| W1 `bridge-forward` | `src/http/routes/bridge.js` | 加 `[WHALE-DSH-FORWARD]` 段：桥收到微信入站后先 POST 给 dsh 的 `11233/fish-soul/wechat/inbound`，再对桥返回 `action='none'` | 不加这段，桥会自己用「鲸鲸」人格回话；加了之后鲸鲸只当传声筒，决策与回复都归 dsh 的希希 |
+| W2 `app-outbound` | `bridge/app.py` | 在 `BridgeRuntime.start()` 里恢复 `outbound_api` 的 `bind + start`（`[WHALE-DSH-OUTBOUND]`） | 不加这段，`127.0.0.1:8899/outbound` 不监听，dsh 有想法也发不出微信 |
+| W3 `probe-clean` | `bridge/bg_sender.py` | `send()` 里输入框非空时，原本只打一行日志就 `return input_not_empty`；改成确认是编码探测残留（`_PROBE_TEXTS` = 鲸 / ¾¨ / 笢）就先调 `_clear_composer` 清空，复查为空继续发，清不干净才拒发（`[WHALE-PROBE-CLEAN]`，替换式） | 探测字一旦留在框里，这个会话从此一条也发不出去：日志写着「删掉后再发」，代码却没有删 |
+
+**开关**：W1 只看 `WhaleGirl/data/dsh-forward.json`，`{"enabled":true,"url":"http://127.0.0.1:11233/fish-soul/wechat/inbound","token":"","timeoutMs":8000}`；删掉文件或 `enabled=false` 即退回鲸鲸本体。W2 没有单独开关，随 python 桥启动。
+
+**为什么会被冲掉**：鲸鱼 App 自己更新时是整文件替换 `bridge.js` / `app.py` / `bg_sender.py`，三段补丁随之消失，症状是「微信群里希希不说话、只剩鲸鲸自作主张」。所以：
+
+1. 鲸鱼更新后手动跑一次 `node patch-whalegirl.mjs`（或 `pnpm patch`，会连带跑 dsh 侧）；
+2. `services/fish-stack-watchdog.ps1` 里已加**每 10 分钟静默重放一次**（幂等，标记还在就什么都不动），补上后只在日志记一行 `whalegirl patch replayed`，**不擅自重启鲸鱼**——要让改动生效仍需重启 8787 与 python 桥；
+3. 判定中文输出在 PowerShell 5.1 下会按 GBK 解码成乱码，看门狗改用英文标记 `PATCH_APPLIED` 判断是否真的补过。
+
+**部署提醒**：`services/` 下的脚本不是自动安装的，改了要自己同步到运行位置（看门狗读的是 `~/.dsh/fish-stack-watchdog.ps1`）：
+
+```powershell
+Copy-Item .\services\fish-stack-watchdog.ps1 C:\Users\<你>\.dsh\fish-stack-watchdog.ps1 -Force
+# 然后杀掉旧的 powershell 实例，用 fish-stack-watchdog.vbs 重新拉起（wscript //B //Nologo）
+```
+
+**验证**：`node patch-whalegirl.mjs --check` 三处都在位（W1 / W2 / W3）；`netstat` 看 8787 / 8899 / 11233 三个端口都在听；`curl http://127.0.0.1:8899/outbound` 返 `{"ok":true,"ready":true}`；微信里发一句，`soul.db` 的微信入站时间会刷新。
+
+**W3 实测证据**（2026-11-16）：群消息注入后桥日志依次出现 `后台通道：核对 目标=… → 通过` → `已清掉编码探测残留的「鲸」，继续发送（不是用户草稿）` → `编码实测 → utf16` → `后台通道发送成功（sent，4.5s）`；此前同一路径停在 `input_not_empty`。W3 是替换式补丁：目标文件已含 `WHALE-PROBE-CLEAN` 即 `ALREADY`，原文段被上游大改则报 `DRIFT`（不乱改）。
+
+**回滚**：每次打补丁前脚本会把原文件备份到 `~/.dsh/backup/whalegirl-patch-<时间戳>/`，拷回去重启鲸鱼即可。
+
 ## 用法
 
 ```bash
@@ -118,6 +149,7 @@ DSH 启动时会按 profile 的 `package.json` + `pnpm-lock.yaml` 做依赖安�
 
 ```
 patch-fish-soul.mjs    补丁器：版本无关、幂等、三态判定、可自动退役
+  patch-whalegirl.mjs    鲸鱼侧（WhaleLauncher）W1 入站转发 / W2 8899 出站启动，独立于 dsh 插件
 audit-upstream.mjs     上游体检：对 npm 最新版判断每处补丁还有没有用
 AGENTS.md              给 Agent 的作业单：上游更新时怎么最快判兼容 / 漂移了按什么顺序修
 assets/

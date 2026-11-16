@@ -1,9 +1,53 @@
 # 变更说明（补丁仓，非插件本体）
+## 未编号（W3 probe-clean + 微信群放行 P16，2026-11-16）：入站通了、出站被探测草稿堵死
+
+**症状**：群里 @希希 有反应（dsh 侧 07:34:05 已生成「在呢」并写进 `chat-archive.db`），但微信里一个字都没出来；桥日志停在 `input_not_empty`。
+
+**根因（两处，先后叠加）**：
+1. dsh 侧闸门：`wechat.groupAllowList` 存的是纯数字群号，入站 `targetId` 带 `@chatroom` 后缀，`includes` 永远不命中 → 群消息被静默丢弃（P16 `wechat-groupmatch`，`gateway.js` 改 1 处、0 漂移）。
+2. 鲸鱼侧出站：`bridge/bg_sender.py` 的 `send()` 在输入框非空时**只记日志就 `return input_not_empty`**，而框里的「鲸」是 `detect_char_mode` 探测留下的残留（`_PROBE_TEXTS`）。注释写着「删掉后再发」，代码并没有删 —— 于是这个群永久发不出去。
+
+**新增**：`patch-whalegirl.mjs` 第三组 `W3 probe-clean`——识别为探测残留时先 `_clear_composer(hwnd, edit)` 清空，复查为空就继续发，清不掉才 `return input_dirty`；用户真实草稿（非 `_PROBE_TEXTS`）仍按原逻辑 `input_not_empty` 拒发。整组替换式（`replaceOnce`），标记 `WHALE-PROBE-CLEAN`。
+
+**验证（本机实测）**：
+- 覆盖演练：未打补丁的官方 `bg_sender.py` 放进临时 root → `node patch-whalegirl.mjs --root …` 输出 `PATCHED 1`，补后 `py_compile` 通过；再跑一次 → `ALREADY`（幂等）。
+- 真机：重启 python 桥后注入群消息，桥日志 `核对 目标 → 通过` → `已清掉编码探测残留的「鲸」，继续发送（不是用户草稿）` → `编码实测 → utf16` → `后台通道发送成功（sent，4.5s）`；dsh 侧同时产出回复，微信端真实投递。
+- 端口 8787 / 8899 / 11233 全在听；`node patch-whalegirl.mjs --check` 三组均 `ALREADY`。
+
+**状态**：本机已修到「微信群里希希能说话、dsh 回复能发出去」。补丁仓改动仍未 git 提交（按惯例等确认后统一提交）。
+
 
 本文件记录本仓库每次打给 `dsh-fish-soul`（已安装那一份）的补丁改动：改了什么、开关在哪、配额怎么算、怎么验证、怎么回滚。
 不含上游源码，也不改上游版本号。
 
 ---
+
+## 未编号（鲸鱼桥 W1/W2 固化 + 看门狗自动重放，2026-11-16）：微信被鲸鱼更新冲回鲸鲸人格
+
+**症状**：微信群里希希不说话，回话的是鲸鲸自己的口气；`8899` 也不再监听，dsh 侧回复发不出去。
+
+**根因**：鲸鱼 App 2026-11-15 22:09 的更新把 `src/http/routes/bridge.js` 与 `bridge/app.py` 整文件换回官方版，两段本地补丁一起消失——
+- `bridge.js` 的 `[WHALE-DSH-FORWARD]` 段（入站 POST 到 dsh `11233/fish-soul/wechat/inbound` 后返回 `action='none'`）没了，桥退回自己回话；
+- `app.py` 的 `BridgeRuntime.start()` 里 `outbound_api` 的 `bind + start` 调用没了（`[WHALE-DSH-OUTBOUND]`），`127.0.0.1:8899/outbound` 不监听。
+`data/dsh-forward.json` 本身完好（`enabled=true`、url 指向 11233），所以不是开关问题。
+
+**新增**：
+- `patch-whalegirl.mjs`——鲸鱼侧独立补丁入口，W1 `bridge-forward` / W2 `app-outbound` 两组，按 `WHALE-DSH-FORWARD` / `WHALE-DSH-OUTBOUND` 标记判 `ALREADY` / `PATCHED` / `DRIFT`，改前备份到 `~/.dsh/backup/whalegirl-patch-<时间戳>/`，`--check` 只判定不写盘。
+- `package.json`：`patch` / `check` 改成先跑 `patch-fish-soul.mjs` 再跑 `patch-whalegirl.mjs`；另加 `patch:whalegirl` / `check:whalegirl`。
+- `services/fish-stack-watchdog.ps1`：主循环加 whalegirl patch guard，每 10 分钟静默重放一次（幂等），补上只写日志 `whalegirl patch replayed, restart WhaleLauncher to take effect`，**不擅自重启鲸鱼**；state 加 `lastWhalegirlPatch` 键。
+
+**验证（本机实测）**：
+- `node patch-whalegirl.mjs --check` → 两组均在位；`node --check bridge.js`、`py_compile app.py` 均通过；输出与手写验证版逐字节一致（bridge.js 7616 字符 / app.py 19086 字符）。
+- **覆盖演练**：把 `bridge.js` / `app.py` 换回官方原版（标记数归零），把 state 的 `lastWhalegirlPatch` 清零，重启看门狗 26 秒后标记自动回到 5 处 / 1 处，日志出现 `whalegirl patch replayed ... PATCH_APPLIED 1`，被冲掉的文件已被脚本备份。
+- 重启后端口：8787（node server.js）/ 8899（python 桥）/ 11233（dsh 入站）全在听；`GET 8899/outbound` 返 `{"ok":true,"ready":true}`；`data/bridge-ready.json` 由 python 桥在 06:36 重新写入；`POST 11233/fish-soul/wechat/inbound`（白名单外的假群）返 `{"ok":true,"accepted":1}`，即转发目的地可用且不会误发消息。
+
+**踩坑备忘**：
+- 看门狗实际运行的是 `~/.dsh/fish-stack-watchdog.ps1`，**不是**仓库里的 `services/` 副本——只改仓库等于没改，必须同步过去再重启实例（本轮踩过一次：改完 state 里迟迟没有 `lastWhalegirlPatch`，就是因为跑的还是 11-12 的旧副本）。
+- PowerShell 5.1 从 node 捕获 stdout 时按 GBK 解码，中文「已补上」匹配不上，改用英文标记 `PATCH_APPLIED`。
+- 捕鲸鱼更新后不会自动重启服务，补丁补上后仍需重启 8787 与 python 桥才生效。
+
+**状态**：本机已修复并固化；补丁仓改动**仍未 git 提交**（等确认后统一提交）。
+
 
 ## 未编号（本机升到 0.16.6 + 幂等缺陷修复，2026-11-15）：补齐安装落地
 

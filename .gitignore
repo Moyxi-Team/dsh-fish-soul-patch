@@ -17,3 +17,4 @@ RISKS.md
 history/
 *.bak
 *.orig
+*.bak.*
