@@ -1,0 +1,34 @@
+[
+  {
+    "id": "wechat-voice-signature",
+    "title": "语音 —— voiceLines 认 canVoice：平台自己就能发语音时不走「发不了」分支",
+    "file": "lib/voice.js",
+    "marker": "canVoice = false }) {",
+    "old": "export function voiceLines({ v, ttsReady = false, session = {}, speakers = [], where = 'QQ', relay = false }) {",
+    "new": "export function voiceLines({ v, ttsReady = false, session = {}, speakers = [], where = 'QQ', relay = false, canVoice = false }) {"
+  },
+  {
+    "id": "wechat-voice-branch",
+    "title": "语音 —— 「能不能发」的判据：QQ 或平台自己支持语音（微信走鲸鱼语音网关）",
+    "file": "lib/voice.js",
+    "marker": "where === 'QQ' || canVoice === true",
+    "old": "\tif (where === 'QQ') {",
+    "new": "\tif (where === 'QQ' || canVoice === true) {"
+  },
+  {
+    "id": "wechat-voice-comment",
+    "title": "语音 —— 注释同步：微信也算能发",
+    "file": "lib/voice.js",
+    "marker": "QQ / 微信（canVoice）",
+    "old": " *  - QQ：能发（「偶尔自己想发」/ 对方发了语音 / 对方点名要）就教她怎么写；点名要了却发不了就让她直说；",
+    "new": " *  - QQ / 微信（canVoice）：能发（「偶尔自己想发」/ 对方发了语音 / 对方点名要）就教她怎么写；点名要了却发不了就让她直说；"
+  },
+  {
+    "id": "wechat-voice-index",
+    "title": "微信 —— replyIsWechat 分支补语音指令（以前模型从来不知道能写 [语音] 段）",
+    "file": "lib/index.js",
+    "marker": "[FS-WECHAT-VOICE]",
+    "old": "wxMemeRule);\n",
+    "new": "wxMemeRule);\n\t\t\t// [FS-WECHAT-VOICE] 微信以前没给过语音指令，模型从来不会写 [语音] 段 —— 微信端就永远只有文字。\n\t\t\t// 出站链路是现成的：channels/wechat.js 把 record 段单独投给鲸鱼语音网关（voiceGatewayUrl，默认 8899）。\n\t\t\tlines.push(...voiceLines({ v: voiceConfig(currentConfig.voice, currentConfig.embedding), ttsReady: voice.readyFor('tts'), session, speakers, where: '微信', canVoice: true }));\n"
+  }
+]

@@ -1009,6 +1009,56 @@ function patchWechatTransport() {
 }
 
 /**
+ * P14 朋友圈 B 方案：文案由 dsh 出，鲸鱼（WhaleLauncher）只当「手」。
+ *
+ * 鲸鱼自己那套朋友圈是「自己的 LLM + 自己的人设」，开了就是第二个人格在发；
+ * 这里把它降级成执行器：鲸鱼侧 publishFeatureEnabled=true（发表总开关）、publishEnabled=false
+ * （原生定时生成关掉），文案改由 dsh 读 persona.json 生成，POST 鲸鱼的
+ * /api/moments/publish-external 入队，桥接 claim 后由 moments_publish 操作微信 UI 发表。
+ *
+ * 落地两件事：
+ *  ① 新增 lib/moments.js（整文件资产）：读 persona、拼提示词、预校验、回环 POST、节奏控制
+ *     （wechat.moments 段：enabled / perDay / minGapMinutes / activeHours / publishUrl / withImage）；
+ *  ② index.js 两处锚点（import + 启动时 moments.start()），见 assets/moments-hunks.json。
+ *
+ * 鲸鱼 8787 只绑 127.0.0.1，接口侧用 isLoopbackRequest 兜底，不额外要求 token；
+ * dsh 这边若配了 wechat.inboundToken，会带上 x-bot-token 头，两边都不拦。
+ */
+function patchMoments() {
+	log('\n[P14 moments] 朋友圈 —— 文案由 dsh 出，鲸鱼只当「手」发表');
+	const tpl = join(HERE, 'assets', 'moments.js');
+	const target = join(lib, 'moments.js');
+	if (!existsSync(tpl)) {
+		failed += 1;
+		note('P14 moments', 'DRIFT', '仓库里缺 assets/moments.js，没法落地 lib/moments.js');
+		log('  × 缺 assets/moments.js');
+		return;
+	}
+	const body = readFileSync(tpl, 'utf8');
+	const existed = existsSync(target);
+	if (existed && sameText(readFileSync(target, 'utf8'), body)) {
+		skipped += 1;
+		note('P14 moments', 'ALREADY', 'lib/moments.js 已是当前版本');
+		log('  · lib/moments.js 已是最新，跳过');
+	} else if (CHECK) {
+		log(`  [check] 会${existed ? '重写' : '新增'} lib/moments.js`);
+		note('P14 moments', 'DRIFT', `[check] 待${existed ? '重写' : '新增'} lib/moments.js`);
+	} else {
+		if (existed) {
+			const bak = join(backupDir, 'moments.js');
+			mkdirSync(dirname(bak), { recursive: true });
+			copyFileSync(target, bak);
+			log(`  · 旧 lib/moments.js 已备份到 ${bak}`);
+		}
+		writeFileSync(target, body, 'utf8');
+		changed += 1;
+		note('P14 moments', 'PATCHED', `${existed ? '重写' : '新增'} lib/moments.js`);
+		log(`  ✓ ${existed ? '重写' : '新增'} lib/moments.js`);
+	}
+	patchHunks({ tag: 'P14 moments', label: '朋友圈 —— index 引入并在启动时挂上', jsonName: 'moments-hunks.json' });
+}
+
+/**
  * 打完补丁后冒烟：真把插件入口 import 一次。
  * 文本上全是 PATCHED 不等于能加载 —— 比如 schemastery 根本没有 z.record（是 z.dict），
  * 写入时毫无报错，要等宿主启用插件才炸成「1 entry did not activate」。
@@ -1063,6 +1113,11 @@ try {
 		patchHunks({ tag: 'P12 anti-template', label: '主动说话去模板 —— 别再用“刚看到个/刚刷到”起头', jsonName: 'anti-template-hunks.json' });
 	if (ONLY === '' || ONLY === 'wechat-groupname')
 		patchHunks({ tag: 'P13 wechat-groupname', label: '微信 —— 群名标题（不再是数字群 ID）+ 出站不再换图', jsonName: 'wechat-groupname-hunks.json' });
+	if (ONLY === '' || ONLY === 'wechat-voice')
+		patchHunks({ tag: 'P15 wechat-voice', label: '微信 —— 能发语音（补语音指令 + 平台支持语音）', jsonName: 'wechat-voice-hunks.json' });
+	if (ONLY === '' || ONLY === 'wechat-groupmatch')
+		patchHunks({ tag: 'P16 wechat-groupmatch', label: '微信 —— 群白名单匹配归一化（@chatroom 与纯数字群号同一个群）', jsonName: 'wechat-groupmatch-hunks.json' });
+	if (ONLY === '' || ONLY === 'moments') patchMoments();
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;

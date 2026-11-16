@@ -1,0 +1,10 @@
+[
+	{
+		"id": "wechat-group-match-normalize",
+		"title": "群白名单匹配归一化：@chatroom 后缀与纯数字群号视为同一个群",
+		"file": "lib/gateway.js",
+		"marker": "cfg.groupAllowList.some((x) => norm(x) === id)",
+		"old": "\t\treturn cfg.groupAllowList.includes(String(groupId));",
+		"new": "\t\t// [FS-WECHAT-GROUPMATCH] 微信群的 targetId 带 @chatroom 后缀，设置页勾的群是纯数字群号，\n\t\t//   直接 includes 永远对不上 -> 群里静默不接话。比较前两边都归一化成纯数字群号。\n\t\tconst norm = (v) => String(v ?? '').trim().toLowerCase().replace(/@(im\\.)?chatroom$/, '');\n\t\tconst id = norm(groupId);\n\t\treturn cfg.groupAllowList.some((x) => norm(x) === id);"
+	}
+]

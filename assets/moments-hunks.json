@@ -1,0 +1,18 @@
+[
+	{
+		"id": "moments-import",
+		"title": "index 引入朋友圈模块",
+		"file": "lib/index.js",
+		"marker": "// [FS-MOMENTS-IMPORT]",
+		"old": "import { VoiceService, voiceConfig, voiceLines } from './voice.js';",
+		"new": "import { VoiceService, voiceConfig, voiceLines } from './voice.js';\nimport { createMoments } from './moments.js'; // [FS-MOMENTS-IMPORT]"
+	},
+	{
+		"id": "moments-wire",
+		"title": "index 启动时挂上朋友圈发表（受 wechat.moments.enabled 控制）",
+		"file": "lib/index.js",
+		"marker": "// [FS-MOMENTS]",
+		"old": "\ttestHooks.gateway = gateway;\n",
+		"new": "\ttestHooks.gateway = gateway;\n\t// [FS-MOMENTS] 朋友圈 B 方案：文案由 dsh 读 persona.json 生成，鲸鱼只当「手」发表。\n\t// 鲸鱼侧须 publishFeatureEnabled=true（总开关）且 publishEnabled=false（原生定时关掉），\n\t// 否则会出现「鲸鲸口吻」的第二条人格在发朋友圈。节奏看 wechat.moments 段。\n\ttry {\n\t\tconst moments = createMoments({\n\t\t\tgetConfig,\n\t\t\tsaveConfig,\n\t\t\tlog,\n\t\t\tcallLlm: llmRouter.bound('social'),\n\t\t\tpersonaPath: () => `${fishSoulDir()}/persona.json`,\n\t\t});\n\t\tmoments.start();\n\t\tctx.effect(() => () => moments.stop(), 'dsh-fish-soul: moments');\n\t} catch (error) {\n\t\tlog('warn', `[fish-soul] 朋友圈模块没装上：${String(error instanceof Error ? error.message : error)}`);\n\t}\n"
+	}
+]

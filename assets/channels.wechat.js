@@ -92,6 +92,11 @@ export class WechatChannel {
 			enabled: w.enabled === true,
 			bridgeUrl: String(w.bridgeUrl ?? 'http://127.0.0.1:11234/fish-soul/outbound'),
 			token: String(w.bridgeToken ?? w.token ?? ''),
+			// [FS-WECHAT-VOICE] 语音专用出口：本机 WhaleLauncher 桥的本地发送 API。
+			// 微信出站只有它能真发语音（TTS 合成 → 录音发送），文字/表情仍走 bridgeUrl。
+			voiceUrl: String(w.voiceGatewayUrl ?? 'http://127.0.0.1:8899/outbound'),
+			voiceToken: String(w.voiceGatewayToken ?? ''),
+			voiceTimeoutMs: Number(w.voiceGatewayTimeoutMs ?? 120000) || 120000,
 			selfId: String(w.selfId ?? ''),
 			masterUserIds: Array.isArray(w.masterUserIds) ? w.masterUserIds.map(String) : [],
 			privateAllowList: Array.isArray(w.privateAllowList) ? w.privateAllowList.map(String) : []
@@ -128,15 +133,61 @@ export class WechatChannel {
 		const { kind, target } = parseTarget(channelId);
 		const segments = Array.isArray(segs) ? segs : [];
 		if (segments.length === 0) return '';
-		const res = await postJson(cfg.bridgeUrl, {
-			channelId: String(channelId),
-			kind,
-			target: String(target),
-			convId: String(convId ?? ''),
-			segments
-		}, cfg.token);
-		this.connected = true;
-		return String(res?.messageId ?? res?.message_id ?? '');
+		// [FS-WECHAT-VOICE] 语音段单独走本机语音网关（WhaleLauncher 桥的本地 API），
+		// 文字 / 表情照旧走 social-bridge：微信侧只有语音网关能真发语音气泡。
+		const voiceSegs = segments.filter((s) => s?.type === 'record');
+		let restSegs = segments.filter((s) => s?.type !== 'record');
+		// [FS-WECHAT-VOICE-DEDUP] 语音已经把这句话说出来了，别再跟着发一遍同样的文字。
+		if (voiceSegs.length > 0 && restSegs.length > 0) {
+			const said = new Set(voiceSegs.map((s) => String(s?.data?.text ?? '').trim()).filter((t) => t !== ''));
+			if (said.size > 0) restSegs = restSegs.filter((s) => !(s?.type === 'text' && said.has(String(s?.data?.text ?? '').trim())));
+		}
+		let messageId = '';
+		if (restSegs.length > 0) {
+			const res = await postJson(cfg.bridgeUrl, {
+				channelId: String(channelId),
+				kind,
+				target: String(target),
+				convId: String(convId ?? ''),
+				segments: restSegs
+			}, cfg.token);
+			messageId = String(res?.messageId ?? res?.message_id ?? '');
+			this.connected = true;
+		}
+		if (voiceSegs.length === 0) return messageId;
+		// 语音网关需要「念什么」的原文；只有 base64 音频时发不了，直接退回文字。
+		const spoken = voiceSegs.map((s) => String(s?.data?.text ?? '').trim()).filter((t) => t !== '');
+		let voiceId = '';
+		if (cfg.voiceUrl !== '') {
+			try {
+				const res = await postJson(cfg.voiceUrl, {
+					channelId: String(channelId),
+					kind,
+					target: String(target),
+					convId: String(convId ?? ''),
+					segments: voiceSegs
+				}, cfg.voiceToken, cfg.voiceTimeoutMs);
+				voiceId = String(res?.messageId ?? res?.message_id ?? '');
+				this.connected = true;
+			} catch (error) {
+				this.log('error', `[fish-soul] 微信语音没发出去：${String(error instanceof Error ? error.message : error)}，改成打字`);
+			}
+		}
+		if (voiceId === '' && spoken.length > 0) {
+			try {
+				const res = await postJson(cfg.bridgeUrl, {
+					channelId: String(channelId),
+					kind,
+					target: String(target),
+					convId: String(convId ?? ''),
+					segments: spoken.map((text) => ({ type: 'text', data: { text } }))
+				}, cfg.token);
+				messageId = messageId === '' ? String(res?.messageId ?? res?.message_id ?? '') : messageId;
+			} catch (error) {
+				this.log('error', `[fish-soul] 微信语音兜底文字也失败：${String(error instanceof Error ? error.message : error)}`);
+			}
+		}
+		return messageId === '' ? voiceId : messageId;
 	}
 
 	async groupName() {
