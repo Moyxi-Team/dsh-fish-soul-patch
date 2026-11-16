@@ -1,18 +1,7 @@
----
-AIGC:
-    Label: "1"
-    ContentProducer: 001191440300708461136T1XGW3
-    ProduceID: c3040d704551dfa25d47107616a7e32f_e2862adadfc511f19919525400638852
-    ReservedCode1: n/RbVk6mkQ1BEYSeqtzgBmFExZYrjIuQTP92ne/D2lAutvsDufHJp+dVvgFknfX2B2wgcqJClYrseWfidXyQAsSYZSlS4DF8zzHyAmB8uqK0cbb8llIO9ZUf158ySDo1IPXAlG0kkYB37ALgPrEJt4dIkShhf5X1gYyoCxFGR20uWevMNpQVsgbNolY=
-    ContentPropagator: 001191440300708461136T1XGW3
-    PropagateID: c3040d704551dfa25d47107616a7e32f_e2862adadfc511f19919525400638852
-    ReservedCode2: n/RbVk6mkQ1BEYSeqtzgBmFExZYrjIuQTP92ne/D2lAutvsDufHJp+dVvgFknfX2B2wgcqJClYrseWfidXyQAsSYZSlS4DF8zzHyAmB8uqK0cbb8llIO9ZUf158ySDo1IPXAlG0kkYB37ALgPrEJt4dIkShhf5X1gYyoCxFGR20uWevMNpQVsgbNolY=
----
-
 # 上游兼容性核查（自动生成）
 
-- 核查时间：2026-11-14
-- 核查对象：`dsh-fish-soul@0.15.55`（npm 最新版）
+- 核查时间：2026-11-16
+- 核查对象：`dsh-fish-soul@0.18.2`（npm 最新版）
 - 生成方式：`node audit-upstream.mjs`（GitHub Actions 每周自动跑一次并提交本文件）
 
 ## 分组结论
@@ -20,59 +9,15 @@ AIGC:
 | 组 | 处 | 可退役 | 仍需 | 漂移 | 结论 |
 | --- | --- | --- | --- | --- | --- |
 | P1 meme | 1 | 0 | 1 | 0 | 🟡 继续用 |
-| P2 douyin | 5 | 0 | 5 | 0 | 🟡 继续用 |
+| P2 douyin | 5 | 0 | 3 | 2 | 🔴 要更新锚点 |
 | P3 remount | 3 | 1 | 2 | 0 | 🟡 继续用 |
 | P4 plugins | 6 | 0 | 6 | 0 | 🟡 继续用 |
-| P5 dm | 23 | 0 | 23 | 0 | 🟡 继续用 |
+| P5 dm | 23 | 0 | 22 | 1 | 🔴 要更新锚点 |
 | P6 share | 9 | 9 | 0 | 0 | 🟢 整组可退役 |
-| P7 wechat | 26 | 0 | 25 | 1 | 🔴 要更新锚点 |
-| P8 wechat-pane | 23 | 0 | 23 | 0 | 🟡 继续用 |
-| P9 wechat-transport | 22 | 0 | 22 | 0 | 🟡 继续用 |
-| P10 wechat-master | 11 | 0 | 2 | 9 | 🔴 要更新锚点 |
-
-## 上游改了什么（通俗版）
-
-> 补丁锚点与上游现状逐行对齐后的结论；对不上的行以 `-`(补丁原写法) / `+`(上游现状) 成对列出。
-
-### W05（P7 wechat · lib/db.js）
-- 通俗说：**上游把这段基本重写了**（上游第 336 行附近，5 行里只剩 2 行原样）。补丁逻辑要按新写法重新落。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
-
-### wechat-master-01（P10 wechat-master · lib/config-schema.js）
-- 通俗说：**这段在上游里已经找不到对应代码** —— 函数改名、挪了位置或整体重构了。先在该文件里搜补丁依赖的函数名再定位。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
-
-### wechat-master-02（P10 wechat-master · lib/config-schema.js）
-- 通俗说：**上游改动了这段里的几行**（上游第 24 行附近，4 行里原样还剩 2 行）。照下面成对的对比改锚点。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
-
-### wechat-master-03（P10 wechat-master · lib/gateway.js）
-- 通俗说：**上游改动了这段里的几行**（上游第 224 行附近，4 行里原样还剩 2 行）。照下面成对的对比改锚点。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
-
-### wechat-master-04（P10 wechat-master · lib/gateway.js）
-- 通俗说：**上游把这段基本重写了**（上游第 832 行附近，6 行里只剩 2 行原样）。补丁逻辑要按新写法重新落。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
-
-### wechat-master-07（P10 wechat-master · lib/routes.js）
-- 通俗说：**上游把这段基本重写了**（上游第 43 行附近，5 行里只剩 2 行原样）。补丁逻辑要按新写法重新落。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
-
-### wechat-master-08（P10 wechat-master · lib/routes.js）
-- 通俗说：**这段在上游里已经找不到对应代码** —— 函数改名、挪了位置或整体重构了。先在该文件里搜补丁依赖的函数名再定位。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
-
-### wechat-master-09（P10 wechat-master · lib/routes.js）
-- 通俗说：**这段在上游里已经找不到对应代码** —— 函数改名、挪了位置或整体重构了。先在该文件里搜补丁依赖的函数名再定位。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
-
-### wechat-master-10（P10 wechat-master · lib/routes.js）
-- 通俗说：**这段在上游里已经找不到对应代码** —— 函数改名、挪了位置或整体重构了。先在该文件里搜补丁依赖的函数名再定位。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
-
-### wechat-master-11（P10 wechat-master · lib/routes.js）
-- 通俗说：**这段在上游里已经找不到对应代码** —— 函数改名、挪了位置或整体重构了。先在该文件里搜补丁依赖的函数名再定位。
-- 这段与锚点差异太大，逐行对比不可靠 → 直接在该文件里搜锚点里的函数名 / 中文字样来定位新写法。
+| P7 wechat | 26 | 0 | 26 | 0 | 🟡 继续用 |
+| P8 wechat-pane | 25 | 0 | 24 | 1 | 🔴 要更新锚点 |
+| P9 wechat-transport | 23 | 0 | 23 | 0 | 🟡 继续用 |
+| P10 wechat-master | 11 | 0 | 11 | 0 | 🟡 继续用 |
 
 ## 逐处明细
 
@@ -80,11 +25,11 @@ AIGC:
 | --- | --- | --- | --- | --- |
 | P1 meme | 借 dsh-meme 的只读取图服务 | `meme-bridge` | 🟡 仍需 | 上游仍未接入 dsh-meme |
 | P2 douyin | 评论区状态按可见性判定（折叠态不再误判为已打开） | `douyin-comment-visible` | 🟡 仍需 | 锚点在，补丁仍有效 |
-| P2 douyin | 作品详情页只走 note/video 直链 + 点右侧「评论(n)」Tab | `douyin-note-tab` | 🟡 仍需 | 锚点在，补丁仍有效 |
-| P2 douyin | 回复只在可见评论条目里找并用真实鼠标点击 | `douyin-reply-visible` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P2 douyin | 作品详情页只走 note/video 直链 + 点右侧「评论(n)」Tab | `douyin-note-tab` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
+| P2 douyin | 回复只在可见评论条目里找并用真实鼠标点击 | `douyin-reply-visible` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
 | P2 douyin | BGM 挑歌先滤掉非歌曲条目（0.15.32：配乐不确认就不发布，不再硬兜底） | `douyin-music-trace` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P2 douyin | douyin-social.js 文件头加补丁标记 | `douyin-social-header` | 🟡 仍需 | 锚点在，补丁仍有效 |
-| P3 remount | 自家会话每条消息补挂人格段（热更新后人格卡 + 记忆块不再掉线） | `index-remount-our-session` | 🟢 可退役 | 上游已自己修好（{"present":"所有会话都在 inbox 时补挂一次做保险"}） |
+| P3 remount | 自家会话每条消息补挂人格段（热更新后人格卡 + 记忆块不再掉线） | `index-remount-our-session` | 🟢 可退役 | 上游已自己修好（{"present":"mountSectionsFor(payload?.agent);"}） |
 | P3 remount | sectionsMounted 从 Set 改 Map（换 ctx 才重挂，同一 ctx 不重复注册） | `index-remount-map` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P3 remount | sectionsMounted 换成 Map 后，登记改成 set(id, ctx)（原来 Set 的 add 在 Map 上会 TypeError） | `index-remount-set` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P4 plugins | 系统设置多一个「个人插件」子页 | `client-system-plugins-tab` | 🟡 仍需 | 锚点在，补丁仍有效 |
@@ -93,7 +38,7 @@ AIGC:
 | P4 plugins | routes.js 引入 plugins 路由 | `routes-import-plugins` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P4 plugins | 路由分派里挂上 /plugins/* | `routes-mount-plugins` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P4 plugins | 个人插件清单（整文件 routes-plugins.js） | `plugins-route-file` | 🟡 仍需 | 上游无 lib/routes-plugins.js，本仓库新增文件仍需要 |
-| P5 dm | import 主动私信模块 | `dm-social-import` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P5 dm | import 主动私信模块 | `dm-social-import` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
 | P5 dm | 加 maybeDm / dmNow / dmCandidates，status 带 dm | `dm-social-methods` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P5 dm | 自走层 tick 里问一次要不要主动发 | `dm-index-tick` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P5 dm | 抖音主动私信：把人格卡全文递给 DouyinSocial | `dm-persona-soul` | 🟡 仍需 | 锚点在，补丁仍有效 |
@@ -129,7 +74,7 @@ AIGC:
 | P7 wechat | 聊天存档：取样 sample() 也按归一化通道查 | `W02` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P7 wechat | db：新增 person_wechat_alias 表（微信 id → canonical_id），person 表结构不动 | `W03` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P7 wechat | db：老库启动时补建微信别名表 + 唯一索引 | `W04` | 🟡 仍需 | 锚点在，补丁仍有效 |
-| P7 wechat | db：微信认人（canonicalOfWechat / findPersonByWechat / setWechatAlias / resolveOrCreateWechatPerson） | `W05` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
+| P7 wechat | db：微信认人（canonicalOfWechat / findPersonByWechat / setWechatAlias / resolveOrCreateWechatPerson） | `W05` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P7 wechat | gateway-util：微信通道判定（wechatKindOf / isWechatChannelId），platformOf 认出 wechat | `W06` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P7 wechat | gateway-util：通道种类识别加微信（wechat-private / wechat-group） | `W07` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P7 wechat | gateway-util：微信私聊 / 微信群的中文名、群聊判定、群主归一口径 | `W08` | 🟡 仍需 | 锚点在，补丁仍有效 |
@@ -174,6 +119,8 @@ AIGC:
 | P8 wechat-pane | stickers：微信要动图时直接借 dsh-meme 图库（不再先挑本地收藏） | `W49` | 🟡 仍需 | 锚点是前序补丁 meme-bridge 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
 | P8 wechat-pane | stickers：加 stageMemeGif（图库 gif 落一份到 _stickers） | `W50` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P8 wechat-pane | stickers：面板清单忽略 meme-*.gif | `W51` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P8 wechat-pane | 微信设置页 —— /channels/wechat-config 接受朋友圈 / 群点名 / 出站换图三个新字段 | `wechat-pane-moments-fields` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
+| P8 wechat-pane | routes：新增 GET /channels/wechat-groups（微信设置页群名单可视化） | `W52` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P9 wechat-transport | ChatGateway 构造参数加 wechat 通道 | `wechat-transport-gateway-01` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P9 wechat-transport | this.wechat 存下微信通道 | `wechat-transport-gateway-02` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P9 wechat-transport | Outbox 选通道：声明 self 并按 channel_id 取通道 | `wechat-transport-gateway-03` | 🟡 仍需 | 锚点在，补丁仍有效 |
@@ -194,41 +141,21 @@ AIGC:
 | P9 wechat-transport | index 建 WechatChannel 实例 | `wechat-transport-index-04` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P9 wechat-transport | index 把 wechat 通道注入 ChatGateway 参数 | `wechat-transport-index-05` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P9 wechat-transport | index 启动微信通道 + 入站服务 + 卸载清理 | `wechat-transport-index-06` | 🟡 仍需 | 锚点在，补丁仍有效 |
+| P9 wechat-transport | 语音段带上原文：微信语音网关（WhaleLauncher 桥）要靠它合成 | `wechat-transport-gateway-15` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P9 wechat-transport | 微信入站服务（整文件 wechat-inbound.js） | `wechat-inbound-file` | 🟡 仍需 | 上游无 lib/wechat-inbound.js，本仓库新增文件仍需要 |
 | P9 wechat-transport | 微信出站通道（整文件 channels/wechat.js） | `wechat-channel-file` | 🟡 仍需 | 上游无 lib/channels/wechat.js，本仓库新增文件仍需要 |
-| P10 wechat-master | 微信配置：主人私聊接管开关要能存住（否则面板上开了保存完就回落） | `wechat-master-01` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
-| P10 wechat-master | 微信插话：让着你（masterQuiet）要能存住 | `wechat-master-02` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
-| P10 wechat-master | 微信运行配置里带上 masterTakeover | `wechat-master-03` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
-| P10 wechat-master | 主人私聊接管关掉时整条不进 soul（不回复、不记记忆） | `wechat-master-04` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
+| P10 wechat-master | 微信配置：主人私聊接管开关要能存住（否则面板上开了保存完就回落） | `wechat-master-01` | 🟡 仍需 | 锚点是前序补丁 W27 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
+| P10 wechat-master | 微信插话：让着你（masterQuiet）要能存住 | `wechat-master-02` | 🟡 仍需 | 锚点是前序补丁 W27 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
+| P10 wechat-master | 微信运行配置里带上 masterTakeover | `wechat-master-03` | 🟡 仍需 | 锚点是前序补丁 wechat-transport-gateway-06 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
+| P10 wechat-master | 主人私聊接管关掉时整条不进 soul（不回复、不记记忆） | `wechat-master-04` | 🟡 仍需 | 锚点是前序补丁 wechat-transport-gateway-08 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
 | P10 wechat-master | 微信出站：任何静态图（含 dsh-meme 缓存的 webp）发之前先换成真动图 | `wechat-master-05` | 🟡 仍需 | 锚点在，补丁仍有效 |
 | P10 wechat-master | 新增 wechatAnimatedSwap：拿文件名当"感觉"去图库换一张真 GIF | `wechat-master-06` | 🟡 仍需 | 锚点在，补丁仍有效 |
-| P10 wechat-master | /state 里算出「微信·嘉新（主人）」这条会话通到哪儿（认人、工作区、活跃） | `wechat-master-07` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
-| P10 wechat-master | 微信表情体检：借库开没开、图库有没有 GIF、上一次挑图结果 | `wechat-master-08` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
-| P10 wechat-master | /state 回给面板：接管开关 + 主人会话状态 | `wechat-master-09` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
-| P10 wechat-master | /state 回给面板：表情体检结果 | `wechat-master-10` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
-| P10 wechat-master | 保存微信配置时接受 masterTakeover | `wechat-master-11` | 🔴 漂移 | 锚点找不到、上游也没修 → 需要按新版更新锚点 |
+| P10 wechat-master | /state 里算出「微信·嘉新（主人）」这条会话通到哪儿（认人、工作区、活跃） | `wechat-master-07` | 🟡 仍需 | 锚点是前序补丁 W43 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
+| P10 wechat-master | 微信表情体检：借库开没开、图库有没有 GIF、上一次挑图结果 | `wechat-master-08` | 🟡 仍需 | 锚点是前序补丁 W43 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
+| P10 wechat-master | /state 回给面板：接管开关 + 主人会话状态 | `wechat-master-09` | 🟡 仍需 | 锚点是前序补丁 W43 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
+| P10 wechat-master | /state 回给面板：表情体检结果 | `wechat-master-10` | 🟡 仍需 | 锚点是前序补丁 W43 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
+| P10 wechat-master | 保存微信配置时接受 masterTakeover | `wechat-master-11` | 🟡 仍需 | 锚点是前序补丁 W45 写进去的（上游本无这段），跟着前序补丁走，不单独判漂移 |
 
-**结论**：需要更新锚点：10 处的上游代码改版了，补丁本身没被上游吸收。
+**结论**：需要更新锚点：4 处的上游代码改版了，补丁本身没被上游吸收。
 
 > 说明：`可退役` = 上游自己已经做完了，这类补丁不必再维护、也不必跟版本；`仍需` = 上游还没有，补丁继续用；`漂移` = 上游改了这段代码但没实现同样功能，需要按新版更新锚点。
-*（内容由AI生成，仅供参考）*
-
-## 实打复核（2026-11-14，人工复核 audit 结论）
-
-上表由 `audit-upstream.mjs` 静态比对生成，会把「链式依赖未模拟」的情况虚报成漂移。本次按补丁**实跑**结果复核：
-
-| audit 结论 | 实打结论 | 说明 |
-| --- | --- | --- |
-| W05（P7 · lib/db.js）漂移 | **真漂，已修** | 上游 0.15.55 在 `findPersonByDouyin` 与 `PLATFORM_COLUMN` 之间插入了 `normalizeDouyinIdentity` 等身份归一新函数，原 `old` 锚点（含 `findPersonByDouyin` 块的连续段）被截断。已把 W05 的 `old` 收窄为单行 `const PLATFORM_COLUMN = ...`、`new` 改为「微信认人函数块 + 该行」，两版通用且随上游插函数不再漂 |
-| wechat-master-01~11（P10）九处漂移 | **假漂，实打全上** | 这九处 hunk 依赖同文件内前一处补丁的产物，audit 未模拟链式依赖，故报「锚点找不到」；实打时全部命中，无需改 |
-| P6 share 整组 9 处 | 已退役 | 上游 0.15.55 原生实现「刷到视频 → 抖音原生卡片私信」，`upstreamFixed.present` 自动跳过 |
-| P3 remount 1 处 / lib/index.js 人格段 1 处 / gateway.js 抖音私信 4 处 | 已退役 | 上游已自行实现，同样走自动退役 |
-
-验证结论（同一份 assets 实打两版干净包）：
-
-| 版本 | 改了 | 已打过 | 退役 | 漂移 | 失败 | 冒烟 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 0.15.49 | 132 | 5 | 3 段 | **0** | 0 | 通过 |
-| 0.15.55 | 132 | 5 | 3 段 | **0** | 0 | 通过 |
-
-运行库部署（0.15.55 纯净包 + 同一份 assets）：改 132 处，漂移 0，失败 0；`lib` 全目录 `node --check` 0 失败；`canonicalOfWechat` / `resolveOrCreateWechatPerson` / `person_wechat_alias` 均已落位（lib/db.js 441 / 480 行）。
