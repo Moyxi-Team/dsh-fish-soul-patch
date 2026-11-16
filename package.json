@@ -13,8 +13,10 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "patch": "node patch-fish-soul.mjs",
-    "check": "node patch-fish-soul.mjs --check",
+    "patch": "node patch-fish-soul.mjs && node patch-whalegirl.mjs",
+    "check": "node patch-fish-soul.mjs --check && node patch-whalegirl.mjs --check",
+    "patch:whalegirl": "node patch-whalegirl.mjs",
+    "check:whalegirl": "node patch-whalegirl.mjs --check",
     "verify": "node tools/verify-install.mjs",
     "audit": "node audit-upstream.mjs"
   }

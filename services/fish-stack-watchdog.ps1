@@ -138,7 +138,7 @@ function Remove-Sink {
 
 # A hashtable, not a PSCustomObject: ConvertFrom-Json hands back an object that rejects
 # assignment to any property it did not already have ("在此对象上找不到属性…").
-$state = @{ voiceUp = $null; snowUp = $null; sinkUp = $null; qqMissingLogged = $false; snowFails = 0; lastTokenRefresh = ''; lastSessionCheck = ''; hostGoneSince = '' }
+$state = @{ voiceUp = $null; snowUp = $null; sinkUp = $null; qqMissingLogged = $false; snowFails = 0; lastTokenRefresh = ''; lastSessionCheck = ''; lastWhalegirlPatch = ''; hostGoneSince = '' }
 try {
   if (Test-Path $stateFile) {
     $loaded = Get-Content $stateFile -Raw | ConvertFrom-Json
@@ -292,6 +292,28 @@ while ($true) {
         $state.lastTokenRefresh = $nowUtc.ToString('o')
         Save-State
         Write-Log 'copilot token refresh dispatched (45 min cadence)'
+      }
+    }
+
+    # ------------------------------------------- whalegirl patch guard
+    # WhaleLauncher 自己更新时会整文件换掉 src/http/routes/bridge.js 与 bridge/app.py，
+    # 微信→dsh 的入站转发段（WHALE-DSH-FORWARD）和 8899 出站启动段（WHALE-DSH-OUTBOUND）
+    # 就被冲掉，表现是「群里希希不说话、只剩鲸鲸自作主张」。这里每 10 分钟静默跑一次补丁，
+    # 幂等：标记还在就什么都不动。补上了要重启鲸鱼才生效，所以只记日志，不擅自重启。
+    $wgNow = (Get-Date).ToUniversalTime()
+    $wgDue = $true
+    if ($state.lastWhalegirlPatch) {
+      try { $wgDue = ($wgNow - [datetime]::Parse($state.lastWhalegirlPatch, $null, 'RoundtripKind')).TotalMinutes -ge 10 } catch { $wgDue = $true }
+    }
+    if ($wgDue) {
+      $wgPatcher = 'C:\Users\Administrator\.dsh\patches\dsh-fish-soul-patch\patch-whalegirl.mjs'
+      if ((Test-Path $wgPatcher) -and (Test-Path $VOICE_NODE)) {
+        try {
+          $wgOut = (& $VOICE_NODE $wgPatcher 2>&1) -join ' '
+          if ($wgOut -match 'PATCH_APPLIED') { Write-Log ('whalegirl patch replayed, restart WhaleLauncher to take effect :: ' + $wgOut) }
+        } catch { Write-Log ('whalegirl patch error: ' + $_.Exception.Message) }
+        $state.lastWhalegirlPatch = $wgNow.ToString('o')
+        Save-State
       }
     }
 
