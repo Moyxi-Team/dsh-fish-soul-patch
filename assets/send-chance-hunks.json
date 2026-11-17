@@ -1,0 +1,105 @@
+[
+ {
+  "id": "P24 frac",
+  "title": "概率归一化辅助 frac（0~1，不过 floor）",
+  "file": "voice.js",
+  "marker": "FS-SEND-CHANCE-NUM",
+  "old": "\tconst num = (x, d, lo, hi) => { const n = Number(x); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.floor(n))) : d; };",
+  "new": "\tconst num = (x, d, lo, hi) => { const n = Number(x); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.floor(n))) : d; };\n\t// [FS-SEND-CHANCE-NUM] 概率参数不能过 num（它是 Math.floor，0.25 会被压成 0）\n\tconst frac = (x, d) => { const n = Number(x); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : d; };"
+ },
+ {
+  "id": "P24 voice-cfg",
+  "title": "voiceConfig 新增 chance（默认 0.25）",
+  "file": "voice.js",
+  "marker": "FS-SEND-CHANCE-VOICE-CFG",
+  "old": "\t\tspeak: ['never', 'mirror', 'sometimes'].includes(v.speak) ? v.speak : 'mirror',",
+  "new": "\t\tspeak: ['never', 'mirror', 'sometimes'].includes(v.speak) ? v.speak : 'mirror',\n\t\t// [FS-SEND-CHANCE-VOICE-CFG] 每轮发语音的概率（0~1，默认 0.25）：掷不中这一轮就只用文字\n\t\tchance: frac(v.chance, 0.25),"
+ },
+ {
+  "id": "P24 roll",
+  "title": "voiceLines 每轮掷一次骰子",
+  "file": "voice.js",
+  "marker": "FS-SEND-CHANCE-ROLL",
+  "old": "\tconst voiceIn = session.voiceIn === true;",
+  "new": "\tconst voiceIn = session.voiceIn === true;\n\t// [FS-SEND-CHANCE-ROLL] 每轮只掷一次：命中才允许发语音（默认 25%）；对方点名要语音的照发\n\tconst chance = Number.isFinite(Number(v.chance)) ? Math.min(1, Math.max(0, Number(v.chance))) : 0.25;\n\tconst hit = Math.random() < chance;"
+ },
+ {
+  "id": "P24 cond",
+  "title": "发语音的条件加上骰子（点名要语音的例外）",
+  "file": "voice.js",
+  "old": "\t\tif (ttsReady && v.speak !== 'never' && (v.speak === 'sometimes' || voiceIn || asked)) {",
+  "new": "\t\tif (ttsReady && v.speak !== 'never' && (asked || (hit && (v.speak === 'sometimes' || voiceIn)))) {",
+  "marker": "asked || (hit && ("
+ },
+ {
+  "id": "P24 neg",
+  "title": "骰子没中时明确让她别写 [语音]",
+  "file": "voice.js",
+  "marker": "FS-SEND-CHANCE-NEG",
+  "old": "\t\treturn asked ? ['[语音] 你现在发不了语音（没开 / 没配好 / 设成了不发），只能打字；ta 要语音就直说发不了，别编别的理由。'] : [];",
+  "new": "\t\t// [FS-SEND-CHANCE-NEG] 骰子没中：明确说这轮别写 [语音]（只丢一句「偶尔发」，她其实每轮都发）\n\t\tif (ttsReady && v.speak !== 'never' && !asked) return ['[这轮别发语音] 这次只用文字回，别写 [语音] 段。'];\n\t\treturn asked ? ['[语音] 你现在发不了语音（没开 / 没配好 / 设成了不发），只能打字；ta 要语音就直说发不了，别编别的理由。'] : [];"
+ },
+ {
+  "id": "P24 state",
+  "title": "设置页状态带上 chance",
+  "file": "voice.js",
+  "old": "\t\t\tsttProvider: c.sttProvider, sttModel: c.sttModel, ttsModel: c.ttsModel, ttsVoice: c.ttsVoice, speak: c.speak, maxChars: c.maxChars,",
+  "new": "\t\t\tsttProvider: c.sttProvider, sttModel: c.sttModel, ttsModel: c.ttsModel, ttsVoice: c.ttsVoice, speak: c.speak, chance: c.chance, maxChars: c.maxChars,",
+  "marker": "chance: c.chance"
+ },
+ {
+  "id": "P24 sticker-cfg",
+  "title": "stickerConfig 新增 sendChance（默认 0.15）",
+  "file": "stickers.js",
+  "marker": "FS-SEND-CHANCE-STICKER",
+  "old": "\t\tmeme: v.meme === true\n\t};",
+  "new": "\t\tmeme: v.meme === true,\n\t\t// [FS-SEND-CHANCE-STICKER] 每轮允许发表情的概率（0~1，默认 0.15）：以前有图库就每轮都能发，群里连刷太吵\n\t\tsendChance: (() => { const c = Number(v.sendChance); return Number.isFinite(c) ? Math.min(1, Math.max(0, c)) : 0.15; })()\n\t};"
+ },
+ {
+  "id": "P24 sticker-fn",
+  "title": "导出 stickerSendAllowed",
+  "file": "stickers.js",
+  "marker": "FS-SEND-CHANCE-STICKER-FN",
+  "old": "\t};\n}\n\nexport class StickerBox {",
+  "new": "\t};\n}\n\n/** [FS-SEND-CHANCE-STICKER-FN] 这一轮能不能发表情：按 stickers.sendChance 掷骰子（同一条回复只掷一次）。 */\nexport function stickerSendAllowed(cfg = {}) {\n\tconst n = Number(cfg?.sendChance);\n\tconst chance = Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.15;\n\treturn Math.random() < chance;\n}\n\nexport class StickerBox {"
+ },
+ {
+  "id": "P24 import",
+  "title": "index 引入 stickerSendAllowed",
+  "file": "index.js",
+  "old": "import { StickerBox, stickerConfig } from './stickers.js';",
+  "new": "import { StickerBox, stickerConfig, stickerSendAllowed } from './stickers.js';"
+ },
+ {
+  "id": "P24 wx",
+  "title": "微信表情指令改成按概率给",
+  "file": "index.js",
+  "marker": "FS-SEND-CHANCE-WX",
+  "old": "\t\t\tconst wxMeme = stickerConfig(currentConfig.stickers).meme === true && memeBridge.status().ok === true;",
+  "new": "\t\t\tconst wxStickerCfg = stickerConfig(currentConfig.stickers);\n\t\t\tconst wxMeme = wxStickerCfg.meme === true && memeBridge.status().ok === true;\n\t\t\t// [FS-SEND-CHANCE-WX] 每轮掷一次骰子：命中才给「可以发表情」的指令，没中就明确说这轮别发\n\t\t\t// （以前只要有图库就每轮都给，群里连着好几条全是表情）\n\t\t\tconst wxMemeHit = wxMeme && stickerSendAllowed(wxStickerCfg);"
+ },
+ {
+  "id": "P24 wx-rule",
+  "title": "骰子没中时微信规则明说别发表情（命中时上限 2→1）",
+  "file": "index.js",
+  "old": "\t\t\tconst wxMemeRule = wxMeme\n\t\t\t\t? '想发表情时单独写一行 [表情: 你此刻的感觉]（一次最多 2 个，这一行会换成一张真实的动图发出去）——一律从 dsh-meme 图库里挑最贴的一张；图库里没有贴切的就别写这行、只说话，别硬凑；'\n\t\t\t\t: '';",
+  "new": "\t\t\tconst wxMemeRule = wxMemeHit\n\t\t\t\t? '想发表情时单独写一行 [表情: 你此刻的感觉]（一次最多 1 个，这一行会换成一张真实的动图发出去）——一律从 dsh-meme 图库里挑最贴的一张；图库里没有贴切的就别写这行、只说话，别硬凑；'\n\t\t\t\t: (wxMeme ? '这轮先别发表情，只用文字回（表情不必每句都有，隔几轮再发）；' : '');",
+  "marker": "这轮先别发表情"
+ },
+ {
+  "id": "P24 schema-voice",
+  "title": "配置项 voice.chance（默认 0.25）",
+  "file": "config-schema.js",
+  "marker": "FS-SEND-CHANCE-SCHEMA-VOICE",
+  "old": "\t\t\tspeak: z.string().default('mirror'), // never / mirror（对方发语音时可以回语音）/ sometimes",
+  "new": "\t\t\tspeak: z.string().default('mirror'), // never / mirror（对方发语音时可以回语音）/ sometimes\n\t\t\tchance: z.number().default(0.25), // [FS-SEND-CHANCE-SCHEMA-VOICE] 每轮发语音的概率（0~1）：掷不中就用文字"
+ },
+ {
+  "id": "P24 schema-sticker",
+  "title": "配置项 stickers.sendChance（默认 0.15）",
+  "file": "config-schema.js",
+  "marker": "FS-SEND-CHANCE-SCHEMA-STICKER",
+  "old": "\t\t\tmeme: z.boolean().default(false)\n\t\t}).default({}),",
+  "new": "\t\t\tmeme: z.boolean().default(false),\n\t\t\t// [FS-SEND-CHANCE-SCHEMA-STICKER] 每轮允许发表情的概率（0~1）：调低就不刷屏\n\t\t\tsendChance: z.number().default(0.15)\n\t\t}).default({}),"
+ }
+]

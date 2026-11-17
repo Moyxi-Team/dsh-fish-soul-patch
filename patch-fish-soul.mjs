@@ -1202,6 +1202,8 @@ try {
 	if (ONLY === '' || ONLY === 'moments') patchMoments();
 if (ONLY === '' || ONLY === 'sticker-action') patchShortAction();
 	if (ONLY === '' || ONLY === 'acp-strip') patchAcpStrip();
+	if (ONLY === '' || ONLY === 'send-chance')
+		patchHunks({ tag: 'P24 send-chance', label: '表情包 / 语音别再每轮都发 —— 补概率门控（语音 25% / 表情按 sendChance）', jsonName: 'send-chance-hunks.json' });
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;
@@ -1318,3 +1320,5 @@ function patchAcpStrip() {
 		'FS-ACTION-ONLY',
 	);
 }
+
+
