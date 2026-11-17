@@ -1,3 +1,24 @@
+## 未编号（P5 dm 内升级，2026-11-17）：主动私信按类型找片「搜到即认类型」，整片不准
+
+**症状**：抖音主动私信挑了「萝莉 / 甜妹 / 二次元」，发出去的卡片文案里根本没有这几个词；或者「萝莉」这种词压根搜不出东西（词表里没有）。
+
+**根因**：
+1. `douyin-proactive.js` 的 `searchPool()` 一个类型只搜一个词，回来直接 `srcType = 搜索词`（旧标记 `[FS-SHARE-SEARCH-TRUST]`）——**搜到即认定类型**，文案和 tags 完全不校验。
+2. 类型词表是一词一类的扁平表，萝莉 / 甜妹 / 二次元这种「同义词很多」的类型召回面极窄。
+3. 数据源只有浏览器搜索页：卡片常常只有半句文案、`durS` 拿不到，选片只能靠残缺字段。
+
+**新增**（P5 dm 组内 3 处锚点内容升级 + 整文件模块同步，`--only dm` 即可）：
+- `assets/douyin-proactive.js`（整文件）：
+  - `[FS-SHARE-TYPE-CLUSTER]` 类型词表改成**同义词簇**（18 类，萝莉/甜妹/二次元各有自己的簇），`clusterizeOf()` 拆簇、`normalizeShareTypes()` 归一同时带 clusters。
+  - `[FS-SHARE-TYPE-SCORE]` 新增打分：`scoreTypeMatch()` 按「命中簇数 × 45 + 强信号（tag/话题/标题权重）」给 0–100 分；`resolveMatchPolicy()` 三档阈值 **宽松 30 分 1 簇 / 标准 55 分 1 簇 / 严格 75 分 2 簇**，`dm.typeMatchMinScore` 可单独改分数线（留 0 = 按档位默认）；`bestTypeMatch()` + `pickShareVideo()` 低于阈值直接丢弃。
+  - `searchPool()` 改成**一个类型多个词分别召回**（每词 15 条），候选按命中簇数打分排序；`[FS-SHARE-API-SOURCE]` 接口优先（`/aweme/v1/web/general/search/single/`，**显式不传 a_bogus**，实测不 403 且字段齐全），接口不通才退回浏览器搜索页，`durS` 缺失时用详情接口回填。
+- `assets/dm-hunks.json` / 运行目录 `lib/config-platforms.js`：dm schema 加 `typeMatchLevel`（'' | loose | standard | strict）与 `typeMatchMinScore`（union number/string，默认 0）。
+- `assets/dm-hunks.json` / 运行目录 `lib/routes-douyin.js`：设置页回显与保存透传这两项（保存时只认三档，分数线 clamp 0–100）。
+
+**验证**：三文件 `node --check` 通过；整文件资产与运行目录 sha256 一致；hunk 三态模拟 fresh → 4 处 patched、oldver → 4 处 upgraded、newver → 4 处 skipped（幂等）；schema 穿透 6 组（空 / strict / loose+40 / BOGUS / "80" / ''）全部按预期生效且不报错；打分单测 5 例（含「今天萝莉一下」45 分被标准档丢弃）；实机接口召回「萝莉」27 条，24 条带 `durS`，标准档留 13 条、严格档留 2 条；`node tools/gen-patch-docs.mjs --check` 135 处一致。
+
+**状态**：代码已打、补丁仓与运行目录已同步；补丁仓改动仍未 git 提交。
+
 ## 未编号（P18 proactive-norepeat，2026-11-16）：主动发言连着复读同一句
 
 **症状**：QQ 上希希自己主动开口，隔十几分钟就发一条一模一样的话。`chat-archive.db` 里 `private:412205303` 在 11-15 一天内把「这会儿有点饿，想煮个面吃」发了 11 遍，句子一字不差。

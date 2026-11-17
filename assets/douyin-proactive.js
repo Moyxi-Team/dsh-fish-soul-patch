@@ -43,23 +43,38 @@ const KV_OTHERS = 'douyin.dm.others';
  * 跟 dsh-douyin-scroll 的 forward-pick 一个路子：字段驱动、可解释、跑得快。
  * 设置页可以按类型名覆盖词表（dm.shareTypes），也能加自定义类型。
  */
-const DEFAULT_SHARE_TYPES = {
-	搞笑: ['搞笑', '沙雕', '整活', '段子', '幽默', '笑死', '神回复', '搞笑视频', '喜剧', '抽象', '梗'],
-	游戏: ['游戏', '王者', '原神', '蛋仔', '我的世界', 'mc', '和平精英', '电竞', '开黑', '手游', '单机', '吃鸡', 'lol', 'steam', 'switch', 'ps5', '实况', '上分'],
-	美食: ['美食', '做饭', '菜', '探店', '甜品', '火锅', '小吃', '厨房', '烘焙', '食堂', '下饭', '夜宵', '奶茶'],
-	宠物: ['猫', '狗', '宠物', '萌宠', '喵', '汪', '仓鼠', '铲屎', '撸猫', '撸狗', '毛孩子'],
-	旅行: ['旅行', '旅游', '风景', '露营', '自驾', '出游', 'citywalk', 'city walk', '爬山', '海边', '打卡', '攻略', '出片'],
-	音乐舞蹈: ['翻唱', '音乐', '唱歌', '舞蹈', '跳舞', '广场舞', '编舞', '街舞', '吉他', '钢琴', 'live', '舞台', '歌曲', '翻跳', '配音', 'remix', 'bgm'],
-	颜值穿搭: ['穿搭', '化妆', '护肤', '颜值', '发型', '搭配', 'look', '口红', 'ootd', '妆容', '变美', '穿搭分享'],
-	剧情影视: ['剧情', '短剧', '影视', '电影', '解说', '追剧', '片段', '演技', '反转', '悬疑', '动漫'],
-	数码科技: ['数码', '科技', '手机', '电脑', 'ai', '评测', '开箱', '显卡', '软件', '硬件', 'deepseek', 'chatgpt', '大模型', '编程', '代码', '装机'],
-	情感: ['情感', '恋爱', 'emo', '治愈', '遗憾', '分手', '孤独', '人生', '文案', '暗恋', '想念', '温柔'],
-	日常: ['日常', 'vlog', '生活', '记录', '碎碎念', '随手拍', '打工', '上班', '上课', '摸鱼', '宿舍', '周末'],
-	美女: ['美女', '小姐姐', '颜值', '女神', '漂亮', '好看', '身材', '清纯', '甜妹', '御姐'],
-	动漫: ['动漫', '二次元', '番剧', '动画', 'amv', 'mad', '漫画', 'cos', '手绘', '新番'],
-	学习: ['学习', '考研', '知识', '科普', '英语', '教程', '干货', '读书', '考公', '笔记', '自习', '期末'],
-	运动: ['运动', '健身', '跑步', '篮球', '足球', '瑜伽', '减肥', '球场', '打球', '徒步', '骑行'],
+// [FS-SHARE-TYPE-CLUSTER] 类型 → **同义词簇**（每簇 = 同一类内容的不同说法）。
+//   为什么改成簇：原来一个类型只有一串平铺词，召回只取前 3 个词、判定「任一词命中就算这类」，
+//   两件事合起来就是「搜到即认定类型」—— 搜一次搜到什么就都当成这一类，零校验。
+//   现在：① 召回按簇各取一个代表词分头搜（多个角度都覆盖）；② 判定按**命中了几簇**打分，
+//   只蹭到一个边角词（簇数不够）的直接丢弃。补词也不会再互相稀释。
+const DEFAULT_TYPE_CLUSTERS = {
+	搞笑: [['搞笑', '沙雕', '整活', '段子'], ['幽默', '笑死', '神回复', '搞笑视频'], ['喜剧', '抽象', '梗']],
+	游戏: [['游戏', '手游', '单机', '开黑'], ['王者', '原神', '蛋仔', '我的世界', 'mc', '和平精英', '吃鸡'], ['电竞', 'lol', 'steam', 'switch', 'ps5', '实况', '上分']],
+	美食: [['美食', '探店', '小吃', '下饭'], ['做饭', '厨房', '烘焙', '食堂'], ['火锅', '甜品', '夜宵', '奶茶']],
+	宠物: [['宠物', '萌宠', '毛孩子', '铲屎'], ['猫', '喵', '撸猫', '仓鼠'], ['狗', '汪', '撸狗']],
+	旅行: [['旅行', '旅游', '出游', '自驾'], ['风景', '海边', '爬山', '露营'], ['citywalk', 'city walk', '打卡', '出片', '攻略']],
+	音乐舞蹈: [['音乐', '歌曲', '唱歌', '翻唱'], ['舞蹈', '跳舞', '编舞', '街舞', '翻跳'], ['吉他', '钢琴', 'live', '舞台', 'remix', 'bgm', '配音']],
+	颜值穿搭: [['穿搭', '搭配', 'ootd', 'look'], ['化妆', '妆容', '口红', '护肤'], ['颜值', '发型', '变美', '清纯']],
+	剧情影视: [['剧情', '短剧', '演技', '反转'], ['影视', '电影', '解说', '追剧', '片段'], ['悬疑', '动漫']],
+	数码科技: [['数码', '科技', '硬件', '装机'], ['手机', '电脑', '显卡', '开箱', '评测'], ['ai', 'deepseek', 'chatgpt', '大模型', '编程', '代码', '软件']],
+	情感: [['情感', '恋爱', '暗恋', '想念'], ['emo', '治愈', '温柔', '文案'], ['遗憾', '分手', '孤独', '人生']],
+	日常: [['日常', 'vlog', '记录', '生活'], ['碎碎念', '随手拍', '摸鱼', '周末'], ['打工', '上班', '上课', '宿舍']],
+	美女: [['美女', '小姐姐', '女神'], ['漂亮', '好看', '身材', '颜值'], ['清纯', '御姐']],
+	动漫: [['动漫', '番剧', '动画', '新番'], ['二次元', 'cos', '漫展'], ['amv', 'mad', '手绘', '漫画']],
+	学习: [['学习', '自习', '笔记', '读书'], ['考研', '考公', '期末', '英语'], ['知识', '科普', '教程', '干货']],
+	运动: [['运动', '健身', '减肥', '瑜伽'], ['跑步', '徒步', '骑行'], ['篮球', '足球', '球场', '打球']],
+	// [FS-SHARE-TYPE-CLUSTER] 本机配置里写了「二次元 / 甜妹 / 萝莉」，原来这三个名字不在词表里，
+	//   pickTypes 只能拿名字本身当唯一搜索词（一次搜一个词、只认这一个词），命中全靠运气。
+	//   现在补成正式类型，各自三簇同义词。
+	萝莉: [['萝莉', '洛丽塔', 'lolita'], ['萌妹', '萌系', '萝莉控'], ['双马尾', 'jk', '妹妹']],
+	甜妹: [['甜妹', '甜美', '甜心'], ['可爱', '软萌', '奶音'], ['初恋', '少女感', '笑容']],
+	二次元: [['二次元', '动漫', '番剧'], ['cos', 'cosplay', '漫展'], ['acg', '纸片人', '漫剪']],
 };
+/** 扁平词表（兼容老调用点 / 设置页展示）：类型名 → 去重后的全部命中词。 */
+const DEFAULT_SHARE_TYPES = Object.fromEntries(
+	Object.entries(DEFAULT_TYPE_CLUSTERS).map(([k, cls]) => [k, [...new Set(cls.flat())]])
+);
 
 /**
  * 把设置里的类型词表归一成 [{name, words}]：内置打底，用户写同名就覆盖，写新名字就新增。
@@ -89,7 +104,8 @@ function normalizeShareTypes(raw, deleted) {
 		.map((x) => String(x ?? '').trim())
 		.filter((x) => x !== ''));
 	for (const k of gone) merge.delete(k);
-	return [...merge.entries()].map(([name, words]) => ({ name, words }));
+	// [FS-SHARE-TYPE-CLUSTER] 归一结果同时带 clusters：打分要靠它，只有扁平 words 判不出「命中了几簇」
+	return [...merge.entries()].map(([name, words]) => ({ name, words, clusters: clusterizeOf(name, words) }));
 }
 
 /** 一条作品属于哪几类（文案 + 话题里出现类型词就算这类；可能同时好几类，也可能一类都不是）。 */
@@ -97,6 +113,129 @@ function classifyVideo(item, types) {
 	const hay = `${String(item?.desc ?? '')} ${(Array.isArray(item?.tags) ? item.tags : []).join(' ')}`.toLowerCase();
 	if (hay.trim() === '') return [];
 	return types.filter((t) => t.words.some((w) => hay.includes(w))).map((t) => t.name);
+}
+
+/**
+ * [FS-SHARE-TYPE-CLUSTER] 把一个类型的词拆成簇：
+ *   · 内置簇里仍存在的词 → 原样成簇（用户删过的词自动剔除）；
+ *   · 用户自己加的新词 / 老配置里没簇信息的词 → 每 3 个并成一簇；
+ *   · 一个簇都凑不出 → 类型名自己当唯一簇。
+ */
+function clusterizeOf(name, words) {
+	const wl = (Array.isArray(words) ? words : []).map((w) => String(w ?? '').trim().toLowerCase()).filter((w) => w !== '');
+	const wordSet = new Set(wl);
+	const builtin = Array.isArray(DEFAULT_TYPE_CLUSTERS[name]) ? DEFAULT_TYPE_CLUSTERS[name] : [];
+	const clusters = [];
+	const used = new Set();
+	for (const cl of builtin) {
+		const kept = (Array.isArray(cl) ? cl : [cl])
+			.map((w) => String(w ?? '').trim().toLowerCase())
+			.filter((w) => w !== '' && wordSet.has(w));
+		if (kept.length === 0) continue;
+		clusters.push([...new Set(kept)]);
+		for (const w of kept) used.add(w);
+	}
+	const rest = wl.filter((w) => !used.has(w));
+	for (let i = 0; i < rest.length; i += 3) clusters.push(rest.slice(i, i + 3));
+	if (clusters.length === 0) clusters.push(wl.length > 0 ? [...new Set(wl)] : [String(name ?? '').trim().toLowerCase()].filter((w) => w !== ''));
+	return clusters;
+}
+
+/**
+ * [FS-SHARE-TYPE-SCORE] 三档匹配严格度 —— 替代原来「搜到即认定类型」的一刀切。
+ *   · 宽松 loose：沾到一个词就能算（召回多，发错风险高）；
+ *   · 标准 standard：默认。至少命中 1 簇，且分数要达到 55（≈ 命中 1 簇 + 1 个强信号：话题/标签里就有这个词）；
+ *   · 严格 strict：至少要命中 2 簇同义词，分数线 75 —— 宁可不发，也不发不对味的。
+ * 设置页把 dm.typeMatchLevel 写成 loose / standard / strict 即可切换；dm.typeMatchMinScore 可单独改分数线。
+ */
+export const TYPE_MATCH_LEVELS = {
+	loose: { level: 'loose', label: '宽松', minScore: 30, minClusters: 1 },
+	standard: { level: 'standard', label: '标准', minScore: 55, minClusters: 1 },
+	strict: { level: 'strict', label: '严格', minScore: 75, minClusters: 2 },
+};
+
+/** 严格度 → 实际生效的策略 {level, label, minScore, minClusters}（不认识的档位按标准档）。 */
+export function resolveMatchPolicy(level, rawMinScore) {
+	const key = String(level ?? '').trim().toLowerCase();
+	const base = TYPE_MATCH_LEVELS[key] ?? TYPE_MATCH_LEVELS.standard;
+	const custom = Number(rawMinScore);
+	// 只认正数：0 / 空 / 负数都当「没单独设分数线」，回落到档位自带的分数线
+	// （设置页留空时会写 0，若按 0 算就把标准档 55 分变成 1 分，等于没拦）
+	const minScore = Number.isFinite(custom) && custom > 0 ? Math.min(100, Math.max(1, Math.round(custom))) : base.minScore;
+	return { ...base, minScore };
+}
+
+/**
+ * 给「一条视频 vs 一个类型」打分：
+ *   score = min(100, 命中簇权重和 × 45 + 强信号数 × 10)
+ *   · 命中簇权重：词长 ≥2 记 1，单字（猫/狗/菜这种）只记 0.5 —— 单字在长文案里太容易误命中；
+ *   · 强信号：命中的词就写在**话题/标签**里，或文案里带 #话题 —— 说明作者自己也这么标，比正文擦边更可信；
+ *   · 只命中单字且没有强信号 → 最高只给 20 分，当噪声处理。
+ * ok = score ≥ minScore 且命中簇数 ≥ minClusters（pickShareVideo 只留 ok 的）。
+ */
+export function scoreTypeMatch(item, type, policy = null) {
+	const pol = policy !== null && policy !== undefined && Number.isFinite(Number(policy.minScore))
+		? policy
+		: resolveMatchPolicy('standard');
+	const desc = String(item?.desc ?? '').toLowerCase();
+	const tags = (Array.isArray(item?.tags) ? item.tags : [])
+		.map((t) => String(t ?? '').trim().toLowerCase())
+		.filter((t) => t !== '');
+	const hay = `${desc} ${tags.join(' ')}`;
+	const name = String(type?.name ?? type ?? '');
+	const clusters = Array.isArray(type?.clusters) && type.clusters.length > 0
+		? type.clusters
+		: (Array.isArray(type?.words) && type.words.length > 0 ? type.words.map((w) => [w]) : [[name.toLowerCase()]]);
+	if (hay.trim() === '' || name === '') {
+		return { type: name, score: 0, hitClusters: 0, hitWords: [], strongHits: 0, ok: false, policy: pol.level };
+	}
+	let clusterSum = 0;
+	let hitClusters = 0;
+	let strongHits = 0;
+	const hitWords = [];
+	for (const cl of clusters) {
+		const words = (Array.isArray(cl) ? cl : [cl]).map((w) => String(w ?? '').trim().toLowerCase()).filter((w) => w !== '');
+		let best = 0;
+		let strong = false;
+		for (const w of words) {
+			if (!hay.includes(w)) continue;
+			const weight = w.length >= 2 ? 1 : 0.5;
+			if (weight > best) best = weight;
+			hitWords.push(w);
+			if (tags.includes(w) || desc.includes(`#${w}`) || tags.some((t) => t.includes(w))) strong = true;
+		}
+		if (best > 0) {
+			clusterSum += best;
+			hitClusters += 1;
+			if (strong) strongHits += 1;
+		}
+	}
+	let score = Math.min(100, Math.round(clusterSum * 45 + strongHits * 10));
+	const uniq = [...new Set(hitWords)];
+	const onlySingleChar = uniq.length > 0 && uniq.every((w) => w.length < 2);
+	if (onlySingleChar && strongHits === 0) score = Math.min(score, 20);
+	const ok = score >= Number(pol.minScore) && hitClusters >= Number(pol.minClusters);
+	return { type: name, score, hitClusters, hitWords: uniq.slice(0, 10), strongHits, ok, policy: pol.level };
+}
+
+/** 一条视频对「想要的几个类型」各打一次分，取最像的那个（同分优先命中簇多的）。 */
+export function bestTypeMatch(item, wantTypes, types, policy = null) {
+	const pol = policy !== null && policy !== undefined && Number.isFinite(Number(policy.minScore))
+		? policy
+		: resolveMatchPolicy('standard');
+	const want = (Array.isArray(wantTypes) ? wantTypes : []).map((t) => String(t ?? '').trim()).filter((t) => t !== '');
+	let best = { type: '', score: 0, hitClusters: 0, hitWords: [], strongHits: 0, ok: false, policy: pol.level };
+	for (const n of want) {
+		const def = (Array.isArray(types) ? types : []).find((t) => String(t?.name ?? '') === n)
+			?? { name: n, words: [n], clusters: [[n]] };
+		const m = scoreTypeMatch(item, def, pol);
+		if (m.score > best.score
+			|| (m.score === best.score && m.ok === true && best.ok !== true)
+			|| (m.score === best.score && m.hitClusters > best.hitClusters)) {
+			best = m;
+		}
+	}
+	return best;
 }
 
 /** 「搞笑,游戏」/['搞笑','游戏'] → ['搞笑','游戏']（留空 = 不限）。 */
@@ -157,6 +296,8 @@ export function dmCfg(d) {
 		.filter((x) => x.name !== '');
 	// 同一个人的冷却：新字段是小时；老配置里只写了 coolDays 的按天换算过来
 	const coolHours = Number.isFinite(Number(dm.coolHours)) ? num(dm.coolHours, 24, 1, 720) : num(dm.coolDays, 1, 1, 60) * 24;
+	// [FS-SHARE-TYPE-SCORE] 类型匹配严格度（宽松 / 标准 / 严格，默认标准）；dm.typeMatchMinScore 可单独改分数线
+	const matchPolicy = resolveMatchPolicy(dm.typeMatchLevel, dm.typeMatchMinScore);
 	return {
 		enabled: on && dm.enabled === true,
 		// perDay 是「同一个人一天最多几次」——每个人单独算，不是所有人加起来
@@ -167,6 +308,8 @@ export function dmCfg(d) {
 		// 视频类型：词表 + 每人想收哪几类（targets[].wantTypes）
 		shareTypes,
 		shareTypeNames: shareTypes.map((t) => t.name),
+		// [FS-SHARE-TYPE-SCORE] 这次生效的匹配策略（选片按它过滤，低于阈值的一律丢弃）
+		matchPolicy,
 		// [FS-DM-TYPE-DEL] 内置类型名单 + 删掉的类型名单一起回给设置页：
 		// 前端据此判断「哪些是内置（不给删）/ 哪些是自己加的（给删）」，不用再各存一份硬编码，
 		// 也不会再出现「自己加的类型被当成内置、删不掉」。
@@ -990,23 +1133,117 @@ const SEARCH_VIDEOS_JS = String.raw`(() => {
 })()`;
 
 /**
- * [FS-DM-SHARE-OTHERS] 在搜索页按关键词抓一批视频（别人的），滚几次多拿一些。
- * 搜索本身就是「按类型筛」—— 搜什么类型拿到的就是什么类型。
- * [FS-SHARE-STRICT-TYPE] 用户要求「不是那个类型就不许发」，所以这里再加一道关：
- *   卡片文案必须真的带上该类型的关键词（或词表里的词）才算数，
- *   否则宁可这批一条不返回（上层会因此这次不发），也不把不对味的内容塞进池。
+ * [FS-SHARE-API-SOURCE] 抖音搜索接口（只读端点）。
+ *   实测结论（2026-11-17 本机探测脚本 probe-search*.mjs）：
+ *     · /aweme/v1/web/general/search/single/ 与 /aweme/v1/web/search/item/ 在 **不带 a_bogus**
+ *       （只由 DouyinHttp.request 自动加 x-secsdk-web-signature）时返回 200 / status_code=0 / 各 10~12 条视频；
+ *     · 反而带上 a_bogus 时 data 为空 —— 所以这里显式**不传 aBogus**；
+ *     · 返回项里 aweme_info 的 desc / text_extra(话题) / duration(毫秒) / statistics.digg_count 都齐，
+ *       浏览器搜索页那两大毛病（卡片只有半句文案、durS 拿不到）在接口侧根本不存在。
+ *   数据源顺序：接口优先，接口不可用（没 cookie / 接口变了 / 非 http 模式）才退回浏览器搜索页。
  */
-async function searchPool(social, keyword, words = []) {
-	const browser = social.host?.browser;
+const SEARCH_API_PATH = '/aweme/v1/web/general/search/single/';
+const SEARCH_API_FALLBACK_PATH = '/aweme/v1/web/search/item/';
+
+export async function searchByHttp(social, keyword, { count = 15 } = {}) {
+	const http = social.http ?? null;
 	const kw = String(keyword ?? '').trim();
-	if (!browser || kw === '') return [];
-	// [FS-SHARE-SEARCH-TRUST] 搜索词本身就是类型 —— 抖音按这个词排出来的就是这一类的，直接收。
-	// 旧版还有一道「卡片文案必须带类型词」的二次拦截：卡片上常是歌词 / 半句话题 / 空文案，
-	// 一拦就全灭（实测搜「萝莉」抓到的全是空 desc），池子里只剩收藏和推荐，
-	// 最后一条都对不上类型 → 整轮不发。用户要的就是「搜什么发什么」，这里不再筛文案。
-	const hints = [...new Set([kw, ...(Array.isArray(words) ? words : [])].map((w) => String(w ?? '').trim()).filter((w) => w !== ''))];
-	void hints;
-	// [FS-SHARE-SEARCH-V2] 两套地址都试：先视频 Tab，再裸搜索页（新版有时只认后者）
+	if (kw === '') return { ok: false, list: [], reason: 'empty-keyword' };
+	if (!http || typeof http.request !== 'function') return { ok: false, list: [], reason: 'no-http' };
+	if (http.isLoggedIn?.() !== true) return { ok: false, list: [], reason: 'no-cookie' };
+	const referer = `https://www.douyin.com/search/${encodeURIComponent(kw)}?type=video`;
+	const tries = [
+		{
+			path: SEARCH_API_PATH,
+			params: [
+				['keyword', kw], ['search_channel', 'aweme_video_web'], ['offset', '0'], ['count', String(count)],
+				['sort_type', '0'], ['publish_time', '0'], ['filter_duration', ''], ['search_source', 'tab_search'],
+				['query_correct_type', '1'], ['is_filter_search', '0'], ['from_group_id', ''],
+			],
+		},
+		{
+			path: SEARCH_API_FALLBACK_PATH,
+			params: [
+				['keyword', kw], ['offset', '0'], ['count', String(count)], ['search_source', 'normal_search'],
+				['query_correct_type', '1'], ['is_filter_search', '0'], ['from_group_id', ''],
+			],
+		},
+	];
+	for (const t of tries) {
+		// 注意：不传 aBogus —— 搜索端点带签名反而返回空数据（见上面实测结论）
+		const r = await http.request({ path: t.path, params: t.params, referer }).catch(() => null);
+		if (!r || r.ok !== true) continue;
+		const arr = Array.isArray(r.json?.data) ? r.json.data
+			: Array.isArray(r.json?.aweme_list) ? r.json.aweme_list : [];
+		const list = [];
+		for (const d of arr) {
+			// type=1 才是视频；type=6 之类是混排广告/直播条目，没有 aweme_info，直接跳过
+			const a = d?.aweme_info
+				?? (Array.isArray(d?.aweme_list) ? d.aweme_list[0] : null)
+				?? (d?.aweme_id ? d : null);
+			if (!a) continue;
+			const it = toVideoItem(a);
+			if (!/^\d{8,}$/.test(it.id)) continue;
+			list.push({ ...it, hitWords: [], viaApi: true, srcType: '' });
+		}
+		if (list.length > 0) return { ok: true, list, path: t.path };
+	}
+	return { ok: false, list: [], reason: 'api-empty' };
+}
+
+/**
+ * [FS-SHARE-TYPE-CLUSTER] 从一个类型里挑「召回用」的关键词：每个同义词簇取一个代表词（优先 2 字以上，
+ * 单字搜出来太杂），类型名本身永远排第一。多词分别召回是第 2 期改造的核心 —— 只搜一个词时，
+ * 搜到的 20 条全是同一个角度，命中簇数永远上不去，打分就没意义。
+ */
+function recallWordsFor(name, def, maxPerType = 4) {
+	const clusters = Array.isArray(def?.clusters) && def.clusters.length > 0
+		? def.clusters
+		: (Array.isArray(def?.words) && def.words.length > 0 ? def.words.map((w) => [w]) : []);
+	const out = [];
+	const self = String(name ?? '').trim();
+	if (self !== '') out.push(self);
+	for (const cl of clusters) {
+		const words = (Array.isArray(cl) ? cl : [cl]).map((w) => String(w ?? '').trim()).filter((w) => w !== '');
+		if (words.length === 0) continue;
+		const best = words.find((w) => w.length >= 2) ?? words[0];
+		if (best !== '' && !out.includes(best)) out.push(best);
+	}
+	return out.slice(0, Math.max(1, maxPerType));
+}
+
+/** 从文案里把 #话题 抠出来（浏览器兜底抓不到 cha_list 时用，打分靠它）。 */
+function tagsFromDesc(desc) {
+	const out = [];
+	for (const m of String(desc ?? '').matchAll(/#([^\s#@]{1,24})/g)) {
+		const t = String(m[1] ?? '').trim();
+		if (t !== '') out.push(t);
+	}
+	return [...new Set(out)].slice(0, 12);
+}
+
+/**
+ * [FS-DM-SHARE-OTHERS] 按关键词抓一批视频（别人的）。
+ * [FS-SHARE-SEARCH-TRUST-OFF] 旧版这里写着「搜到什么就当什么类型、不校验文案」，那个口径已拆掉。
+ *   现在本函数只负责**取候选**（desc / tags / durS 尽量带全），是不是那个类型由 pickShareVideo
+ *   按同义词簇命中打分 + 阈值裁决。
+ */
+async function searchPool(social, keyword, words = [], { count = 15 } = {}) {
+	const kw = String(keyword ?? '').trim();
+	if (kw === '') return [];
+	void words;
+	// ① 接口优先（字段齐全、能算 durS）
+	const byApi = await searchByHttp(social, kw, { count }).catch((e) => ({ ok: false, list: [], reason: errText(e) }));
+	if (byApi.ok === true && byApi.list.length > 0) {
+		social.log?.('info', `[fish-soul] 抖音：搜「${kw}」走接口拿到 ${byApi.list.length} 条（文案/话题/时长齐全）`);
+		return byApi.list;
+	}
+	// ② 接口不行 → 退回浏览器搜索页（字段残缺，durS 拿不到，靠 desc 里的 #话题 补 tags）
+	const browser = social.host?.browser;
+	if (!browser) {
+		social.log?.('warn', `[fish-soul] 抖音：搜「${kw}」接口不可用（${byApi.reason ?? '未知'}）且没有浏览器，这条搜不了`);
+		return [];
+	}
 	const urls = [
 		`https://www.douyin.com/search/${encodeURIComponent(kw)}?type=video`,
 		`https://www.douyin.com/search/${encodeURIComponent(kw)}`,
@@ -1027,28 +1264,30 @@ async function searchPool(social, keyword, words = []) {
 			for (const x of (Array.isArray(found) ? found : [])) {
 				const id = String(x?.id ?? '');
 				if (!/^\d{8,20}$/.test(id) || seen.has(id)) continue;
-				// [FS-SHARE-SEARCH-TRUST] 搜索页给的就是「这个类型」的视频 → 直接收，不再按文案拦
 				seen.add(id);
-				out.push({ id, desc: String(x?.desc ?? ''), tags: [] });
+				const desc = String(x?.desc ?? '');
+				// [FS-SHARE-TYPE-CLUSTER] 搜索页只给半句卡片文案 → 把 #话题 抠出来当 tags，别提交通用词的打分能力
+				out.push({ id, desc, tags: tagsFromDesc(desc), durS: 0, digg: 0, at: 0, hitWords: [], viaApi: false, srcType: '' });
 			}
 			if (out.length >= 20) break;
 			await browser.eval('window.scrollBy(0, 2400)').catch(() => {});
 			await sleep(1500 + i * 400);
 		}
-		social.log?.('info', `[fish-soul] 抖音：搜「${kw}」抓到 ${out.length} 条（搜索结果直接按「${kw}」这一类算）`);
+		social.log?.('info', `[fish-soul] 抖音：搜「${kw}」走搜索页抓到 ${out.length} 条（接口不通，字段可能不全）`);
 		if (out.length > 0) break;
 	}
 	return out;
 }
 
 /**
- * [FS-DM-SHARE-OTHERS] 「别人的视频」池 —— 用户明确要求：分享视频不许再发希希自己发的。
+ * [FS-DM-SHARE-OTHERS] 「别人的视频」池 —— 分享视频不许再发希希自己发的。
  *
- * 来源三条，按可靠度排：① 按她给这个人选的类型去搜索页抓（这类内容才对得上）；
- * ② 她的收藏夹（listcollection，实测可直接拿）；③ 首页推荐流（每次都是新的一批）。
- * 全部剔掉她自己作品的 id；缓存 12 小时（key 里带类型，换类型就重抓）。
+ * 来源三条，按可靠度排：① 按她给这个人选的类型做**多词召回**（同义词簇各取代表词分别搜，命中词累加）；
+ * ② 她的收藏夹（listcollection）；③ 首页推荐流。全部剔掉她自己作品的 id；缓存 12 小时。
+ * [FS-SHARE-POOL-V5] 池里每条都带 hitWords（哪几个搜索词召回到的）与 score（文案/话题打分），
+ *   pickShareVideo 再按阈值做最终裁决 —— 池子只负责「多召回、留证据」，不再自己认定类型。
  */
-async function othersPool(social, { wantTypes = [], types = [] } = {}) {
+export async function othersPool(social, { wantTypes = [], types = [] } = {}) {
 	const want = (Array.isArray(wantTypes) ? wantTypes : []).map((t) => String(t ?? '').trim()).filter((t) => t !== '');
 	const key = want.join('|');
 	let cached = null;
@@ -1061,12 +1300,13 @@ async function othersPool(social, { wantTypes = [], types = [] } = {}) {
 		digg: Number(x?.digg) || 0,
 		at: Number(x?.at) || 0,
 		srcType: String(x?.srcType ?? ''),
+		hitWords: Array.isArray(x?.hitWords) ? x.hitWords.map((w) => String(w ?? '')).filter((w) => w !== '') : [],
+		score: Number(x?.score) || 0,
+		viaApi: x?.viaApi === true,
 	});
-	// [FS-SHARE-SEARCH-V2] 缓存带版本号：老版本缓存里全是「srcType 为空」的残池（搜索页一条没抓到），
-	// 不认版本的话修好了也会继续吃那口坏缓存、继续「没抓到这类的视频」。
-	// [FS-DM-SHARE-V4] 升到 v4：v3 会把「一条没搜到 + 收藏/推荐凑出来的池」缓存 12 小时，
-	// 于是整天都在吃那口没有类型的旧池，永远「13 条没一条对得上」。v4 起只有 search=true（真按类型搜到过）才认缓存。
-	const cachedOk = Number(cached?.v ?? 0) === 4
+	// [FS-SHARE-POOL-V5] 缓存升到 v5：v4 池里没有 hitWords / score，而且都是搜索页来的半句文案，
+	//   不认版本会继续吃旧池、继续拿不到证据打分。
+	const cachedOk = Number(cached?.v ?? 0) === 5
 		&& cached?.key === key
 		&& Array.isArray(cached?.items) && cached.items.length > 0
 		&& Date.now() - Number(cached?.at ?? 0) < 12 * HOUR_MS
@@ -1084,35 +1324,64 @@ async function othersPool(social, { wantTypes = [], types = [] } = {}) {
 	}
 	const notMine = (a) => !(selfSec !== '' && String(a?.author?.sec_uid ?? '') === selfSec);
 	const out = [];
-	const seen = new Set();
+	const seen = new Map();
 	const put = (list, srcType) => {
 		for (const x of (Array.isArray(list) ? list : [])) {
 			const id = String(x?.id ?? '');
-			if (!/^\d{8,}$/.test(id) || selfIds.has(id) || seen.has(id)) continue;
-			seen.add(id);
-			out.push({ ...norm(x), srcType: srcType ?? String(x?.srcType ?? '') });
+			if (!/^\d{8,}$/.test(id) || selfIds.has(id)) continue;
+			const hit = Array.isArray(x?.hitWords) ? x.hitWords.map((w) => String(w ?? '')).filter((w) => w !== '') : [];
+			const prev = seen.get(id);
+			if (prev) {
+				// 同一个视频被多个搜索词召回 → 命中词累加（pickShareVideo 的簇打分也吃这个证据）
+				prev.hitWords = [...new Set([...prev.hitWords, ...hit])];
+				if ((Number(x?.score) || 0) > (Number(prev.score) || 0)) prev.score = Number(x?.score) || 0;
+				continue;
+			}
+			const row = { ...norm(x), srcType: srcType ?? String(x?.srcType ?? ''), hitWords: [...new Set(hit)] };
+			seen.set(id, row);
+			out.push(row);
 		}
 	};
 
-	// ① 按类型搜（第一个词搜不到就换下一个词再试，词表没配就拿类型名）
+	// ① 按类型多词召回（每个同义词簇取一个代表词分别搜；命中词记在 hitWords 上）
 	let searchHit = 0;
+	let searchMiss = 0;
 	for (const t of want) {
 		const def = types.find((x) => x.name === t);
-		const kws = (Array.isArray(def?.words) ? def.words : []).map((w) => String(w ?? '').trim()).filter((w) => w !== '').slice(0, 3);
-		if (kws.length === 0) kws.push(t);
-		let got = [];
+		const kws = recallWordsFor(t, def, 4);
+		const gotAll = [];
 		for (const kw of kws) {
-			// [FS-SHARE-SEARCH-TRUST] 搜到什么就是什么类型（srcType 直接标成这次的类型词）
-			got = await searchPool(social, kw, [t, ...kws]).catch(() => []);
-			if (got.length > 0) break;
+			const got = await searchPool(social, kw, [t, ...kws]).catch(() => []);
+			if (got.length === 0) continue;
+			searchHit += got.length;
+			for (const g of got) {
+				const prev = gotAll.find((x) => x.id === g.id);
+				if (prev) {
+					prev.hitWords = [...new Set([...(prev.hitWords ?? []), kw])];
+					continue;
+				}
+				gotAll.push({ ...g, hitWords: [kw] });
+			}
+			// 每个类型召回够 24 条就够挑了，别把搜索接口刷太狠
+			if (gotAll.length >= 24) break;
 		}
-		if (got.length === 0) social.log?.('warn', `[fish-soul] 抖音：「${t}」这类一条都没搜到（试过 ${kws.join('/')}）`);
-		put(got, t);
-		searchHit += got.length;
+		if (gotAll.length === 0) {
+			searchMiss += 1;
+			social.log?.('warn', `[fish-soul] 抖音：「${t}」这类一条都没搜到（多词召回试过 ${kws.join('/')}）`);
+			continue;
+		}
+		// 打个「有几条真的带命中词」的日志，方便看召回质量（阈值裁决在 pickShareVideo）
+		const scored = gotAll.map((x) => {
+			const m = def ? scoreTypeMatch(x, def) : { score: 0, hitClusters: 0 };
+			return { ...x, score: Number(m.score) || 0, scoreClusters: Number(m.hitClusters) || 0 };
+		});
+		const withHit = scored.filter((x) => Number(x.score) > 0).length;
+		const viaApi = scored.filter((x) => x.viaApi === true).length;
+		social.log?.('info', `[fish-soul] 抖音：「${t}」多词召回 ${scored.length} 条（命中词打分>0 的 ${withHit} 条，接口来源 ${viaApi} 条；召回词 ${kws.join('/')}）`);
+		put(scored, t);
 	}
-	// [FS-SHARE-SEARCH-TRUST] 按类型搜到了 → 就只用搜索结果。
-	// 收藏夹 / 推荐流里的视频 srcType 是空的，严格模式下会被 pickShareVideo 一条不留地剔掉；
-	// 掺进来只会把池子弄脏（就是上次那「13 条没一条对得上」的来源），还会诱使缓存把脏池存 12 小时。
+	// [FS-SHARE-TYPE-SCORE] 现在「搜到」不等于「是那个类型」：只有打分命中（score>0）的才算搜到。
+	// 想彻底不掺脏数据就别动这里 —— 一条都没命中时才去收藏夹兜底，兜底的候选同样要过 pickShareVideo 的阈值。
 	const useFallback = want.length === 0 || searchHit === 0;
 	if (useFallback && http && typeof http.collection === 'function' && http.isLoggedIn?.() === true) {
 		const col = await http.collection({ count: 20 }).catch(() => null);
@@ -1125,16 +1394,24 @@ async function othersPool(social, { wantTypes = [], types = [] } = {}) {
 			await sleep(600);
 		}
 	}
-	// 搜索页抓到的多是卡片上那半句文案 → detail 补全文案/话题，挑类型才准
+	// 搜索页抓到的多是卡片上那半句文案 → detail 补全文案/话题/时长，打分才准
 	if (out.length > 0) {
 		const enriched = await enrichWithDetail(http, out, { limit: 12, concurrency: 3 }).catch(() => out);
 		out.length = 0;
+		seen.clear();
 		for (const x of (Array.isArray(enriched) ? enriched : [])) {
 			if (selfIds.has(String(x?.id ?? ''))) continue;
-			out.push({ ...norm(x), srcType: String(x?.srcType ?? '') });
+			put([x], String(x?.srcType ?? ''));
 		}
 	}
-	if (out.length > 0) { try { setKv(social.db, KV_OTHERS, { v: 4, search: searchHit > 0, at: Date.now(), key, items: out }); } catch { /* 存不下不影响这次 */ } }
+	if (want.length > 0 && searchMiss === want.length) {
+		social.log?.('warn', `[fish-soul] 抖音：想要的 ${want.join('/')} 一个词都没搜到内容（接口与搜索页都没给），这轮池子可能靠收藏/推荐凑`);
+	}
+	if (out.length > 0) {
+		try {
+			setKv(social.db, KV_OTHERS, { v: 5, search: searchHit > 0, at: Date.now(), key, items: out });
+		} catch { /* 存不下不影响这次 */ }
+	}
 	return out;
 }
 
@@ -1197,14 +1474,17 @@ function noteShared(social, name, id) {
 /**
  * 按「这个人想收哪几类」从候选池里挑一条（纯函数，方便单测）。
  * - wantTypes 空 = 不限，全池随机；
- * - [FS-DM-SHARE-OTHERS] excludeIds = 她自己作品的 id（用户要求：分享视频不要分享希希自己发的）——
- *   在**最早一步**就剔掉，后面的分类/回退都不会再把它捞回来；
- * - 候选带 srcType（搜索来的，本身就是那个类型）时直接算命中，不再靠文案猜；
- * - 过滤后一条都没有 → 退回全池并标 fellBack（只退到「别人的」池，不会再退到她自己的作品）；
- *   strictTypes=true 时不退（宁可这次不发，也不发不对类型的内容）；
- * - 同类里优先挑没发给过这个人的。
+ * - [FS-DM-SHARE-OTHERS] excludeIds = 她自己作品的 id（用户要求：分享视频不要分享希希自己发的）；
+ * - [FS-SHARE-TYPE-SCORE] **拆掉「搜到即认定类型」**：候选不再凭 srcType（= 搜索词）就算命中这一类，
+ *   必须按「文案 / 话题命中了这个类型的几簇同义词」打分，分数 ≥ policy.minScore 且命中簇数 ≥ policy.minClusters
+ *   才算；不达标的**直接丢弃**（旧版是「不达标就退回全池照发」，那等于类型约束形同虚设）；
+ * - 够格的候选按 score 降序 → 点赞降序取前 60% 再随机，避免总挑到「只蹭到一个边角词」的那条；
+ * - strictTypes=true（这个人指定了类型时的默认）时一条不达标就这次不发。
  */
-export function pickShareVideo(items, { wantTypes = [], types = [], sentIds = [], excludeIds = [], strictTypes = false, random = Math.random } = {}) {
+export function pickShareVideo(items, {
+	wantTypes = [], types = [], sentIds = [], excludeIds = [], strictTypes = false,
+	random = Math.random, policy = null,
+} = {}) {
 	const skip = new Set((Array.isArray(excludeIds) ? excludeIds : []).map((x) => String(x ?? '')));
 	const raw = (Array.isArray(items) ? items : [])
 		.filter((x) => /^\d{8,}$/.test(String(x?.id ?? '')) && !skip.has(String(x?.id ?? '')));
@@ -1212,26 +1492,57 @@ export function pickShareVideo(items, { wantTypes = [], types = [], sentIds = []
 	// 有话可说才值得分享 —— 只在「有时长信息」时丢，页面兜底拿不到时长的不受影响。
 	const pool = raw.filter((x) => !(Number(x?.durS) > 0 && Number(x?.durS) < 12));
 	const base = pool.length > 0 ? pool : raw;
-	if (base.length === 0) return { item: null, types: [], fellBack: false, matched: 0 };
+	if (base.length === 0) return { item: null, types: [], fellBack: false, matched: 0, rejected: 0 };
 	const want = (Array.isArray(wantTypes) ? wantTypes : []).filter((t) => String(t ?? '') !== '');
+	const pol = policy !== null && policy !== undefined && Number.isFinite(Number(policy.minScore))
+		? policy
+		: resolveMatchPolicy('standard');
 	let cands = base;
 	let fellBack = false;
+	let rejected = 0;
+	let picked = null;
 	if (want.length > 0) {
-		cands = base.filter((x) => want.includes(String(x?.srcType ?? '')) || classifyVideo(x, types).some((t) => want.includes(t)));
-		if (cands.length === 0) {
-			if (strictTypes) return { item: null, types: [], fellBack: true, matched: 0 };
-			cands = base;
-			fellBack = true;
+		// [FS-SHARE-TYPE-SCORE] 每条候选对每个想要的类型各打一次分，取最高的那个类型作为「它算哪类」
+		const scored = base
+			.map((x) => ({ x, m: bestTypeMatch(x, want, types, pol) }))
+			.filter((s) => s.m.ok === true)
+			.sort((a, b) => (b.m.score - a.m.score)
+				|| ((Number(b.x?.digg ?? 0) || 0) - (Number(a.x?.digg ?? 0) || 0)));
+		rejected = base.length - scored.length;
+		if (scored.length === 0) {
+			// 阈值不达标 → 这次不发（strictTypes 与否都一样：口径就是「宁可不发也别发错类型」）
+			return {
+				item: null, types: [], fellBack: true, matched: 0, rejected,
+				policyLevel: pol.level, reason: 'no-type-match-over-threshold',
+			};
 		}
+		cands = scored.map((s) => ({ ...s.x, _score: s.m.score, _hitClusters: s.m.hitClusters, _matchedType: s.m.type }));
+		picked = scored;
 	}
 	const fresh = cands.filter((x) => !sentIds.includes(String(x.id)));
 	const use = fresh.length > 0 ? fresh : cands;
-	// 同类里优先热门的（按点赞降序取前 60% 再随机），避免一直挑到最冷的那几条
-	const ranked = [...use].sort((a, b) => (Number(b?.digg ?? 0) || 0) - (Number(a?.digg ?? 0) || 0));
+	// 分层排序：先按类型匹配分（有类型要求时），同分再按点赞降序，取前 60% 再随机
+	const ranked = [...use].sort((a, b) => ((Number(b?._score ?? 0) || 0) - (Number(a?._score ?? 0) || 0))
+		|| ((Number(b?.digg ?? 0) || 0) - (Number(a?.digg ?? 0) || 0)));
 	const head = ranked.slice(0, Math.max(1, Math.ceil(ranked.length * 0.6)));
 	const idx = Math.min(head.length - 1, Math.max(0, Math.floor(random() * head.length)));
 	const item = head[idx];
-	return { item, types: classifyVideo(item, types), fellBack, matched: cands.length };
+	const m = want.length > 0
+		? (picked ?? []).find((s) => String(s.x?.id ?? '') === String(item?.id ?? ''))?.m
+			?? bestTypeMatch(item, want, types, pol)
+		: null;
+	return {
+		item,
+		types: classifyVideo(item, types),
+		fellBack,
+		matched: cands.length,
+		rejected,
+		policyLevel: pol.level,
+		score: Number(m?.score ?? 0),
+		hitClusters: Number(m?.hitClusters ?? 0),
+		hitWords: Array.isArray(m?.hitWords) ? m.hitWords : [],
+		matchedType: String(m?.type ?? ''),
+	};
 }
 
 /**
@@ -1258,6 +1569,10 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 		? opts.types
 		: (() => { try { return dmCfg(social.getConfig() ?? {}).shareTypes; } catch { return normalizeShareTypes(null); } })();
 	const wantTypes = Array.isArray(opts.wantTypes) ? opts.wantTypes : [];
+	// [FS-SHARE-TYPE-SCORE] 这次用哪档严格度：显式传就用传的，否则读设置页 dm.typeMatchLevel（默认标准档）
+	const policy = opts.policy !== null && opts.policy !== undefined && Number.isFinite(Number(opts.policy.minScore))
+		? opts.policy
+		: (() => { try { return dmCfg(social.getConfig() ?? {}).matchPolicy; } catch { return resolveMatchPolicy('standard'); } })();
 	// [FS-SHARE-CARD] 指定了 videoId（她刷到的那条视频）就发这一条，不再去池子里另挑 ——
 	//   「刷到有意思的就发给你」改走卡片之后走这里有。
 	const forcedId = /^\d{8,}$/.test(String(opts.videoId ?? '')) ? String(opts.videoId) : '';
@@ -1313,13 +1628,17 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 			excludeIds: selfIds,
 			strictTypes,
 			random: rnd,
+			policy,
 		});
 		item = pickedVideo.item;
+		if (item && want.length > 0) {
+			social.log?.('info', `[fish-soul] 抖音：${name} 想要的「${want.join('/')}」选中一条（来源类型 ${pickedVideo.matchedType || '-'}，匹配分 ${pickedVideo.score}，命中 ${pickedVideo.hitClusters} 簇：${(pickedVideo.hitWords ?? []).slice(0, 6).join('/') || '-'}；${policy.label}档要求 ≥${policy.minScore} 分且 ≥${policy.minClusters} 簇，本批挡掉 ${pickedVideo.rejected} 条）`);
+		}
 		if (!item) {
 			return {
 				ok: false,
 				error: want.length > 0
-					? `这次只发「${want.join('/')}」类的视频，池子里 ${items.length} 条没一条对得上这个类型，这次不发`
+					? `这次只发「${want.join('/')}」类的视频，池子里 ${items.length} 条没一条达到${policy.label}档匹配度（要 ≥${policy.minScore} 分且 ≥${policy.minClusters} 簇同义词命中），这次不发`
 					: `抓到的候选都被过滤掉了，这次不发（池子里 ${items.length} 条）`,
 			};
 		}
@@ -1759,6 +2078,7 @@ export async function runProactive(social, { manual = false } = {}) {
 	const shared = await host.exclusive('把她的一条视频分享给好友', () => shareVideoToFriend(social, friend, {
 		wantTypes: Array.isArray(friend.wantTypes) ? friend.wantTypes : [],
 		types: c.shareTypes,
+		policy: c.matchPolicy,
 	}), { maxMs: 200_000 })
 		.catch((e) => ({ ok: false, error: errText(e) }));
 	if (shared?.ok !== true) {
