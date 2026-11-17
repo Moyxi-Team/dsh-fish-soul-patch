@@ -1201,6 +1201,7 @@ try {
 	if (ONLY === '' || ONLY === 'wechat-services') patchWechatServices();
 	if (ONLY === '' || ONLY === 'moments') patchMoments();
 if (ONLY === '' || ONLY === 'sticker-action') patchShortAction();
+	if (ONLY === '' || ONLY === 'acp-strip') patchAcpStrip();
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;
@@ -1277,5 +1278,43 @@ function patchShortAction() {
 		D_NEW,
 		'微信侧提示词：不认识的表情包先联网查它表达什么，别反问对方',
 		'FS-STICKER-LOOKUP',
+	);
+}
+
+
+// P23：[FS-ACP-STRIP] 内核的上下文压缩记账提示（"📦 [ACP] Compressed …" / "N tokens saved."）漏进正文，
+//      微信上就是一条莫名其妙的系统日志；[FS-ACTION-ONLY] 剥完之后只剩一句动作神态（"皱着眉头认真思考"）时不再单独发一条。
+function patchAcpStrip() {
+	replaceOnce(
+		'behavior.js',
+		'\tconst before = t;\n\t// markdown',
+		`\tconst before = t;
+\t// 系统侧泄漏进正文的元信息：[FS-ACP-STRIP]
+\t// DSH 内核做上下文压缩时会给模型塞一段记账提示（"📦 [ACP] Compressed m00001–m00148 → 1 block(s)~"
+\t// 加 "107494 tokens saved."），模型有时会把它当正文抄出来，到微信上就是一条莫名其妙的系统日志。
+\t{
+\t\tconst next = t
+\t\t\t.replace(/^[^\\n]*\\[ACP\\][^\\n]*\\n?/gim, '')
+\t\t\t.replace(/^[ \\t]*\\d+\\s*tokens?\\s+saved\\.?[ \\t]*\\n?/gim, '')
+\t\t\t.replace(/^[ \\t]*m\\d+\\s*[–—\\-~]+\\s*m\\d+\\s*→\\s*\\d+\\s*block\\(s\\)~?[ \\t]*\\n?/gim, '');
+\t\tif (next !== t) { t = next; changes.add('系统提示泄漏'); }
+\t}
+\t// markdown`,
+		'剥掉漏进正文的 ACP 压缩记账提示',
+		'FS-ACP-STRIP',
+	);
+	replaceOnce(
+		'behavior.js',
+		'\t// 整段都是套话 / AI 自称：这条不发（调用方当成 [不回]）',
+		`\t// 只剩一句动作神态（"皱着眉头认真思考"）：没有要说的话，这条不发 [FS-ACTION-ONLY]
+\t{
+\t\tconst bare = t.replace(/[。！？!?～~….\\s]+$/g, '').trim();
+\t\tif (bare !== '' && [...bare].length <= 14 && !/[，,。！？!?；;：:]/.test(bare) && looksLikeAction(bare)) {
+\t\t\treturn { text: '', changes: [...changes, '只剩动作描写'] };
+\t\t}
+\t}
+\t// 整段都是套话 / AI 自称：这条不发（调用方当成 [不回]）`,
+		'只剩一句动作神态时不再单独发一条',
+		'FS-ACTION-ONLY',
 	);
 }

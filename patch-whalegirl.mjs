@@ -607,6 +607,7 @@ try {
 	if (ONLY === '' || ONLY === 'chatname') patchWechatChatName(root);
 	if (ONLY === '' || ONLY === 'uifallback') patchImageFallback(root);
 if (ONLY === '' || ONLY === 'mediafix') patchMediaFix(root);
+	if (ONLY === '' || ONLY === 'wxsquash') patchWechatNameSquash(root);
 } catch (err) {
 	failed += 1;
 	log(`出错：${err && err.message ? err.message : err}`);
@@ -692,5 +693,114 @@ function patchMediaFix(root) {
 		writeFileSync(vis, vtext.replace('Number(v.timeoutMs) || 30000', 'Number(v.timeoutMs) || 60000'), 'utf8');
 		changed += 1;
 		log(`[${id}] 已把视觉识别超时放宽到 60s（原文件：${saved}）`);
+	}
+}
+
+
+// W11 [FS-WX-INVIS]：微信备注里夹的零宽字符（U+200B 等）会让「UIA 读到的会话名」和
+// 「数据库里的备注名」严格比较失败 —— 文字走后台通道没事，图片/表情出站却一直 chat-mismatch。
+// 只在比较前去掉不可见字符，不改身份（"A B" 与 "AB" 仍然不相等）。
+function patchWechatNameSquash(root) {
+	const id = 'W11 wechat-name-invisible';
+	const SQUASH = `_INVISIBLE_CHARS = dict.fromkeys(map(ord, '\\u200b\\u200c\\u200d\\u2060\\ufeff\\u00ad\\u200e\\u200f'))
+
+
+def _squash_name(value):
+    """会话名归一：去掉零宽 / 方向控制等不可见字符再比。 [FS-WX-INVIS]
+
+    微信备注里的 U+200B 会让「UIA 读到的会话名」和「数据库里的备注名」严格比较失败，
+    表现为图片 / 表情出站一直 chat-mismatch，而纯文字走后台通道却是好的。
+    """
+    return str(value if value is not None else '').translate(_INVISIBLE_CHARS).strip()
+
+
+`;
+	const CLEAN = `_INVIS_CHARS = dict.fromkeys(map(ord, '\\u200b\\u200c\\u200d\\u2060\\ufeff\\u00ad\\u200e\\u200f'))
+# 频道口径前缀：soul 那边叫「微信·嘉新」「QQ·希希」，微信会话列表里只显示「嘉新」。
+_CHANNEL_PREFIX_RE = re.compile(r'^(?:微信|WeChat|QQ|企微|企业微信|飞书|钉钉)\\s*[·・\\.\\-—_:：]\\s*', re.I)
+# 括号注释：「（主人）」「(群)」这类备注是 soul 自己加的，微信里没有。
+_BRACKET_NOTE_RE = re.compile(r'[（(【\\[][^）)】\\]]{0,20}[）)】\\]]')
+
+
+def clean_shown_name(text):
+    """把频道口径的显示名剥成微信里真正的会话名。 [FS-WX-INVIS]
+
+    现场：soul 传下来的显示名是「微信·嘉新\\u200b\\u200b（主人）」，微信会话列表里只有「嘉新」。
+    带着前缀 / 括号 / 零宽字符去搜索和比对永远对不上，表现就是文字走后台通道能发出去，
+    图片和表情却一直 open-chat-failed / chat-mismatch。
+    """
+    s = str(text or '').translate(_INVIS_CHARS)
+    s = _CHANNEL_PREFIX_RE.sub('', s)
+    s = _BRACKET_NOTE_RE.sub('', s)
+    s = re.sub(r'\\s+', ' ', s).strip()
+    return s
+
+
+`;
+	const targets = [
+		{
+			file: join(root, 'bridge', 'sticker_transport.py'),
+			pairs: [
+				['def _is_blank(value):', SQUASH + 'def _is_blank(value):'],
+				[
+					"    cur = str(current or '').strip()\n    return bool(cur) and any(str(alias or '').strip() == cur for alias in (aliases or ()))",
+					"    cur = _squash_name(current)\n    return bool(cur) and any(_squash_name(alias) == cur for alias in (aliases or ()))",
+				],
+			],
+		},
+		{
+			file: join(root, 'bridge', 'bg_sender.py'),
+			pairs: [
+				['def name_score(alias, name):', SQUASH + 'def name_score(alias, name):'],
+				[
+					'    alias = str(alias or "").strip()\n    name = str(name or "").strip()\n    if not alias or not name:\n        return None',
+					'    alias = _squash_name(alias)\n    name = _squash_name(name)\n    if not alias or not name:\n        return None',
+				],
+			],
+		},
+		{
+			file: join(root, 'bridge', 'account_mixin.py'),
+			pairs: [
+				['def is_raw_chat_id(text):', CLEAN + 'def is_raw_chat_id(text):'],
+				[
+					'        if not out:\n            out.append(shown or username)',
+					'        if not out:\n            out.append(shown or username)\n        # [FS-WX-INVIS] 再补一个剥掉频道前缀 / 括号备注 / 零宽字符的干净名。\n        # 原名保留在前面（不改变现有优先级），干净名在打分时才会拿到 0 分精确匹配。\n        clean = clean_shown_name(shown)\n        if clean and clean != shown and clean not in out:\n            out.append(clean)',
+				],
+			],
+		},
+	];
+	for (const t of targets) {
+		if (!existsSync(t.file)) {
+			failed += 1;
+			note(id, 'MISSING', `没有 ${t.file}`);
+			log(`[${id}] 找不到 ${t.file}`);
+			continue;
+		}
+		const text = readFileSync(t.file, 'utf8');
+		if (text.includes('FS-WX-INVIS')) {
+			note(id, 'ALREADY', '会话名比对的零宽归一在位');
+			log(`[${id}] ${t.file} 已经在（跳过）`);
+			continue;
+		}
+		let out = text;
+		let drift = '';
+		for (const [o, n] of t.pairs) {
+			const at = out.indexOf(o);
+			if (at < 0) {
+				drift = o.split('\n')[0];
+				break;
+			}
+			out = out.slice(0, at) + n + out.slice(at + o.length);
+		}
+		if (drift) {
+			failed += 1;
+			note(id, 'DRIFT', '锚点对不上：' + drift.trim().slice(0, 40));
+			log(`[${id}] 停手：${t.file} 里锚点对不上（${drift.trim().slice(0, 40)}）`);
+			continue;
+		}
+		const saved = backup(t.file);
+		writeFileSync(t.file, out, 'utf8');
+		changed += 1;
+		log(`[${id}] 已改 ${t.file}：会话名比较前先去掉零宽字符（原文件：${saved}）`);
 	}
 }
