@@ -309,8 +309,10 @@ window.__ModuleLoader__.load({
 				tip: "名单都是微信 id（wxid 或备注 id），一行一个。主人说话按主人的语气回，别人按普通朋友。改完立刻生效。"
 			},
 				Row({ title: "主人" }, Area({ ...bind("masterUserIds"), placeholder: "wxid_xxxxxxxx" })),
-				Row({ title: "私聊只回这些人", desc: "留空 = 谁私聊都回；填了就只有名单里的人能聊" },
-					Area({ ...bind("privateAllowList"), placeholder: "留空 = 都回" })),
+				Row({ title: "私聊只回这些人", desc: "留空 = 谁都不放行；想谁都回就打开下面『所有私聊都回』，填了只放名单里的人" },
+					Area({ ...bind("privateAllowList"), placeholder: "留空 = 谁都不回" })),
+				Row({ title: "所有私聊都回", desc: "打开 = 谁私聊都理（跟 QQ 的「所有好友」一个意思）；关掉 = 只看上面那份名单。主人不受名单限制", meta: Tag(w.allFriends === true ? "都回" : "看名单", w.allFriends === true ? undefined : "outline") },
+					sw("所有私聊都回", w.allFriends === true, (v) => save({ allFriends: v }))),
 				Row({ title: "叫她的名字", desc: "群里没 @ 她时，喊到这些名字也算在叫她；一行一个" },
 					Area({ ...bind("callNames"), placeholder: "希希 / 鼠鼠 / 大肥鱼，每行一个" })));
 
@@ -326,7 +328,7 @@ window.__ModuleLoader__.load({
 				}, sw("所有群都能接话", w.allGroups === true, (v) => save({ allGroups: v }))),
 				Row({
 					title: "只在叫名字时才回",
-					desc: "打开 = 群里得叫「" + (w.callNames ?? []).join(" / ") + "」她才接；关掉 = 群里正常聊天也可能插一句",
+					desc: "打开 = 得叫「" + (w.callNames ?? []).join(" / ") + "」她才接（群里没 @ 也算）；关掉 = 正常聊天也可能插一句",
 					meta: Tag(w.mentionOnly === true ? "点名才回" : "可能随时插话", "outline")
 				}, sw("只在叫名字时才回", w.mentionOnly === true, (v) => save({ mentionOnly: v }))),
 				Row({

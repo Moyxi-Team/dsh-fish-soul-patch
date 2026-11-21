@@ -18,3 +18,6 @@ history/
 *.bak
 *.orig
 *.bak.*
+*.bak-*
+__pycache__/
+*.pyc

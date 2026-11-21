@@ -16,6 +16,17 @@ import engine as G
 IMAGE_DIR = os.path.join(G.ROOT, 'data', 'dsh-inbox')
 
 
+def _window_usable(desktop, hwnd):
+    """[WHALE-IMAGE-FOREGROUND-RETRY] 窗口还在、可见、没最小化：UIA 交互能把它带到前台。"""
+    try:
+        windows = desktop.windows
+        return bool(windows.IsWindow(hwnd)
+                    and windows.IsWindowVisible(hwnd)
+                    and not windows.IsIconic(hwnd))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def attach(runtime):
     """把 send_outbound_image 挂到 BridgeRuntime 上；幂等，重复调用不覆盖。"""
     if runtime is None or hasattr(runtime, 'send_outbound_image'):
@@ -47,13 +58,39 @@ def _send(self, path, chat_display_name, chat_username=''):
 
     try:
         # ① 需要微信主窗在前台，粘贴通道只往已聚焦的会话发
+        # [WHALE-IMAGE-FOREGROUND-RETRY] 置前只重试 3 次（间隔 150ms），抢不到也不再整张丢图：
+        # 现场日志连续三次 outbound-image failed/could-not-bring-wechat-to-front，微信窗口
+        # 明明开着、只是没被置到最前，图 / 表情就全被丢掉，用户只看到「她一个字都不回」。
+        # 只要 hwnd 有效、窗口可见且没最小化就继续——后面的 UIA 打开会话 / 点输入框
+        # 本身会把微信带到前台；窗口无效或最小化时才返回原错误码。
         try:
-            if not desktop.foreground(hwnd):
+            brought = False
+            try:
+                brought = bool(desktop.foreground(hwnd))
+            except Exception:  # noqa: BLE001
+                brought = False
+            if not brought:
                 snap = self.snapshot_win_state()
-                if not self.force_foreground(hwnd) or not desktop.foreground(hwnd):
-                    self.restore_win_state(snap)
-                    snap = None
+                for _try in range(3):
+                    try:
+                        self.force_foreground(hwnd)
+                        if desktop.foreground(hwnd):
+                            brought = True
+                            break
+                    except Exception:  # noqa: BLE001
+                        pass
+                    if _try < 2:
+                        time.sleep(0.15)
+            if not brought:
+                if not _window_usable(desktop, hwnd):
+                    if snap is not None:
+                        try:
+                            self.restore_win_state(snap)
+                        except Exception:  # noqa: BLE001
+                            pass
+                        snap = None
                     return bad('could-not-bring-wechat-to-front')
+                G.log('[outbound-image] 微信没能置到前台，但窗口有效可见，继续发送')
         except Exception:
             if snap is not None:
                 try:

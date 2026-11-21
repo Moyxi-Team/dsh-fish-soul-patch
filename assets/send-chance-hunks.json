@@ -9,19 +9,20 @@
  },
  {
   "id": "P24 voice-cfg",
-  "title": "voiceConfig 新增 chance（默认 0.25）",
+  "title": "voiceConfig 新增 chance（默认 0.5）",
   "file": "voice.js",
   "marker": "FS-SEND-CHANCE-VOICE-CFG",
   "old": "\t\tspeak: ['never', 'mirror', 'sometimes'].includes(v.speak) ? v.speak : 'mirror',",
-  "new": "\t\tspeak: ['never', 'mirror', 'sometimes'].includes(v.speak) ? v.speak : 'mirror',\n\t\t// [FS-SEND-CHANCE-VOICE-CFG] 每轮发语音的概率（0~1，默认 0.25）：掷不中这一轮就只用文字\n\t\tchance: frac(v.chance, 0.25),"
+  "new": "\t\tspeak: ['never', 'mirror', 'sometimes'].includes(v.speak) ? v.speak : 'mirror',\n\t\t// [FS-SEND-CHANCE-VOICE-CFG] 每轮发语音的概率（0~1，默认 0.5）：掷不中这一轮就只用文字\n\t\tchance: frac(v.chance, 0.5),"
  },
  {
   "id": "P24 roll",
-  "title": "voiceLines 每轮掷一次骰子",
+  "title": "voiceLines 每轮掷一次骰子（默认 50%，掷中记一笔供下轮判连发）",
   "file": "voice.js",
   "marker": "FS-SEND-CHANCE-ROLL",
   "old": "\tconst voiceIn = session.voiceIn === true;",
-  "new": "\tconst voiceIn = session.voiceIn === true;\n\t// [FS-SEND-CHANCE-ROLL] 每轮只掷一次：命中才允许发语音（默认 25%）；对方点名要语音的照发\n\tconst chance = Number.isFinite(Number(v.chance)) ? Math.min(1, Math.max(0, Number(v.chance))) : 0.25;\n\tconst hit = Math.random() < chance;"
+  "new": "\tconst voiceIn = session.voiceIn === true;\n\t// [FS-SEND-CHANCE-ROLL] 每轮只掷一次：命中才允许发语音（默认 50%）；对方点名要语音的照发\n\tconst chance = Number.isFinite(Number(v.chance)) ? Math.min(1, Math.max(0, Number(v.chance))) : 0.5;\n\tconst hit = Math.random() < chance;\n\t// [FS-VOICE-ROLL-MARK] 掷中时记一笔时间：下一轮没掷中时据此只提醒「别连发」，不再每轮一刀切硬禁\n\tconst vKey = String(session.id ?? session.sessionId ?? session.channelId ?? '');\n\tconst vSeen = (globalThis.__fsVoiceLastHit ??= new Map());\n\tif (hit) vSeen.set(vKey, Date.now());",
+  "upgradeOld": "\tconst voiceIn = session.voiceIn === true;\n\t// [FS-SEND-CHANCE-ROLL] 每轮只掷一次：命中才允许发语音（默认 25%）；对方点名要语音的照发\n\tconst chance = Number.isFinite(Number(v.chance)) ? Math.min(1, Math.max(0, Number(v.chance))) : 0.25;\n\tconst hit = Math.random() < chance;"
  },
  {
   "id": "P24 cond",
@@ -33,11 +34,12 @@
  },
  {
   "id": "P24 neg",
-  "title": "骰子没中时明确让她别写 [语音]",
+  "title": "骰子没中时不再一刀切硬禁，只在上一轮刚发过语音时提醒别连发",
   "file": "voice.js",
   "marker": "FS-SEND-CHANCE-NEG",
   "old": "\t\treturn asked ? ['[语音] 你现在发不了语音（没开 / 没配好 / 设成了不发），只能打字；ta 要语音就直说发不了，别编别的理由。'] : [];",
-  "new": "\t\t// [FS-SEND-CHANCE-NEG] 骰子没中：明确说这轮别写 [语音]（只丢一句「偶尔发」，她其实每轮都发）\n\t\tif (ttsReady && v.speak !== 'never' && !asked) return ['[这轮别发语音] 这次只用文字回，别写 [语音] 段。'];\n\t\treturn asked ? ['[语音] 你现在发不了语音（没开 / 没配好 / 设成了不发），只能打字；ta 要语音就直说发不了，别编别的理由。'] : [];"
+  "new": "\t\t// [FS-SEND-CHANCE-NEG] 骰子没中：不再每轮一刀切硬禁。只有「上一轮刚发过语音」时才提醒别连发，其余轮次不额外下指令，交给她自己按自然节奏决定（避免群里连刷语音）\n\t\tif (ttsReady && v.speak !== 'never' && !asked) {\n\t\t\tconst lastVoiceAt = Number(vSeen.get(vKey) ?? 0);\n\t\t\tif (lastVoiceAt > 0 && Date.now() - lastVoiceAt < 10 * 60_000) return ['[这轮别连发语音] 上一条已经发过语音了，这次只用文字回，别写 [语音] 段。'];\n\t\t\treturn [];\n\t\t}\n\t\treturn asked ? ['[语音] 你现在发不了语音（没开 / 没配好 / 设成了不发），只能打字；ta 要语音就直说发不了，别编别的理由。'] : [];",
+  "upgradeOld": "\t\t// [FS-SEND-CHANCE-NEG] 骰子没中：明确说这轮别写 [语音]（只丢一句「偶尔发」，她其实每轮都发）\n\t\tif (ttsReady && v.speak !== 'never' && !asked) return ['[这轮别发语音] 这次只用文字回，别写 [语音] 段。'];\n\t\treturn asked ? ['[语音] 你现在发不了语音（没开 / 没配好 / 设成了不发），只能打字；ta 要语音就直说发不了，别编别的理由。'] : [];"
  },
  {
   "id": "P24 state",
@@ -67,6 +69,7 @@
   "id": "P24 import",
   "title": "index 引入 stickerSendAllowed",
   "file": "index.js",
+  "marker": "stickerConfig, stickerSendAllowed } from './stickers.js'",
   "old": "import { StickerBox, stickerConfig } from './stickers.js';",
   "new": "import { StickerBox, stickerConfig, stickerSendAllowed } from './stickers.js';"
  },

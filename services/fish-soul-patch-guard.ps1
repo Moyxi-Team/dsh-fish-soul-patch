@@ -1,26 +1,21 @@
-﻿# fish-soul-patch-guard.ps1
-# Self-heal guard for the dsh-fish-soul patch set.
+#Requires -Version 5.1
+# fish-soul patch guard
+# Runs every patch repo under ~/.dsh/patches in --check mode; if anything is missing,
+# drifted or failed, re-apply the patches and re-check. Log goes to ~/.dsh/fish-soul-patch-guard.log.
 #
-# Why: DSH runs a pnpm install on every launch, and that rewrites
-# node_modules\dsh-fish-soul with the pristine upstream build - silently dropping
-# every patch (WeChat tab in the panel, animated sticker swap, proactive DM, ...).
-#
-# What this does: run the patcher in --check mode; if anything is missing, drifted or
-# failing, re-apply the whole patch set once and report. Fully idempotent, silent,
-# never blocks anything - failures only go to the log.
-#
-# Called by app-triggered-boot.ps1 (hidden, delayed so the install has finished).
-# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\Administrator\.dsh\fish-soul-patch-guard.ps1 [-DelaySeconds 90]
-param([int]$DelaySeconds = 90)
+# History: used to guard only dsh-fish-soul-patch. The meme-bridge repo
+# (~/.dsh/patches/fish-soul-meme-bridge) was never checked here, so its drift went
+# unnoticed until a manual --check. Now both repos are walked with their own
+# "expected patched count" floor.
 
-$ErrorActionPreference = 'Continue'
-# node prints UTF-8; without this the check output arrives as mojibake and nothing parses.
+param([int]$DelaySeconds = 0)
+
 try {
-  [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-  $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  $OutputEncoding = [System.Text.Encoding]::UTF8
 } catch { }
+
 $root = 'C:\Users\Administrator\.dsh'
-$repo = Join-Path $root 'patches\dsh-fish-soul-patch'
 $log  = Join-Path $root 'fish-soul-patch-guard.log'
 $lock = Join-Path $root 'fish-soul-patch-guard.lock'
 
@@ -48,21 +43,26 @@ foreach ($cand in @('C:\Program Files\nodejs\node.exe', 'node')) {
   if (Test-Path $cand) { $node = $cand; break }
 }
 if (-not $node) { Write-Log 'node not found - guard skipped'; exit 0 }
-if (-not (Test-Path (Join-Path $repo 'patch-fish-soul.mjs'))) { Write-Log ('patch repo missing: ' + $repo); exit 0 }
 
-Set-Location $repo
-if ($DelaySeconds -gt 0) { Start-Sleep -Seconds $DelaySeconds }
+# repo -> how many patches a healthy tree should already have applied.
+$repos = @(
+  @{ dir = (Join-Path $root 'patches\dsh-fish-soul-patch');   minPatched = 100 },
+  @{ dir = (Join-Path $root 'patches\fish-soul-meme-bridge'); minPatched = 30 }
+)
+
+$slept = $false
 
 function Invoke-Check {
+  param([string]$dir, [string]$patchScript)
   try {
-    $out = & $node 'patch-fish-soul.mjs' '--check' 2>&1 | Out-String
+    $out = & $node $patchScript '--check' 2>&1 | Out-String
   } catch {
     return @{ ok = $false; raw = $_.Exception.Message }
   }
   $m = [regex]::Match($out, '\u7ed3\u679c\uff1a\u6539\u4e86\s*(\d+)\s*\u5904\uff0c\u5df2\u6253\u8fc7\s*(\d+)\s*\u5904.*?\u6f02\u79fb\s*(\d+)\s*\u5904\uff0c\u5931\u8d25\s*(\d+)\s*\u5904')
   if (-not $m.Success) { return @{ ok = $false; raw = $out } }
   return @{
-    ok = $true
+    ok      = $true
     changed = [int]$m.Groups[1].Value
     patched = [int]$m.Groups[2].Value
     drift   = [int]$m.Groups[3].Value
@@ -71,27 +71,40 @@ function Invoke-Check {
   }
 }
 
-$state = Invoke-Check
-if (-not $state.ok) {
-  Write-Log ('check output not parsed: ' + (($state.raw -split "`n" | Select-Object -Last 3) -join ' / '))
-  exit 0
+foreach ($r in $repos) {
+  $dir = [string]$r.dir
+  $min = [int]$r.minPatched
+  $label = Split-Path $dir -Leaf
+  $script = Join-Path $dir 'patch-fish-soul.mjs'
+
+  if (-not (Test-Path $script)) { Write-Log ($label + ': patch repo missing (' + $dir + ')'); continue }
+  Set-Location $dir
+  if (-not $slept -and $DelaySeconds -gt 0) { Start-Sleep -Seconds $DelaySeconds; $slept = $true }
+
+  $state = Invoke-Check -dir $dir -patchScript 'patch-fish-soul.mjs'
+  if (-not $state.ok) {
+    Write-Log ($label + ': check output not parsed: ' + (($state.raw -split "`n" | Select-Object -Last 3) -join ' / '))
+    continue
+  }
+
+  $need = ($state.changed -gt 0) -or ($state.drift -gt 0) -or ($state.failed -gt 0) -or ($state.patched -lt $min)
+  if (-not $need) {
+    Write-Log ('{0}: healthy: patched={1} drift={2} failed={3} changed={4} - nothing to do' -f $label, $state.patched, $state.drift, $state.failed, $state.changed)
+    continue
+  }
+
+  Write-Log ('{0}: patch lost or drifted: patched={1} drift={2} failed={3} changed={4} - re-applying' -f $label, $state.patched, $state.drift, $state.failed, $state.changed)
+  $apply = & $node 'patch-fish-soul.mjs' 2>&1 | Out-String
+  Write-Log ($label + ' apply: ' + ((($apply -split "`r?`n") | Where-Object { $_ -match '\u7ed3\u679c' }) -join ' | '))
+
+  $after = Invoke-Check -dir $dir -patchScript 'patch-fish-soul.mjs'
+  if (-not $after.ok) { Write-Log ($label + ': after-check output not parsed'); continue }
+  Write-Log ('{0}: after: patched={1} drift={2} failed={3} changed={4}' -f $label, $after.patched, $after.drift, $after.failed, $after.changed)
+  if ($after.drift -gt 0 -or $after.failed -gt 0) {
+    Write-Log ($label + ': WARN: drift/failure left - anchors need updating against the new upstream build')
+  } elseif ($after.changed -eq 0 -and $after.patched -ge $min) {
+    Write-Log ($label + ': patched files restored after DSH install; restart DSH once for the plugin to load them')
+  }
 }
 
-$need = ($state.changed -gt 0) -or ($state.drift -gt 0) -or ($state.failed -gt 0) -or ($state.patched -lt 100)
-if (-not $need) {
-  Write-Log ('healthy: patched={0} drift={1} failed={2} changed={3} - nothing to do' -f $state.patched, $state.drift, $state.failed, $state.changed)
-  exit 0
-}
-
-Write-Log ('patch lost or drifted: patched={0} drift={1} failed={2} changed={3} - re-applying' -f $state.patched, $state.drift, $state.failed, $state.changed)
-$apply = & $node 'patch-fish-soul.mjs' 2>&1 | Out-String
-Write-Log ('apply: ' + ((($apply -split "`r?`n") | Where-Object { $_ -match '\u7ed3\u679c' }) -join ' | '))
-
-$after = Invoke-Check
-if (-not $after.ok) { Write-Log 'after-check output not parsed'; exit 0 }
-Write-Log ('after: patched={0} drift={1} failed={2} changed={3}' -f $after.patched, $after.drift, $after.failed, $after.changed)
-if ($after.drift -gt 0 -or $after.failed -gt 0) {
-  Write-Log 'WARN: drift/failure left - anchors need updating against the new upstream build'
-} elseif ($after.changed -eq 0 -and $after.patched -ge 100) {
-  Write-Log 'patched files restored after DSH install; restart DSH once for the plugin to load them'
-}
+exit 0

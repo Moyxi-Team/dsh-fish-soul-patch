@@ -1,0 +1,13 @@
+{
+ "version": 1,
+ "generatedAt": "2026-11-19",
+ "note": "群消息回复被投到私聊的修复：会话定位只认会话主名、别名不再混入成员备注、出站严格比对会话 id、target 缺失即丢弃。old/new 均由官方原版一次性 diff 得出（带上下文保证唯一），逐对按序应用。",
+ "hunks": [
+  {
+   "file": "gateway.js",
+   "title": "群会话的 target 只认入站会话 id（targetId / conversationId / chatId）：",
+   "old": "\t\tconst targetId = String(payload?.targetId ?? payload?.conversationId ?? (kind === 'private' ? userId : '')).trim();\n\t\tif (userId === '' || targetId === '') return null;\n",
+   "new": "\t\t// [WHALE-CHAT-STRICT] 群会话的 target 只认入站会话 id（targetId / conversationId / chatId）：\n\t\t// 缺了就丢弃并告警，**绝不**回退成 senderId —— 那是群里某个成员的 wxid，\n\t\t// 拿它当 target 会把本该发到群里的回复打进这个成员的私聊。\n\t\tconst rawTarget = String(payload?.targetId ?? payload?.conversationId ?? payload?.chatId ?? '').trim();\n\t\tconst targetId = kind === 'group' ? rawTarget : (rawTarget || userId);\n\t\tif (userId === '') return null;\n\t\tif (targetId === '') {\n\t\t\tthis.log?.('warn', `[fish-soul] 微信${kind === 'group' ? '群' : '私聊'}消息缺会话 id，丢弃（senderId=${userId}）`);\n\t\t\treturn null;\n\t\t}\n\t\tif (kind === 'group' && targetId === userId) {\n\t\t\tthis.log?.('warn', `[fish-soul] 微信群消息的 target 等于发送人 id（${userId}），疑似回退成 senderId，丢弃`);\n\t\t\treturn null;\n\t\t}\n"
+  }
+ ]
+}

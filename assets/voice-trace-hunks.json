@@ -1,0 +1,50 @@
+[
+  {
+    "id": "voice-trace-vjs",
+    "title": "语音取证埋点 —— voice.js 写本地 trace 日志（不写就永远只能靠猜断点在哪）",
+    "file": "lib/voice.js",
+    "marker": "[FS-VOICE-TRACE] 语音全链路取证埋点",
+    "old": "import { safeDownload } from './safe-download.js';\nimport { getKv, setKv } from './db.js';",
+    "new": "import { safeDownload } from './safe-download.js';\nimport { getKv, setKv } from './db.js';\n// [FS-VOICE-TRACE] 语音全链路取证埋点：只写本地日志，不改任何行为。\nimport { appendFileSync, mkdirSync } from 'node:fs';\n\nconst VOICE_TRACE_DIR = 'C:\\\\Users\\\\Administrator\\\\.dsh\\\\logs';\nconst VOICE_TRACE_FILE = VOICE_TRACE_DIR + '\\\\voice-trace.log';\nexport function voiceTrace(tag, fields = {}) {\n\ttry {\n\t\tmkdirSync(VOICE_TRACE_DIR, { recursive: true });\n\t\tappendFileSync(VOICE_TRACE_FILE, JSON.stringify({ t: new Date().toISOString(), tag, ...fields }) + '\\n', 'utf8');\n\t} catch { /* 埋点失败绝不影响主流程 */ }\n}"
+  },
+  {
+    "id": "voice-trace-lines",
+    "title": "语音取证埋点 —— voiceLines 每轮记 asked / ttsReady / 点名原文",
+    "file": "lib/voice.js",
+    "marker": "[FS-VOICE-TRACE] 每轮先记一条",
+    "old": "\tconst asked = askedForVoice(speakers);\n\tconst voiceIn = session.voiceIn === true;",
+    "new": "\tconst asked = askedForVoice(speakers);\n\tconst voiceIn = session.voiceIn === true;\n\t// [FS-VOICE-TRACE] 每轮先记一条：asked/ttsReady 决定 P28 能不能进，是区分「P28 没执行」和「执行了模型无视」的地基。\n\tvoiceTrace('voiceLines', { where, asked, ttsReady, voiceIn, speakers: speakers.map((s) => String(s?.query ?? s?.text ?? '')).join(' | ').slice(0, 300) });"
+  },
+  {
+    "id": "voice-trace-p28",
+    "title": "语音取证埋点 —— P28 强指令真正下发时记一条",
+    "file": "lib/voice.js",
+    "marker": "[FS-VOICE-TRACE] P28 强指令真的下发时记一条",
+    "old": "\t\tif (asked && ttsReady) {",
+    "new": "\t\tif (asked && ttsReady) {\n\t\t\t// [FS-VOICE-TRACE] P28 强指令真的下发时记一条：和下一轮模型的原文对照，就能判定它有没有照做。\n\t\t\tvoiceTrace('P28-enter', { where, asked, ttsReady, voiceIn, hit });"
+  },
+  {
+    "id": "voice-trace-gw-import",
+    "title": "语音取证埋点 —— gateway.js 引入同一套 trace",
+    "file": "lib/gateway.js",
+    "marker": "[FS-VOICE-TRACE] 语音识别埋点",
+    "old": "import { randomUUID, createHash } from 'node:crypto';",
+    "new": "import { randomUUID, createHash } from 'node:crypto';\n// [FS-VOICE-TRACE] 语音识别埋点：和 voice.js 写同一个本地日志文件。\nimport { voiceTrace } from './voice.js';"
+  },
+  {
+    "id": "voice-trace-gw-scan",
+    "title": "语音取证埋点 —— 记下模型原文有没有 [语音]（入库前标记会被剔掉）",
+    "file": "lib/gateway.js",
+    "marker": "[FS-VOICE-TRACE] 模型原文到底有没有",
+    "old": "\t\t{\n\t\t\tconst voiceSplit = [];",
+    "new": "\t\t{\n\t\t\tconst voiceSplit = [];\n\t\t\t// [FS-VOICE-TRACE] 模型原文到底有没有 [语音]：入库前标记会被剔掉，所以只在识别这一刻记才算数。\n\t\t\tvoiceTrace('gateway-scan', { channelId: row.channel_id, title: row.title, segs: paragraphs.length, hitCount: paragraphs.filter((p) => p.indexOf('[语音]') >= 0).length, texts: paragraphs.map((p) => p.slice(0, 120)) });"
+  },
+  {
+    "id": "voice-trace-gw-tts",
+    "title": "语音取证埋点 —— 正则命中 / mood 是否拦 / TTS 出多少字节 / 失败原因",
+    "file": "lib/gateway.js",
+    "marker": "[FS-VOICE-TRACE] 正则命中之后",
+    "old": "\t\tfor (const [i, p] of paragraphs.entries()) {\n\t\t\tif (!VOICE_RE.test(p)) continue;\n\t\t\tparagraphs[i] = p.replace(VOICE_RE, '').trim();\n\t\t\tconst moodOk = this.moodVoice(profile);\n\t\t\tconst bytes = paragraphs[i] !== '' && moodOk ? await this.voice?.synthesize(paragraphs[i]) ?? null : null;\n\t\t\tif (bytes) voiced[i] = { type: 'record', data: { file: `base64://${bytes.toString('base64')}`, text: paragraphs[i] } }; // [FS-WECHAT-VOICE] 带原文，供微信语音网关合成",
+    "new": "\t\tfor (const [i, p] of paragraphs.entries()) {\n\t\t\tif (!VOICE_RE.test(p)) { voiceTrace('gateway-voicere', { channelId: row.channel_id, i, reMatch: false, seg: p.slice(0, 120) }); continue; }\n\t\t\tvoiceTrace('gateway-voicere', { channelId: row.channel_id, i, reMatch: true, seg: p.slice(0, 120) });\n\t\t\tparagraphs[i] = p.replace(VOICE_RE, '').trim();\n\t\t\tconst moodOk = this.moodVoice(profile);\n\t\t\tconst bytes = paragraphs[i] !== '' && moodOk ? await this.voice?.synthesize(paragraphs[i]) ?? null : null;\n\t\t\t// [FS-VOICE-TRACE] 正则命中之后：mood 有没有拦、TTS 有没有出字节，两件事分开记。\n\t\t\tvoiceTrace('gateway-tts', { channelId: row.channel_id, i, moodOk, bytes: bytes ? bytes.length : 0, mood: String(profile?.mood ?? profile?.tone ?? '').slice(0, 40), text: paragraphs[i].slice(0, 120), failReason: bytes ? '' : String(this.voiceFailReason?.(paragraphs[i]) ?? '').slice(0, 120) });\n\t\t\tif (bytes) voiced[i] = { type: 'record', data: { file: `base64://${bytes.toString('base64')}`, text: paragraphs[i] } }; // [FS-WECHAT-VOICE] 带原文，供微信语音网关合成"
+  }
+]

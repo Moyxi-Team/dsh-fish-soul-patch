@@ -1,0 +1,10 @@
+[
+ {
+  "id": "voice-noecho",
+  "title": "语音段已合成 record 后，文字不得再进文字出站列表（同一句不再既发语音又发文字）",
+  "file": "gateway.js",
+  "marker": "FS-VOICE-NO-ECHO",
+  "old": "\t\tconst messages = paragraphs.map((p, i) => (voiced[i] ? [voiced[i]] : isGroup ? 拆成消息段(p) : [{ type: 'text', data: { text: p } }]));",
+  "new": "\t\tconst messages = paragraphs.map((p, i) => (voiced[i] ? [voiced[i]] : isGroup ? 拆成消息段(p) : [{ type: 'text', data: { text: p } }]));\n\t\t// [FS-VOICE-NO-ECHO] 已转语音的段，文字不得再进文字出站列表：这一格只留 record，\n\t\t// 别处追加进来的 text 段一律剔掉。同一句既发语音又发文字，看的人最出戏。\n\t\tfor (let i = 0; i < messages.length; i += 1) {\n\t\t\tif (!voiced[i]) continue;\n\t\t\tconst before = messages[i].length;\n\t\t\tmessages[i] = messages[i].filter((seg) => seg?.type === 'record');\n\t\t\tif (messages[i].length !== before) voiceTrace('gateway-noecho', { channelId: row.channel_id, i, dropped: before - messages[i].length });\n\t\t}"
+ }
+]

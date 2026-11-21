@@ -44,7 +44,7 @@
  *   node patch-fish-soul.mjs                       # 自动找 ~/.dsh/profiles/<profile>/node_modules/dsh-fish-soul
  *   node patch-fish-soul.mjs --root <插件目录>      # 指定插件目录（含 package.json 的那层）
  *   node patch-fish-soul.mjs --check               # 只报告状态，不改文件
- *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm / share / wechat / wechat-pane / wechat-transport / proactive-norepeat）
+ *   node patch-fish-soul.mjs --only meme           # 只跑某一个补丁（meme / douyin / remount / plugins / dm / share / wechat / wechat-pane / wechat-transport / proactive-norepeat / voice-noecho / voice-noself）
  *   node patch-fish-soul.mjs --json                # 结尾额外打印一段机器可读汇总（CI / audit 用）
  *   node patch-fish-soul.mjs --force               # 忽略「已打过」判断，按文件内容重算（谨慎）
  *   node patch-fish-soul.mjs --smoke               # 额外冒烟：真 import 一次插件入口（改了就会自动跑）
@@ -61,7 +61,88 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const MARK_MEME = 'FS-MEME-BRIDGE-PATCH';
 const MARK_DOUYIN = 'FS-DOUYIN-SOCIAL-PATCH';
 
+// P22 的锚点（原来定义在文件末尾、调用之后，导致 patchShortAction 拿到 undefined——补丁静默「成功」但没写进去）
+var A_OLD = "const ACTION_HEAD = /^(?:她|鱼|小鱼)?(?:轻轻|微微|默默|悄悄|偷偷|慢慢|缓缓|小声地?|低声|歪|眨|揉|摸|拍|笑|叹|挠|托|抱|蹭|戳|探|翻|撇|嘟|鼓|眯|伸|扭|撅|捂|捏|晃|摇|点了点|点点|低下|抬起|抬头|低头|转身|转过|凑|靠|躺|趴|打了个|打个|吐了吐|吐吐|咬|舔|皱|瞪|红着|脸红|脸一红|耳朵|尾巴|双手|一边|眼睛|眼神|声音|嘴角|嘟囔|嘀咕|扶额|捂脸|叉腰|耸肩|摊手|托腮)/;\nfunction looksLikeAction(inner) {";
+var A_NEW = "const ACTION_HEAD = /^(?:她|鱼|小鱼)?(?:轻轻|微微|默默|悄悄|偷偷|慢慢|缓缓|小声地?|低声|歪|眨|揉|摸|拍|笑|叹|挠|托|抱|蹭|戳|探|翻|撇|嘟|鼓|眯|伸|扭|撅|捂|捏|晃|摇|点了点|点点|低下|抬起|抬头|低头|转身|转过|凑|靠|躺|趴|打了个|打个|吐了吐|吐吐|咬|舔|皱|瞪|红着|脸红|脸一红|耳朵|尾巴|双手|一边|眼睛|眼神|声音|嘴角|嘟囔|嘀咕|扶额|捂脸|叉腰|耸肩|摊手|托腮)/;\n// [FS-BRACKET-SHORT] 只有身体动作才认（\"歪头\"\"戳屏幕\"\"揉眼睛\"）——\n// \"（笑死）\"\"（笑哭）\"\"（bushi）\"这类网上常见的短括号不删。\nconst BODY_HEAD = /^(?:她|鱼|小鱼)?(?:歪|戳|揉|摸|拍|挠|托|抱|蹭|探|翻|撇|嘟|鼓|眯|伸|扭|撅|捂|捏|晃|摇|点|低|抬|转|凑|靠|躺|趴|咬|舔|皱|瞪|叹|咳|搓|叉腰|耸肩|摊手|托腮|眨眼|扶额|捂脸)/;\nfunction looksLikeAction(inner) {";
+var B_OLD = "\tconst han = (s.match(/[\\u4e00-\\u9fff]/g) ?? []).length;\n\tif (han < 4 || han < [...s].length * 0.7) return false;\n\treturn ACTION_HEAD.test(s) || (/[了着]/.test(s) && !/[我你]/.test(s));";
+var B_NEW = "\tconst han = (s.match(/[\\u4e00-\\u9fff]/g) ?? []).length;\n\tif (han < [...s].length * 0.7) return false;\n\t// [FS-BRACKET-SHORT] 2~3 个汉字的短身体动作（歪头 / 戳屏幕 / 揉眼睛）也要删；\n\t// 「笑死」「笑哭」「bushi」这类网上常见的短括号仍然不动。\n\tif (han >= 2 && BODY_HEAD.test(s) && !/^笑死|^笑哭|^大笑/.test(s)) return true;\n\tif (han < 4) return false;\n\treturn ACTION_HEAD.test(s) || (/[了着]/.test(s) && !/[我你]/.test(s));";
+var C_OLD = "\t\t\tlines.push(...voiceLines({ v: voiceConfig(currentConfig.voice, currentConfig.embedding), ttsReady: voice.readyFor('tts'), session, speakers, where: 'QQ' }));";
+var C_NEW = "\t\t\t// [FS-STICKER-UNKNOWN] QQ 侧表情包只传过来「【表情图】」四个字、没有画面描述，\n\t\t\t// 以前她会硬猜那是什么表情（\"这个表情好怪啊\"），或者反问对方什么意思。\n\t\t\tlines.push('[看不到的表情] 对方发来「【表情图】」「【图片】」这类你看不到画面的消息时，别猜画面里是什么、也别让对方解释；随口接一句、或者也发个自己的表情就行。同一句里要是还有对方打的字，就按字回。');\n\t\t\tlines.push(...voiceLines({ v: voiceConfig(currentConfig.voice, currentConfig.embedding), ttsReady: voice.readyFor('tts'), session, speakers, where: 'QQ' }));";
+var D_OLD = "\t\t\tif (webToolsReady()) {\n\t\t\t\tlines.push(`[上网] 遇到你不知道或者可能过时的事（新闻、比赛、新出的东西、没听过的梗），可以先用 ${webToolName()} 查；回复里别贴链接、别用 markdown，像聊天一样用自己的话说。`);\n\t\t\t}\n\t\t}";
+var D_NEW = "\t\t\tif (webToolsReady()) {\n\t\t\t\tlines.push(`[上网] 遇到你不知道或者可能过时的事（新闻、比赛、新出的东西、没听过的梗），可以先用 ${webToolName()} 查；回复里别贴链接、别用 markdown，像聊天一样用自己的话说。`);\n\t\t\t\t// [FS-STICKER-LOOKUP] 对方发的表情包，你只拿到一段画面描述。形象不认识、\n\t\t\t\t// 梗或画面文字看不懂时，先查一下它是什么、平时用来表达什么情绪，再顺着接话。\n\t\t\t\tlines.push(`[看不懂的表情包] 对方发来表情包时，你手上只有画面描述。要是描述里的形象你不认识、或者看不出这表情想表达什么（不知道是「无语」「嘲讽」还是「撒娇」），可以先用 ${webToolName()} 查一下（比如搜「XX 表情包 什么意思」「这个梗 出处」）；查到就顺着意思自然接一句、或者也回个表情，别反问对方「你发的这是什么意思」让人家解释；查不到就随口应一句，别编里面的内容。`);\n\t\t\t}\n\t\t}";
+
 const args = process.argv.slice(2);
+// ── P27 的锚点（必须定义在调度调用之前，否则 const 处于 TDZ，replaceOnce 拿到 undefined 会静默判「已打过」）
+const OLD_P27_VOICE = [
+	'\t\tlet paragraphs = 净文字.split(/\\n{2,}/).map((s) => s.trim()).filter((s) => s.replace(VOICE_RE, \'\').trim() !== \'\');',
+].join('\n');
+
+const NEW_P27_VOICE = [
+	'\t\tlet paragraphs = 净文字.split(/\\n{2,}/).map((s) => s.trim()).filter((s) => s.replace(VOICE_RE, \'\').trim() !== \'\');',
+	'\t\t// [FS-VOICE-ANYWHERE] 以前只认段首的 [语音]（VOICE_RE 带 ^）：模型写「嗓子还是哑的呀\\n[语音] 正文」这种',
+	'\t\t// 标记不在段首的形态时，整段被当文字发出去，而且一条日志都不留 —— 看着就是「让她发语音她死活只打字」。',
+	'\t\t// 现在段内任意位置出现标记都算语音：标记前的文字单独成段照常发（不丢），标记后的内容按语音合成；',
+	'\t\t// 命中、标记后没内容、没能合成，都记一条 decision，禁止静默降级。',
+	'\t\t{',
+	'\t\t\tconst voiceSplit = [];',
+	'\t\t\tfor (const p of paragraphs) {',
+	'\t\t\t\tconst idx = p.indexOf(\'[语音]\');',
+	'\t\t\t\tif (idx < 0) { voiceSplit.push(p); continue; }',
+	'\t\t\t\tconst head = p.slice(0, idx).trim();',
+	'\t\t\t\tconst spoken = p.slice(idx).split(\'[语音]\').join(\'\').trim();',
+	'\t\t\t\tif (spoken === \'\') {',
+	'\t\t\t\t\tif (head !== \'\') voiceSplit.push(head);',
+	'\t\t\t\t\tthis.note(\'filtered\', { channelId: row.channel_id, title: row.title, text: head, reason: \'[语音] 标记后面没有内容，这段按文字发\' });',
+	'\t\t\t\t\tcontinue;',
+	'\t\t\t\t}',
+	'\t\t\t\tif (head !== \'\') voiceSplit.push(head);',
+	'\t\t\t\tvoiceSplit.push(\'[语音] \' + spoken);',
+	'\t\t\t\tif (idx > 0) {',
+	'\t\t\t\t\tthis.note(\'filtered\', { channelId: row.channel_id, title: row.title, text: spoken, reason: \'[语音] 标记不在段首（第 \' + (Array.from(head).length + 1) + \' 字），已从段中拆出来按语音发；标记前的文字照常发\' });',
+	'\t\t\t\t}',
+	'\t\t\t}',
+	'\t\t\tparagraphs = voiceSplit;',
+	'\t\t}',
+].join('\n');
+
+const OLD_P27_HIT = [
+	'\t\t\tconst wxMemeHit = wxMeme && stickerSendAllowed(wxStickerCfg);',
+].join('\n');
+
+const NEW_P27_HIT = [
+	'\t\t\t// [FS-STICKER-ONCE-PER-TURN] 一轮只掷一次骰子：以前每步（step1 / step2…）都重掷一次，',
+	'\t\t\t// step1 抽中了但没产出回复、step2 重掷没中，就把「这轮先别发表情」写进最终规则 ——',
+	'\t\t\t// 对方当面要表情包也发不出来。现在同一轮复用第一次抽的结果。',
+	'\t\t\t// 对方本轮明确点名要表情包 / 表情 / 动图时直接豁免门控；规则文本里那句「先别发」也写明可被点名覆盖。',
+	'\t\t\tconst wxTurnId = arg?.agent?.id ?? arg?.scope?.id ?? arg?.sessionId;',
+	'\t\t\tconst wxTurnState = wxTurnId === undefined ? undefined : gateway?.turns?.get(String(wxTurnId));',
+	'\t\t\tconst wxSaid = speakers.map((s) => String(s?.query ?? \'\')).join(\'\\n\');',
+	'\t\t\tconst wxDenySticker = /(?:别|不要|不用|甭|少)[^。！？\\n]{0,4}(?:发|来)[^。！？\\n]{0,3}(?:表情|动图|梗图)/.test(wxSaid);',
+	'\t\t\tconst wxSaidSticker = !wxDenySticker && /(?:发|来|整|甩|给)[^。！？\\n]{0,6}(?:表情包|表情|动图|梗图)|(?:表情包|动图|梗图)[^。！？\\n]{0,6}(?:发|来|一个|一张)|要[^。！？\\n]{0,4}(?:表情包|表情)/.test(wxSaid);',
+	'\t\t\tlet wxMemeHit = false;',
+	'\t\t\tif (wxMeme === true) {',
+	'\t\t\t\tif (wxSaidSticker) wxMemeHit = true;',
+	'\t\t\t\telse if (wxTurnState === undefined) wxMemeHit = stickerSendAllowed(wxStickerCfg);',
+	'\t\t\t\telse {',
+	'\t\t\t\t\tif (wxTurnState.stickerRoll === undefined) wxTurnState.stickerRoll = stickerSendAllowed(wxStickerCfg);',
+	'\t\t\t\t\twxMemeHit = wxTurnState.stickerRoll === true;',
+	'\t\t\t\t}',
+	'\t\t\t}',
+].join('\n');
+
+const OLD_P27_RULE = [
+	'\t\t\tconst wxMemeRule = wxMemeHit',
+	'\t\t\t\t? \'想发表情时单独写一行 [表情: 你此刻的感觉]（一次最多 1 个，这一行会换成一张真实的动图发出去）——一律从 dsh-meme 图库里挑最贴的一张；图库里没有贴切的就别写这行、只说话，别硬凑；\'',
+	'\t\t\t\t: (wxMeme ? \'这轮先别发表情，只用文字回（表情不必每句都有，隔几轮再发）；\' : \'\');',
+].join('\n');
+
+const NEW_P27_RULE = [
+	'\t\t\tconst wxMemeRule = wxMemeHit',
+	'\t\t\t\t? \'想发表情时单独写一行 [表情: 你此刻的感觉]（一次最多 1 个，这一行会换成一张真实的动图发出去）——一律从 dsh-meme 图库里挑最贴的一张；图库里没有贴切的就别写这行、只说话，别硬凑；\' +',
+	'\t\t\t\t\t(wxSaidSticker ? \'（对方这轮点名要表情包了：这一轮至少要发 1 个）\' : \'\')',
+	'\t\t\t\t: (wxMeme ? \'这轮先别发表情，只用文字回（表情不必每句都有，隔几轮再发）；⚠️ 例外：对方这轮如果点名要表情包 / 表情 / 动图，就按对方的要求发 —— 单独写一行 [表情: 你此刻的感觉] 发 1 个，上面那句「先别发」不算数；\' : \'\');',
+].join('\n');
+
 const opt = (name, fallback = '') => {
 	const i = args.indexOf(name);
 	return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : fallback;
@@ -170,6 +251,13 @@ function write(rel, text) {
  */
 function replaceOnce(rel, oldStr, newStr, title, probe = '') {
 	const text = read(rel);
+	// 锚点变量若因定义顺序问题还是 undefined，String(undefined) 会退化成字面量 "undefined"，
+	// 在源码里一搜就有 → 静默判成 patched 但内容没变。这里直接判失败，别再假装改过了。
+	if (typeof oldStr !== 'string' || typeof newStr !== 'string') {
+		log(`  × ${rel}：${title} 的锚点变量不是字符串（undefined？），补丁定义顺序有问题`);
+		failed += 1;
+		return 'failed';
+	}
 	// 多行锚点必须按目标文件的实际换行符比较：上游有的文件整份是 CRLF（index.js / config-schema.js /
 	// gateway.js 都是），拿 \n 拼出来的锚点永远 includes 不到 → 会误报「锚点过期」。这里统一 fit 一次。
 	const useCrlf = text.includes('\r\n');
@@ -310,7 +398,7 @@ function patchMeme() {
 		"\t\tbiliPanelListed: Number.isFinite(listed) ? Math.min(60, Math.max(0, Math.floor(listed))) : 30,\n" +
 		`\t\t// 借 dsh-meme 的只读图库（默认关）：自己的表情包里没有合适的就借它的 [${MARK_MEME}]\n` +
 		"\t\tmeme: v.meme === true\n\t};",
-		'stickerConfig 加 meme 开关');
+		'stickerConfig 加 meme 开关', '\t\tmeme: v.meme === true');
 
 	// 2) StickerBox 收下桥
 	replaceOnce('stickers.js',
@@ -1200,10 +1288,31 @@ try {
 		patchHunks({ tag: 'P20 wechat-consecutive', label: '微信 —— 同人连发文字合并成一组再回（不再只答其中一句）', jsonName: 'wechat-consecutive-hunks.json' });
 	if (ONLY === '' || ONLY === 'wechat-services') patchWechatServices();
 	if (ONLY === '' || ONLY === 'moments') patchMoments();
+	if (ONLY === '' || ONLY === 'chatstrict') patchChatStrict();
 if (ONLY === '' || ONLY === 'sticker-action') patchShortAction();
 	if (ONLY === '' || ONLY === 'acp-strip') patchAcpStrip();
+	if (ONLY === '' || ONLY === 'voice-sticker') patchVoiceStickerGate();
 	if (ONLY === '' || ONLY === 'send-chance')
 		patchHunks({ tag: 'P24 send-chance', label: '表情包 / 语音别再每轮都发 —— 补概率门控（语音 25% / 表情按 sendChance）', jsonName: 'send-chance-hunks.json' });
+	// P28：点名要语音时只给「这次可以发」的许可，模型当成建议 —— 嗓子哑 / 在忙就推脱，微信端依旧只有文字
+	if (ONLY === '' || ONLY === 'voice-must')
+		patchHunks({ tag: 'P28 voice-must', label: '语音 —— 点名要语音必须真发（强指令，不再以嗓子哑 / 在忙推脱）', jsonName: 'voice-must-hunks.json' });
+	// P29：语音发不出时只能靠猜断点（.dsh/logs 里没有 asked / P28 是否下发 / 模型原文有没有 [语音] / TTS 出了多少字节）
+	// 埋点只写本地 trace 日志、不改任何行为；依赖 P27 的段内识别块与 P28 的强指令分支，所以排在它们后面
+	if (ONLY === '' || ONLY === 'voice-trace')
+		patchHunks({ tag: 'P29 voice-trace', label: '语音 —— 全链路取证埋点（asked / P28 / [语音] 原文 / TTS 字节，写 .dsh/logs/voice-trace.log）', jsonName: 'voice-trace-hunks.json' });
+	// P30：语音段已经送去 TTS 合成 record，文字列表里还留着同一句 —— 看的人先听语音、又收到同一条文字
+	if (ONLY === '' || ONLY === 'voice-noecho')
+		patchHunks({ tag: 'P30 voice-noecho', label: '语音 —— 已转语音的段不再进文字出站列表（不再一句话既发语音又发文字）', jsonName: 'voice-noecho-hunks.json' });
+	// P31：嗓子的自我描述（嗓子哑 / 声音不舒服）说一次就出戏一次，所有语音指令分支统一拼上硬约束
+	if (ONLY === '' || ONLY === 'voice-noself')
+		patchHunks({ tag: 'P31 voice-noself', label: '语音 —— 统一禁提嗓子 / 声音 / 哑 / 不方便说话（VOICE_SELF_BAN）', jsonName: 'voice-noself-hunks.json' });
+	// P25：群设置页原来只列 QQ 群，微信群看不到群名、勾不了接话、群设定写了也不生效
+	if (ONLY === '' || ONLY === 'wechat-groupset')
+		patchHunks({ tag: 'P25 wechat-groupset', label: '群设置支持微信群 —— 群名 / 接话开关 / 群设定，设定也注进提示词', jsonName: 'wechat-groupset-hunks.json' });
+	// P26：微信页群列表原来只有开关，群设定只能改库；另外同一个人在两个群备注一样时会被拆成两个人
+	if (ONLY === '' || ONLY === 'wechat-sameperson')
+		patchHunks({ tag: 'P26 wechat-sameperson', label: '微信页群列表就地改群设定 + 跨群同备注算同一个人（wxid / 纯数字两种写法并到一个 person）', jsonName: 'wechat-sameperson-hunks.json' });
 } catch (error) {
 	log(`\n× 出错：${String(error instanceof Error ? error.message : error)}`);
 	process.exitCode = 1;
@@ -1237,14 +1346,6 @@ if (has('--json')) {
 	);
 }
 
-var A_OLD = "const ACTION_HEAD = /^(?:她|鱼|小鱼)?(?:轻轻|微微|默默|悄悄|偷偷|慢慢|缓缓|小声地?|低声|歪|眨|揉|摸|拍|笑|叹|挠|托|抱|蹭|戳|探|翻|撇|嘟|鼓|眯|伸|扭|撅|捂|捏|晃|摇|点了点|点点|低下|抬起|抬头|低头|转身|转过|凑|靠|躺|趴|打了个|打个|吐了吐|吐吐|咬|舔|皱|瞪|红着|脸红|脸一红|耳朵|尾巴|双手|一边|眼睛|眼神|声音|嘴角|嘟囔|嘀咕|扶额|捂脸|叉腰|耸肩|摊手|托腮)/;\nfunction looksLikeAction(inner) {";
-var A_NEW = "const ACTION_HEAD = /^(?:她|鱼|小鱼)?(?:轻轻|微微|默默|悄悄|偷偷|慢慢|缓缓|小声地?|低声|歪|眨|揉|摸|拍|笑|叹|挠|托|抱|蹭|戳|探|翻|撇|嘟|鼓|眯|伸|扭|撅|捂|捏|晃|摇|点了点|点点|低下|抬起|抬头|低头|转身|转过|凑|靠|躺|趴|打了个|打个|吐了吐|吐吐|咬|舔|皱|瞪|红着|脸红|脸一红|耳朵|尾巴|双手|一边|眼睛|眼神|声音|嘴角|嘟囔|嘀咕|扶额|捂脸|叉腰|耸肩|摊手|托腮)/;\n// [FS-BRACKET-SHORT] 只有身体动作才认（\"歪头\"\"戳屏幕\"\"揉眼睛\"）——\n// \"（笑死）\"\"（笑哭）\"\"（bushi）\"这类网上常见的短括号不删。\nconst BODY_HEAD = /^(?:她|鱼|小鱼)?(?:歪|戳|揉|摸|拍|挠|托|抱|蹭|探|翻|撇|嘟|鼓|眯|伸|扭|撅|捂|捏|晃|摇|点|低|抬|转|凑|靠|躺|趴|咬|舔|皱|瞪|叹|咳|搓|叉腰|耸肩|摊手|托腮|眨眼|扶额|捂脸)/;\nfunction looksLikeAction(inner) {";
-var B_OLD = "\tif (han >= 4 && (ACTION_HEAD.test(s) || (/[了着]/.test(s) && !/[我你]/.test(s)))) return true;";
-var B_NEW = "\tif (han >= 4 && (ACTION_HEAD.test(s) || (/[了着]/.test(s) && !/[我你]/.test(s)))) return true;\n\t// 2~3 个汉字的短动作（歪头 / 戳屏幕 / 揉眼睛）：以前因为字数不够被放行，\n\t// 现场就是她一条回复里带「（歪头）（戳屏幕）」，看着特别不自然。\n\tif (/^笑死|^笑哭|^大笑/.test(s)) return false;\n\treturn BODY_HEAD.test(s);";
-var C_OLD = "\t\t\tlines.push(...voiceLines({ v: voiceConfig(currentConfig.voice, currentConfig.embedding), ttsReady: voice.readyFor('tts'), session, speakers, where: 'QQ' }));";
-var C_NEW = "\t\t\t// [FS-STICKER-UNKNOWN] QQ 侧表情包只传过来「【表情图】」四个字、没有画面描述，\n\t\t\t// 以前她会硬猜那是什么表情（\"这个表情好怪啊\"），或者反问对方什么意思。\n\t\t\tlines.push('[看不到的表情] 对方发来「【表情图】」「【图片】」这类你看不到画面的消息时，别猜画面里是什么、也别让对方解释；随口接一句、或者也发个自己的表情就行。同一句里要是还有对方打的字，就按字回。');\n\t\t\tlines.push(...voiceLines({ v: voiceConfig(currentConfig.voice, currentConfig.embedding), ttsReady: voice.readyFor('tts'), session, speakers, where: 'QQ' }));";
-var D_OLD = "\t\t\t\tlines.push(`[上网] 遇到你不知道或者可能过时的事（新闻、比赛、新出的东西、没听过的梗），可以先用 ${webToolName()} 查；回复里别贴链接、别用 markdown，像聊天一样用自己的话说。`);";
-var D_NEW = "\t\t\t\tlines.push(`[上网] 遇到你不知道或者可能过时的事（新闻、比赛、新出的东西、没听过的梗），可以先用 ${webToolName()} 查；回复里别贴链接、别用 markdown，像聊天一样用自己的话说。`);\n\t\t\t\t// [FS-STICKER-LOOKUP] 对方发的表情包，你只拿到一段画面描述。形象不认识、\n\t\t\t\t// 梗或画面文字看不懂时，先查一下它是什么、平时用来表达什么情绪，再顺着接话。\n\t\t\t\tlines.push(`[看不懂的表情包] 对方发来表情包时，你手上只有画面描述。要是描述里的形象你不认识、或者看不出这表情想表达什么（不知道是\"无语\"\"嘲讽\"还是\"撒娇\"），可以先用 ${webToolName()} 查一下（比如搜「XX 表情包 什么意思」「这个梗 出处」）；查到就顺着意思自然接一句、或者也回个表情，别反问对方\"你发的这是什么意思\"让人家解释；查不到就随口应一句，别编里面的内容。`);";
 
 // P22：QQ/微信上「（歪头）（戳屏幕）」这种两三个字的括号动作、看不懂的表情包
 function patchShortAction() {
@@ -1322,3 +1423,135 @@ function patchAcpStrip() {
 }
 
 
+
+// ──────────────── P27：微信语音 / 表情（点名要语音却在打字、点名要表情却在说「这轮先别发」） ────────────────
+/**
+ * A. gateway.js：语音只认段首的 [语音]（VOICE_RE 带 ^）。模型写「嗓子还是哑的呀\n[语音] 正文」这种形态时，
+ *    整段被当文字发，连一条日志都没有 —— 群里看着就是「她不听」。改成段内任意位置命中都算语音，
+ *    标记前的文字照常发、标记后的内容按语音合成，命中与降级都写 decision。
+ * B. index.js：表情门控每步重掷一次骰子，step1 抽中却没产出回复、step2 抽不中，就把「这轮先别发表情」
+ *    写进最终规则；对方当面要表情包也发不出来。改成同一轮只掷一次、对方点名要表情时直接豁免，
+ *    规则文本里那句「先别发」也写明可被点名覆盖。
+ */
+function patchVoiceStickerGate() {
+	const id = 'P27 voice-sticker-gate';
+	const d0 = drifted;
+	const f0 = failed;
+	const c0 = changed;
+	replaceOnce('gateway.js', OLD_P27_VOICE, NEW_P27_VOICE, '语音标记不再要求段首（段内命中也能发语音，且留日志）', 'FS-VOICE-ANYWHERE');
+	replaceOnce('index.js', OLD_P27_HIT, NEW_P27_HIT, '表情门控一轮只掷一次 + 对方点名要表情时豁免', 'FS-STICKER-ONCE-PER-TURN');
+	replaceOnce('index.js', OLD_P27_RULE, NEW_P27_RULE, '「这轮先别发表情」可被点名覆盖', '上面那句「先别发」不算数');
+	if (drifted > d0 || failed > f0) {
+		note(id, 'DRIFT', '有锚点过期或替换失败，见上面的 × 行');
+		return;
+	}
+	note(id, changed > c0 ? (CHECK ? 'PENDING' : 'PATCHED') : 'ALREADY', '语音段内标记 + 表情门控一轮一次（含点名豁免）');
+}
+
+// ──────────────── P25：chat-strict（群消息回复被投到私聊 · 插件侧） ────────────────
+/**
+ * 群里问话，回复进了私聊。桥侧（WechatAgent）的修法见 patch-whalegirl.mjs 的 W19；
+ * 这里补的是插件这一头：群消息出站时 target 不能回退成 senderId。
+ *
+ * 原来三处回退：
+ *   gateway.js  chatId ?? sender_id      —— 群消息没有 chatId 时就用发言人的 id
+ *   bridge.js   targetId = ... ?? senderId —— 同上
+ * 结果：群里的回复被当成私聊发给了那个人。
+ *
+ * 现在：群消息（chatroom）出站必须拿到入站 targetId / conversationId / chatId 之一，
+ * 一个都没有就直接丢弃并告警（宁可这条不发，也不能发错人）；私聊才允许回退 senderId。
+ *
+ * 锚点在 assets/fishsoul/chat-strict-hunks.json，old/new 由官方原版 diff 得出，逐对按序应用。
+ */
+const MARK_CHATSTRICT = 'CHAT-STRICT';
+
+function patchChatStrict() {
+	log('\n[P25] chat-strict —— 群出站 target 只认入站会话 id，缺 id 直接丢弃');
+	const jsonPath = join(HERE, 'assets', 'fishsoul', 'chat-strict-hunks.json');
+	if (!existsSync(jsonPath)) {
+		log(`  × 缺 ${jsonPath}`);
+		failed += 1;
+		note('chat-strict', 'FAILED', '缺 assets/fishsoul/chat-strict-hunks.json');
+		return;
+	}
+	let doc;
+	try {
+		doc = JSON.parse(readFileSync(jsonPath, 'utf8'));
+	} catch (e) {
+		log(`  × ${jsonPath} 解析失败：${e.message}`);
+		failed += 1;
+		note('chat-strict', 'FAILED', 'JSON 解析失败');
+		return;
+	}
+	const hunks = Array.isArray(doc.hunks) ? doc.hunks : [];
+	if (hunks.length === 0) {
+		log('  × 补丁包里没有任何替换对');
+		failed += 1;
+		note('chat-strict', 'FAILED', 'hunks 为空');
+		return;
+	}
+	const byFile = new Map();
+	for (const h of hunks) {
+		if (!h || typeof h.old !== 'string' || typeof h.new !== 'string' || h.old === '') continue;
+		const rel = String(h.file || '').replace(/\\/g, '/').replace(/^lib\//, '');
+		if (!byFile.has(rel)) byFile.set(rel, []);
+		byFile.get(rel).push(h);
+	}
+	let applied = 0;
+	let already = 0;
+	let bad = 0;
+	for (const [rel, list] of byFile) {
+		let text;
+		try {
+			text = read(rel);
+		} catch {
+			log(`  × ${rel}：文件不存在`);
+			failed += 1;
+			bad += 1;
+			note('chat-strict', 'FAILED', `${rel} 不存在`);
+			continue;
+		}
+		const crlfFile = text.includes('\r\n');
+		let norm = text.replace(/\r\n/g, '\n');
+		let fileApplied = 0;
+		let fileAlready = 0;
+		let fileBad = 0;
+		for (const h of list) {
+			const o = h.old.replace(/\r\n/g, '\n');
+			const n = h.new.replace(/\r\n/g, '\n');
+			const cnt = norm.split(o).length - 1;
+			// 先判「已应用」再判锚点：纯插入类替换对的 old 是 new 的前缀（old = 上下文 + 插入点），
+			// 打完以后 old 依然在文件里，先查 old 会把「已打过」误判成「待应用」，再打一遍就插重了。
+			// new 都带足够上下文、生成时已校验全篇唯一，所以 includes(new) 是可靠的「已应用」判据。
+			if (norm.includes(n)) {
+				fileAlready += 1;
+				continue;
+			}
+			if (cnt === 1) {
+				norm = norm.replace(o, () => n);
+				fileApplied += 1;
+				continue;
+			}
+			log(`  × ${rel}：${h.title || '某处'} 锚点${cnt === 0 ? '不见了' : `出现 ${cnt} 次`}`);
+			fileBad += 1;
+		}
+		if (fileBad > 0) {
+			failed += 1;
+			bad += 1;
+			note('chat-strict', 'DRIFT', `${rel} 有 ${fileBad} 处锚点过期（上游改版挪了这段代码）`);
+			continue;
+		}
+		applied += fileApplied;
+		already += fileAlready;
+		if (fileApplied === 0) {
+			log(`  ＝ ${rel}：${fileAlready} 处均已打过`);
+			continue;
+		}
+		write(rel, fit(norm, crlfFile));
+		log(`  ✓ ${rel}：${fileApplied} 处已改`);
+		changed += 1;
+	}
+	if (bad > 0) return;
+	log(`  ${CHECK ? '待应用' : '已应用'} ${applied} 处 / 已存在 ${already} 处 / 共 ${hunks.length} 处`);
+	note('chat-strict', applied > 0 ? (CHECK ? 'PENDING' : 'PATCHED') : 'ALREADY', `共 ${hunks.length} 处，本次应用 ${applied}，已存在 ${already}`);
+}

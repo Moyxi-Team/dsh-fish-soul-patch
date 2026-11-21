@@ -1,0 +1,10 @@
+[
+  {
+    "id": "voice-must-speak",
+    "title": "语音 —— 点名要语音改成强指令：这一轮必须真写出 [语音]，不许以嗓子哑 / 不方便 / 在忙推脱；点名轮不再受 speak 配置与概率门控限制",
+    "file": "lib/voice.js",
+    "marker": "[FS-VOICE-MUST-SPEAK]",
+    "old": "\t\tif (ttsReady && v.speak !== 'never' && (asked || (hit && (v.speak === 'sometimes' || voiceIn)))) {\n\t\t\treturn [`[语音] ${voiceIn ? '对方发的是语音，' : asked ? '对方想听你的语音，' : ''}${how}；${asked ? '这次可以发' : '大多数时候还是打字'}）。`];\n\t\t}",
+    "new": "\t\t// [FS-VOICE-MUST-SPEAK] 点名要语音 → 这一轮必须真写出 [语音] 段。旧文案只写「这次可以发」，模型常当成\n\t\t// 可有可无的建议，于是回一句「嗓子还哑着呢 / 在忙」就了事；点名轮也不再受 speak 配置与概率门控限制。\n\t\tif (asked && ttsReady) {\n\t\t\treturn [`[语音] ${voiceIn ? '对方发的是语音，' : ''}对方点名要语音 —— 这一轮必须真的写出一段 [语音]，不能只用文字回，也不能拿嗓子不舒服、声音哑、不方便、在忙、待会儿再说之类的话推脱。${how}；现在就发这一条，前后可以有文字）。`];\n\t\t}\n\t\tif (ttsReady && v.speak !== 'never' && (asked || (hit && (v.speak === 'sometimes' || voiceIn)))) {\n\t\t\treturn [`[语音] ${voiceIn ? '对方发的是语音，' : asked ? '对方想听你的语音，' : ''}${how}；${asked ? '这次可以发' : '大多数时候还是打字'}）。`];\n\t\t}"
+  }
+]

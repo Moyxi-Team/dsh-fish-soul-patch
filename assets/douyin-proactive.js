@@ -337,6 +337,81 @@ function sentToday(day, name) {
 	return Number(day?.byName?.[k] ?? 0) || 0;
 }
 
+/** 把毫秒时间戳落成她能认的日期串（用角色时区，跟 clock 保持一致）。 */
+function dateStrOfMs(social, ms) {
+	const at = Number(ms) > 0 ? Number(ms) : 0;
+	if (at <= 0) return '';
+	try {
+		if (typeof social.clock?.getRoleDateParts === 'function') {
+			const p = social.clock.getRoleDateParts(new Date(at));
+			if (p && typeof p.dateStr === 'string' && p.dateStr !== '') return p.dateStr;
+		}
+	} catch { /* 读不到就走下面的本机时间 */ }
+	const d = new Date(at);
+	const p2 = (n) => String(n).padStart(2, '0');
+	return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+}
+
+/**
+ * [FS-DM-DEDUP-CROSS] 跨链路去重：今天这个人是不是**已经收到过一张卡片**了。
+ *
+ * 为什么要跨链路：「刷到即分享」(browse 链路，走 life.queueShare → gateway.deliverDouyinShare)
+ * 和「主动私信」(dm 链路，走 runProactive) 是两套独立调度，各记各的账
+ * （share.day 只管刷到分享的条数，dm.day 只管主动私信的条数）—— 两条链路同时命中主人时，
+ * 主人就会连着收到两张卡片。实机症状就是「连发俩视频卡片」。
+ *
+ * 判据（任一命中就算今天已经发过，取不到就一律当没发过，宁可少发也不重复）：
+ *   ① dm.day.byName[name] > 0            —— 主动私信今天已经给他发过；
+ *   ② recent 里今天有他且 shared=true    —— 任何链路（含 browse / life）都已经发过卡片；
+ *   ③ name === masterName 且 share.day 今天 count > 0 —— 刷到即分享只发给主人，
+ *      所以只要今天有过刷到分享，主人就一定已经收到过一条。
+ *
+ * @returns {{hit: boolean, by: string, reason: string}}
+ */
+export function crossLinkSent(social, name, dateStr) {
+	const who = String(name ?? '').trim();
+	if (who === '') return { hit: false, by: '', reason: '' };
+	const day = dateStr !== '' ? dateStr : (() => {
+		try { return social.clock.getRoleDateParts().dateStr; } catch { return ''; }
+	})();
+	// ① 主动私信今天发过
+	try {
+		if (sentToday(readDay(social, day), who) > 0) {
+			return { hit: true, by: 'dm.day', reason: `今天已经主动私信过「${who}」了（dm.day 已记 1 条）` };
+		}
+	} catch { /* 读不到就继续看别的证据 */ }
+	// ② recent：任何链路发过卡片
+	try {
+		const list = getKv(social.db, KV_RECENT, []) ?? [];
+		const hit = (Array.isArray(list) ? list : []).find((x) => {
+			if (String(x?.name ?? '').trim() !== who) return false;
+			if (x?.shared !== true) return false;
+			if (x?.ok !== true) return false;
+			return day === '' || dateStrOfMs(social, x?.at) === day;
+		});
+		if (hit) {
+			const by = String(hit?.source ?? '');
+			return {
+				hit: true,
+				by: `recent:${by === '' ? 'unknown' : by}`,
+				reason: `今天已经给「${who}」发过一条卡片了（来源：${sourceLabel(by) || by || '未知'}）`
+			};
+		}
+	} catch { /* 同上 */ }
+	// ③ 刷到即分享（browse）：只发给主人，所以只要今天有刷到分享，主人就收过
+	try {
+		const master = String(social.getConfig?.()?.masterName ?? '').trim();
+		if (master !== '' && master === who) {
+			const sd = getKv(social.db, 'share.day', null);
+			const sameDay = sd && typeof sd === 'object' && (day === '' || String(sd.date ?? '') === day);
+			if (sameDay && Number(sd.count ?? 0) > 0) {
+				return { hit: true, by: 'share.day', reason: `今天已经「刷到即分享」给过「${who}」了（share.day 已记 ${Number(sd.count)} 条）` };
+			}
+		}
+	} catch { /* 同上 */ }
+	return { hit: false, by: '', reason: '' };
+}
+
 /**
  * 今天还能发几条：每个人各自剩多少，加起来就是总数。
  * perDay 是「同一个人一天最多几次」，不是全体合计 —— 勾的人越多，理论上总条数越大。
@@ -391,7 +466,15 @@ export function proactiveStatus(social) {
 		mutualCount: cached.length,
 		mutualAt: Number(mutual?.at ?? 0),
 		mutualList: cached.slice(0, 200),
-		recent: Array.isArray(recent) ? recent.slice(0, 6) : [],
+		// [FS-DM-TRACE-SEND] 每条带上来源标签（主动私信 / 刷到即分享 / 主动分享 / 手动试发），
+		//   设置页「最近发过」据此一眼看出这条是哪个链路发的 —— 两条链路重复发同一个人时也看得出来。
+		recent: Array.isArray(recent)
+			? recent.slice(0, 6).map((x) => ({
+				...(x ?? {}),
+				source: String(x?.source ?? ''),
+				srcLabel: sourceLabel(x?.source)
+			}))
+			: [],
 		lastError: error
 	};
 }
@@ -681,21 +764,119 @@ async function getDmBridge() {
 }
 
 /**
+ * [FS-SHARE-MSGID] 读一次「我和某个人」会话的快照：最大 msgId（seq）+ 我方卡片条数 + 消息总数。
+ *
+ * 用途：点「分享」**前后各读一次**。以前只认面板行变「捎句话」——面板没刷新（真机常见）就判失败，
+ * 于是又点一次，同一张卡片发两遍。改成用会话本身做裁判：只要冒出新消息（尤其我方卡片），
+ * 就说明已经发出去了，绝不再点第二次。
+ *
+ * 读不到会话 → uncertain=true：宁可这一轮不重试（可能已经发了），也不冒重复发的风险。
+ */
+async function readPeerMsgProbe(social, name) {
+	const browser = social.host?.browser;
+	if (!browser) return { ok: false, uncertain: true };
+	const bridge = await getDmBridge();
+	if (!bridge || typeof bridge.readDM !== 'function') return { ok: false, uncertain: true };
+	const r = await bridge.readDM({ browser, uname: name, limit: 30 })
+		.catch(() => null);
+	if (!r || r.ok !== true) return { ok: false, uncertain: true, error: String(r?.error ?? '读不到会话') };
+	const msgs = Array.isArray(r.messages) ? r.messages : [];
+	let maxSeq = -1;
+	let myCards = 0;
+	for (const m of msgs) {
+		const seq = Number(m?.seq);
+		if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq;
+		if (m?.fromMe === true && m?.isShare === true) myCards += 1;
+	}
+	const last = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+	return {
+		ok: true,
+		maxSeq,
+		total: msgs.length,
+		myCards,
+		// 最后一条是不是我方发的：fromMe 三态，未知（null）按「优先当我方」处理，避免误重试
+		lastMine: last ? last.fromMe !== false : false,
+		lastKey: last ? `${Number(last.seq) || 0}|${String(last.text ?? '').slice(0, 24)}` : ''
+	};
+}
+
+/** 聊天输入框在不在（进入会话成功的硬信号）。 */
+async function hasChatInput(browser) {
+	const has = await browser.eval(HAS_INPUT_JS).catch(() => false);
+	return has === true;
+}
+
+/**
+ * [FS-SAY-SESSION-FIRST] 打开「我和她」的会话，**并等到输入框真的出现**。
+ *
+ * 卡片发完要补一句说明，以前直接走 sendDM：只要私信面板没真的进到聊天框，
+ * 就会以「打不开私信面板」整句丢掉 —— 实机日志里「视频卡片已发，文字没发成」多半是这么来的。
+ *
+ * 现在的顺序：
+ *   ① 用 readDM 进会话（它会自己开私信面板 + 选中这个人，不跳页）；
+ *   ② 轮询等输入框出现（最多 ~10 秒）；
+ *   ③ 还不行才回退「去她主页点私信」那条老路。
+ *
+ * @returns {{ok: boolean, via: string, error?: string}}
+ */
+async function openSessionAndWaitInput(browser, friend) {
+	const name = String(friend?.name ?? '').trim();
+	if (await hasChatInput(browser)) return { ok: true, via: '已在会话' };
+	const bridge = await getDmBridge();
+	if (bridge && typeof bridge.readDM === 'function' && name !== '') {
+		await bridge.readDM({ browser, uname: name, limit: 6 }).catch(() => null);
+		for (let i = 0; i < 10; i += 1) {
+			if (await hasChatInput(browser)) return { ok: true, via: '会话列表' };
+			await sleep(700);
+		}
+	}
+	const opened = await openChatFromProfile(browser, friend);
+	if (opened.ok !== true) return { ok: false, via: '', error: String(opened.error ?? '打不开会话') };
+	for (let i = 0; i < 10; i += 1) {
+		if (await hasChatInput(browser)) return { ok: true, via: '主页私信' };
+		await sleep(700);
+	}
+	return { ok: false, via: '', error: '点了「私信」但输入框一直没出来' };
+}
+
+/**
  * 给一个人发一条：先当已有会话发；不行就去主页开新会话、当场打字发。
  * 调用方必须已在 host.exclusive 里。
  */
 export async function sendToFriend(host, friend, text) {
 	const browser = host.browser;
 	const name = String(friend?.name ?? '').trim();
+	const body = String(text ?? '').trim();
+	if (body === '') return { ok: false, error: '要发的正文是空的' };
+	// [FS-SAY-SESSION-FIRST] 会话路径优先：先确认真的进到会话里、输入框出来，再发；
+	//   这里失败才回退下面那条老路（主页点私信），避免「卡片发了、这句话丢了」。
+	const ready = await openSessionAndWaitInput(browser, friend);
+	if (ready.ok === true) {
+		const bridge = await getDmBridge();
+		if (bridge && typeof bridge.sendDM === 'function') {
+			const r = await bridge.sendDM({ browser, text: body, uname: name })
+				.catch((e) => ({ ok: false, error: errText(e) }));
+			if (r?.ok === true) return { ok: true, via: `会话直发（${ready.via}）` };
+			// 会话里发不出去但输入框还在：直接打字走 Enter，别再跳页折腾
+			if (await hasChatInput(browser)) {
+				const typed = await typeAndSend(browser, body);
+				if (typed.ok === true) return { ok: true, via: `会话打字（${ready.via}）` };
+			}
+		} else if (await hasChatInput(browser)) {
+			const typed = await typeAndSend(browser, body);
+			if (typed.ok === true) return { ok: true, via: `会话打字（${ready.via}）` };
+		}
+	}
+	// —— 回退：原来那条路（能发就发，发不了再说） ——
 	const bridge = await getDmBridge();
 	if (bridge && typeof bridge.sendDM === 'function') {
-		const r = await bridge.sendDM({ browser, text, uname: name }).catch((e) => ({ ok: false, error: errText(e) }));
+		const r = await bridge.sendDM({ browser, text: body, uname: name }).catch((e) => ({ ok: false, error: errText(e) }));
 		if (r?.ok === true) return { ok: true, via: '已有会话' };
 	}
 	const opened = await openChatFromProfile(browser, friend);
 	if (!opened.ok) return { ok: false, error: opened.error };
 	await sleep(1000);
-	const sent = await typeAndSend(browser, text);
+	const sent = await typeAndSend(browser, body);
 	return sent.ok ? { ok: true, via: '主页私信' } : { ok: false, error: sent.error };
 }
 
@@ -1729,6 +1910,18 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 	const holdMs = Math.max(0, Math.min(30000, Number(opts.shareHoldMs ?? 3000) || 3000));
 	let sent = false;
 	let lastText = '';
+	// [FS-SHARE-MSGID] 点之前先记下会话里的最大 msgId（seq）+ 我方卡片数，作为基线。
+	//   老逻辑只认「面板那一行变成捎句话」：面板没刷新（真机很常见）就误判失败 → 再点一次 →
+	//   主人收到两张一样的卡片。现在点完拿会话做裁判，只要多出一条我方卡片就立刻收手。
+	const probe0 = await readPeerMsgProbe(social, name);
+	if (probe0.ok === true) {
+		social.log?.('info', `[fish-soul] 抖音：点「分享」前会话基线（${name}）msgId=${probe0.maxSeq}、我方卡片 ${probe0.myCards} 条、共 ${probe0.total} 条`);
+		// readDM 会把页面切到私信，读完拉回视频页，后面重新 hover 唤分享面板
+		await browser.goto(`https://www.douyin.com/video/${id}`, { settleMs: 4000, retries: 0 }).catch(() => {});
+		await sleep(1200);
+	} else {
+		social.log?.('warn', `[fish-soul] 抖音：读不到会话基线（${name}）：${probe0.error ?? '读会话失败'}，这一轮退回面板判据`);
+	}
 	for (let attempt = 1; attempt <= 3 && !sent; attempt += 1) {
 		// [FS-SHARE-REPANEL] 面板会自己收起来（鼠标长时间停在一个位置 / 页面重渲染 / 抖一下都可能关），
 		//   关了之后 shareRowJs 自然找不到她，如果还拿着上一轮的旧坐标去点，就是点空气 —— 之前「三次都没发出去、
@@ -1790,6 +1983,33 @@ export async function shareVideoToFriend(social, friend, opts = {}) {
 		const now = parseJson(await browser.eval(SHARE_PANEL_JS).catch(() => null));
 		lastText = String(now?.text ?? '').slice(0, 120);
 		if (/已发送|发送成功|分享成功/.test(lastText) && targetUid === '') { sent = true; break; }
+		// [FS-SHARE-MSGID] 面板没变「捎句话」≠ 没发出去。回会话里比一次 msgId：
+		//   只要多出一条我方消息（尤其卡片）就说明发到了，立刻收手，绝不再点第二下。
+		if (probe0.ok === true) {
+			const probe1 = await readPeerMsgProbe(social, name);
+			if (probe1.ok === true) {
+				const grew = Number(probe1.maxSeq) > Number(probe0.maxSeq) || Number(probe1.total) > Number(probe0.total);
+				const cardGrew = Number(probe1.myCards) > Number(probe0.myCards);
+				if (cardGrew || (grew && probe1.lastMine === true)) {
+					sent = true;
+					lastText = '会话回读确认：已新增我方卡片';
+					social.log?.('info', `[fish-soul] 抖音：会话回读确认卡片已到（${name}，msgId ${probe0.maxSeq}→${probe1.maxSeq}，我方卡片 ${probe0.myCards}→${probe1.myCards}），不再重复点`);
+					break;
+				}
+				social.log?.('warn', `[fish-soul] 抖音：会话回读确认没发出去（${name}，msgId ${probe0.maxSeq}→${probe1.maxSeq}），这一轮才算真失败`);
+				// 确认没发出去 → 回视频页把面板重建出来，再走下一轮（不是拿旧坐标盲目重点）
+				await browser.goto(`https://www.douyin.com/video/${id}`, { settleMs: 4000, retries: 0 }).catch(() => {});
+				await sleep(1200);
+			} else {
+				// 会话读不到 = 不确定：可能已经发出去了。宁可停手留一条待核实，也不冒重复发的风险
+				social.log?.('warn', `[fish-soul] 抖音：点完「分享」却读不到会话（${name}）：${probe1.error ?? '读会话失败'}；可能已发出，停手不重试`);
+				return {
+					ok: false,
+					uncertain: true,
+					error: `点了「分享」但读不到会话，无法确认是否已发出（${probe1.error ?? '读会话失败'}）；为避免重复发不再重试，请在抖音里核对`
+				};
+			}
+		}
 		social.log?.('warn', `[fish-soul] 抖音：第 ${attempt} 次点「分享」没发出去（${name}），再来一次`);
 		await sleep(1500);
 	}
@@ -1880,13 +2100,41 @@ export async function draft(social, friend, history, { withVideo = false, video 
 		'- 不要提「互关」「关注」「看到你」这类平台关系，不要自我介绍，不要说自己是谁，也不要说「我发你个视频」。',
 		'- 不要推销、不要索要联系方式、不要带链接、话题标签、@ 任何人和表情码。',
 		withVideo ? videoLine : '',
-		'- 实在没什么想说的，就只输出：[不发]',
 		'- 只输出要发的那句话本身，不要加引号、不要解释。'
 	].filter((x) => x !== '').join('\n');
 	let raw = null;
-	try { raw = await social.callLlm(prompt); } catch { raw = null; }
-	let text = String(raw ?? '').trim();
-	if (text === '' || text.includes('[不发]')) return '';
+	let text = '';
+	// [FS-DM-SAY-RETRY] 以前一次没写出来就直接空着回去，卡片后面一句话都没有，库里还记成成功。
+	//   现在问两次：第二遍明说「必须写一句」，把「可以不说话」这条出口彻底堵掉
+	//   （真不想说话应该由会话侧的 silent 表达，不该让模型躲在这条出口后面把卡片留成哑的）。
+	for (let attempt = 1; attempt <= 2; attempt += 1) {
+		const ask = attempt === 1
+			? prompt
+			: [
+				prompt,
+				'- 上一版你一个字都没写。这次必须写一句：从这条视频本身（画面 / 里面说的话 / 你的反应）挑一个角度，直接说给 ta 听。',
+				'- 不许留空、不许只发标点或表情、不许写「没什么好说的」「不发了」这类话；10-60 字，口语。'
+			].join('\n');
+		raw = null;
+		try {
+			raw = await social.callLlm(ask);
+		} catch (e) {
+			social.log?.('warn', `[fish-soul] 抖音：写卡片附言时模型调用出错（第 ${attempt} 次）：${errText(e)}`);
+			raw = null;
+		}
+		text = String(raw ?? '').trim();
+		if (text !== '' && !text.includes('[不发]')) break;
+		text = '';
+	}
+	if (text === '') {
+		// 两次都没写出来：卡片已经发出去了，不能让它哑着 —— 只拿视频自己的文案截一段拼一句最简的保底话，
+		// 不编任何视频里没有的东西；同时留一条 warn 日志，事后能分清这句是兜底来的、不是她自己写的。
+		const fallbackDesc = String(video?.desc ?? '').replace(/\s+/g, ' ').trim();
+		text = fallbackDesc !== ''
+			? `这个给你看看：${fallbackDesc.slice(0, 40)}`
+			: (toMaster === true ? '刷到这个，想到你了。' : '看到这个，觉得你会喜欢。');
+		social.log?.('warn', `[fish-soul] 抖音：两次都没写出附言（${friend?.name ?? ''}），改用保底文案`);
+	}
 	return text
 		.replace(/^(私信|消息|正文|内容)[:：]\s*/, '')
 		.replace(/^["“「『](.*)["”」』]$/s, '$1')
@@ -1916,6 +2164,10 @@ async function sayAfterCard(social, friend, video, history) {
 	let via = '';
 	let textError = '';
 	let silent = false; // 她这轮明说了不说话 —— 别拿插件兜底的话硬塞给她
+	// [FS-DM-SAY-WATCH] 会话那侧的原话原因（say.error / say.silent）要留到返回值里，
+	//   以前这两个值拿到就丢了，卡片后面没文字时库里只剩 ok:true / error:''，事后完全看不出为什么。
+	let sayError = '';
+	let saySilent = false;
 	if (typeof social.sayViaSession === 'function') {
 		const say = await social.sayViaSession(friend.name, info)
 			.catch((e) => ({ ok: false, sent: false, text: '', error: errText(e) }));
@@ -1925,13 +2177,34 @@ async function sayAfterCard(social, friend, video, history) {
 			else social.log('warn', `[fish-soul] 抖音：会话里写了话但没落到抖音（${friend.name}）：${say?.error ?? ''}，改由页面补发同一句`);
 		} else if (say?.silent === true) {
 			silent = true;
-			social.log('info', `[fish-soul] 抖音：她这轮不想说话，只留视频卡片（${friend.name}）`);
+			saySilent = true;
+			sayError = String(say?.error ?? '');
+			social.log('info', `[fish-soul] 抖音：她这轮不想说话，只留视频卡片（${friend.name}）${sayError === '' ? '' : `：${sayError}`}`);
 		} else {
-			social.log('warn', `[fish-soul] 抖音：会话这次没写出话来（${friend.name}）：${say?.error ?? ''}，退回插件自己写`);
+			sayError = String(say?.error ?? '');
+			social.log('warn', `[fish-soul] 抖音：会话这次没写出话来（${friend.name}）：${sayError}，退回插件自己写`);
 		}
 	}
 	if (text === '' && silent !== true) {
-		text = await draft(social, friend, history, { withVideo: true, video, toMaster: video?.toMaster === true }).catch(() => '');
+		text = await draft(social, friend, history, { withVideo: true, video, toMaster: video?.toMaster === true })
+			.catch((e) => {
+				// 以前这里 .catch(() => '') 把异常吞得干干净净，连一条日志都不留
+				social.log('warn', `[fish-soul] 抖音：兜底写话抛错了（${friend.name}）：${errText(e)}`);
+				return '';
+			});
+	}
+	// [FS-DM-SAY-WATCH] 卡片发出去了但一个字的正文都没有：以前这条链路当成「成功」静默走掉。
+	//   这里补一条动作记录，把「为什么没文字」摊开在面板上（silent / 会话原话 / 两次都没产出）。
+	if (text === '') {
+		const why = silent === true
+			? `她这轮说了不说话（silent）${sayError === '' ? '' : `：${sayError}`}`
+			: (sayError !== '' ? sayError : '取话没取到：会话与兜底两次都没产出');
+		social.note?.('dm', {
+			title: '抖音卡片没配文字',
+			reason: `给 ${String(friend?.name ?? '')} 发了视频卡片，但正文是空的：${why}`,
+			text: ''
+		});
+		social.log('warn', `[fish-soul] 抖音：视频卡片已发但没有正文（${String(friend?.name ?? '')}）：${why}`);
 	}
 	// via === 'session'：这句已经由会话发到抖音了，别再重发一遍
 	if (text !== '' && via !== 'session') {
@@ -1943,24 +2216,84 @@ async function sayAfterCard(social, friend, video, history) {
 			social.log('warn', `[fish-soul] 抖音：视频卡片已经发了，这句话没发成（${friend.name}）：${textError}`);
 		}
 	}
-	return { text, via, textError, silent };
+	return { text, via, textError, silent, sayError, saySilent };
 }
 
 /* ── 主流程 ──────────────────────────────────────────────────────── */
 
-function pushRecent(social, item) {
+/**
+ * [FS-DM-TRACE-SEND] 统一的「发出去了」记账口。
+ *
+ * 为什么要有它：以前只有主动私信那条（pushRecent）会写 `douyin.dm.recent`，
+ * 「刷到即分享」(browse) 和 life 主动开口这两条链路发完卡片什么都不记 ——
+ * 于是设置页「最近发过」只看得见一半，两个链路各自发了一次也看不出是同一个人被发了两遍。
+ *
+ * 现在所有「给某个人发了一条抖音消息」都从这里过，每条带 source：
+ *   proactive = 她主动私信挑人发的 / browse = 刷到即分享 / life = life 主动分享 / manual = 设置页「现在试一次」。
+ *
+ * ctx 可以是 social（有 .db），也可以是 { db }（gateway 那边只有一个 db）。
+ * 同步函数、绝不抛：记账失败不能影响已经发出去的消息。
+ */
+export const TRACE_SOURCES = ['proactive', 'browse', 'life', 'manual'];
+const SOURCE_LABEL = {
+	proactive: '主动私信',
+	browse: '刷到即分享',
+	life: '主动分享',
+	manual: '手动试发'
+};
+function normalizeSource(src) {
+	const s = String(src ?? '').trim().toLowerCase();
+	return TRACE_SOURCES.includes(s) ? s : '';
+}
+export function sourceLabel(src) {
+	const s = normalizeSource(src);
+	return s === '' ? '' : (SOURCE_LABEL[s] ?? '');
+}
+export function traceSend(ctx, entry = {}) {
+	const db = ctx?.db ?? ctx?.social?.db ?? null;
+	if (!db) return false;
+	const item = {
+		name: String(entry.name ?? ''),
+		text: String(entry.text ?? ''),
+		ok: entry.ok === true,
+		error: String(entry.error ?? '').slice(0, 120),
+		shared: entry.shared === true,
+		silent: entry.silent === true,
+		via: String(entry.via ?? ''),
+		// [FS-DM-TRACE-SEND] 来源：设置页据此分辨「这条是她主动挑人发的，还是刷视频顺手发的」
+		source: normalizeSource(entry.source),
+		videoId: /^\d{8,}$/.test(String(entry.videoId ?? '')) ? String(entry.videoId) : '',
+		at: Number(entry.at) > 0 ? Number(entry.at) : Date.now()
+	};
 	let list = [];
-	try { list = getKv(social.db, KV_RECENT, []) ?? []; } catch { list = []; }
-	const next = [item, ...(Array.isArray(list) ? list : [])].slice(0, 12);
-	try { setKv(social.db, KV_RECENT, next); } catch { /* 记不上就算了 */ }
+	try { list = getKv(db, KV_RECENT, []) ?? []; } catch { list = []; }
+	const next = [item, ...(Array.isArray(list) ? list : [])].slice(0, 40);
+	try { setKv(db, KV_RECENT, next); } catch { return false; }
+	return true;
 }
 
-function remember(social, { name, text, ok, error = '', shared = false }) {
-	pushRecent(social, { name, text: String(text ?? ''), ok: ok === true, error: String(error ?? '').slice(0, 120), shared: shared === true, at: Date.now() });
-	if (ok) {
+function pushRecent(social, item) {
+	return traceSend(social, item);
+}
+
+function remember(social, { name, text, ok, error = '', shared = false, silent = false, via = '', source = 'proactive', videoId = '' }) {
+	const body = String(text ?? '');
+	// [FS-DM-SAY-WATCH] 只发了卡片、正文是空的，不算「干净成功」：库里必须留下原因。
+	//   老毛病就出在这：卡片发了、文字没产出，还是照原样 ok:true / error:'' 落库，事后回看一条哑私信都看不出来。
+	let err = String(error ?? '').slice(0, 120);
+	if (body.trim() === '' && err === '') {
+		const silentTag = silent === true ? '她这轮不说话 silent' : '取话未产出';
+		err = `${shared === true ? '只发了视频卡片，没发文字' : '没发文字'}（${silentTag}；via=${via === '' ? 'none' : via}）`;
+	}
+	pushRecent(social, {
+		name, text: body, ok: ok === true, error: err, shared: shared === true,
+		silent: silent === true, via: String(via ?? ''), source, videoId, at: Date.now()
+	});
+	// 有瑕疵（含「文字没发成」）就落到最近一次错误里，设置页才看得见，不再静默
+	if (err !== '') {
+		try { setKv(social.db, KV_ERROR, `给 ${name} 发：${err.slice(0, 100)}`); } catch { /* 同上 */ }
+	} else if (ok) {
 		try { setKv(social.db, KV_ERROR, ''); } catch { /* 同上 */ }
-	} else if (error) {
-		try { setKv(social.db, KV_ERROR, `给 ${name} 发：${String(error).slice(0, 100)}`); } catch { /* 同上 */ }
 	}
 }
 
@@ -2058,7 +2391,25 @@ export async function runProactive(social, { manual = false } = {}) {
 		}
 		return { ok: false, error: `选中的每个人今天都发到上限了（同一个人一天最多 ${c.perDay} 次）` };
 	}
-	const friend = pool[Math.floor(social.random() * pool.length) % pool.length];
+	// [FS-DM-DEDUP-CROSS] 选人之前先做一次跨链路去重：今天这个人**已经收到过卡片**（不管那张是
+	//   主动私信发的、还是「刷到即分享」发的）就不再发。两条链路各自记账（dm.day / share.day），
+	//   谁都不知道对方刚发过 —— 实机表现就是主人连着收到两张视频卡片。
+	//   [FS-DM-MANUAL-FORCE] 例外：manual（设置页「现在试一次」）是主人手动触发的强制通道 ——
+	//   跳过去重与每日上限，照常发送（source 记 manual、计数照常累加），否则主人没法验收。
+	//   自动调度（proactive / browse / life）不看这个开关，去重与上限一律照旧。
+	const fresh = manual === true ? pool : pool.filter((x) => crossLinkSent(social, x.name, dateStr).hit !== true);
+	if (fresh.length === 0) {
+		const why = pool
+			.map((x) => crossLinkSent(social, x.name, dateStr).reason)
+			.filter((s) => s !== '')[0] ?? '选中的每个人今天都已经收到过卡片了（跨链路去重）';
+		social.log('info', `[fish-soul] 抖音主动私信：跨链路去重命中，今天不再发（${why}）`);
+		return { ok: false, skipped: true, error: why };
+	}
+	if (fresh.length !== pool.length) {
+		const skippedNames = pool.filter((x) => !fresh.includes(x)).map((x) => x.name);
+		social.log('info', `[fish-soul] 抖音主动私信：跨链路去重跳过 ${skippedNames.join('、')}（今天已经收到过卡片）`);
+	}
+	const friend = fresh[Math.floor(social.random() * fresh.length) % fresh.length];
 
 	// ③ 有会话的话，先看看最近聊过什么（读不到就算了，不影响发）
 	let history = [];
@@ -2083,7 +2434,7 @@ export async function runProactive(social, { manual = false } = {}) {
 		.catch((e) => ({ ok: false, error: errText(e) }));
 	if (shared?.ok !== true) {
 		const why = shared?.error ?? '未知';
-		remember(social, { name: friend.name, text: '', ok: false, error: `分享视频没成：${why}` });
+		remember(social, { name: friend.name, text: '', ok: false, error: `分享视频没成：${why}`, source: manual === true ? 'manual' : 'proactive' });
 		social.log('warn', `[fish-soul] 抖音主动私信：分享视频没成（${friend.name}）：${why}，这次什么都不发`);
 		return { ok: false, error: `分享视频没成：${why}` };
 	}
@@ -2097,8 +2448,12 @@ export async function runProactive(social, { manual = false } = {}) {
 	let via = said.via;
 	const textErr = said.textError;
 	// 卡片已经发出去了，这一条就算发过：记下来（文字没跟上只算小瑕疵，不吞掉这次的记录）
+	// [FS-DM-SAY-WATCH] silent / via 一并落库：正文为空时 remember 就是靠这两个值写清原因的
 	remember(social, {
 		name: friend.name, text, ok: true, shared: true,
+		silent: said.silent === true, via,
+		source: manual === true ? 'manual' : 'proactive',
+		videoId: String(shared?.videoId ?? ''),
 		error: textErr === '' ? '' : `视频卡片已发，文字没发成：${textErr}`
 	});
 
@@ -2162,6 +2517,18 @@ export async function shareBrowsedVideo(social, opts = {}) {
 	if (said.textError !== '') {
 		social.log('warn', `[fish-soul] 抖音刷到的分享：卡片已经发了，这句话没发成：${said.textError}`);
 	}
+	// [FS-DM-TRACE-SEND] 刷到即分享这条链路也记一条（source=browse；调用方要标别的来源可传 opts.source），
+	// 以前这里只写 moments.note，设置页「最近发过」看不到这条，跟主动私信也合不起来。
+	traceSend(social, {
+		name,
+		text: said.text ?? '',
+		ok: true,
+		error: said.textError ?? '',
+		shared: true,
+		via: said.via ?? '',
+		source: normalizeSource(opts.source) === '' ? 'browse' : normalizeSource(opts.source),
+		videoId: shared?.videoId ?? videoId
+	});
 	return { ok: true, videoId: shared?.videoId ?? videoId, text: said.text, via: said.via, textError: said.textError };
 }
 

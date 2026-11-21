@@ -1,0 +1,42 @@
+[
+	{
+		"id": "wechat-groupset-note",
+		"title": "微信页群列表下发群设定（读 kv.group.notes 的 wechat:<群号>@chatroom）",
+		"file": "lib/routes.js",
+		"marker": "[FS-WECHAT-GROUPDATE-API]",
+		"old": "\t\t\t\t\tconst groups = [...rows.values()].map((row) => ({ ...row, allowed: wcfg.allGroups === true || allowKeys.has(normKey(row.id)) }));",
+		"new": "\t\t\t\t\t// [FS-WECHAT-GROUPDATE-API] 群设定一起下发：微信页每行要能就地看/改 kv.group.notes 里\n\t\t\t\t\t// wechat:<群号>@chatroom 那条（以前只有 /behavior/state 那条路带群设定，微信页拿不到）\n\t\t\t\t\tlet noteMap = {};\n\t\t\t\t\ttry {\n\t\t\t\t\t\tconst kvRow = db.prepare(\"SELECT value FROM kv WHERE key = 'group.notes'\").get();\n\t\t\t\t\t\tnoteMap = kvRow === undefined ? {} : (JSON.parse(String(kvRow.value)) ?? {});\n\t\t\t\t\t} catch { noteMap = {}; }\n\t\t\t\t\tconst noteOf = (gid) => {\n\t\t\t\t\t\tfor (const key of ['wechat:' + gid + '@chatroom', 'wechat:group:' + gid + '@chatroom', String(gid)]) {\n\t\t\t\t\t\t\tconst hit = noteMap[key];\n\t\t\t\t\t\t\tif (hit === undefined || hit === null) continue;\n\t\t\t\t\t\t\tconst text = typeof hit === 'string' ? hit : String(hit.text ?? '');\n\t\t\t\t\t\t\tif (text !== '') return text;\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn '';\n\t\t\t\t\t};\n\t\t\t\t\tconst groups = [...rows.values()].map((row) => ({ ...row, note: noteOf(row.id), allowed: wcfg.allGroups === true || allowKeys.has(normKey(row.id)) }));"
+	},
+	{
+		"id": "wechat-groupset-note-ui",
+		"title": "微信页群列表每行可展开改群设定（失焦写 /groups/note）",
+		"file": "lib/client.wechat.js",
+		"marker": "[FS-WECHAT-GROUPDATE-EDIT]",
+		"old": "\t\t\t\tvoid loadGroups();\n\t\t\t};\n\t\t\tconst [form, , patch] = useForm(data, () => ({",
+		"new": "\t\t\t\tvoid loadGroups();\n\t\t\t};\n\t\t\t// [FS-WECHAT-GROUPDATE-EDIT] 群设定就地编辑：每行点「写群设定」展开一个框，失焦就存\n\t\t\t// （写 soul.db 的 kv.group.notes 的 wechat:<群号>@chatroom，跟 QQ 群设定是同一份存储）\n\t\t\tconst [noteOpen, setNoteOpen] = react.useState(\"\");\n\t\t\tconst [noteBusy, setNoteBusy] = react.useState(false);\n\t\t\tconst groupNoteKey = (g) => \"wechat:\" + groupKey(g && g.id) + \"@chatroom\";\n\t\t\tconst saveGroupNote = async (g, text) => {\n\t\t\t\tif (noteBusy) return;\n\t\t\t\tconst body = String(text ?? \"\");\n\t\t\t\tif (body.trim() === String(g?.note ?? \"\").trim()) return;\n\t\t\t\tsetNoteBusy(true);\n\t\t\t\ttry {\n\t\t\t\t\tconst r = await api(\"POST\", \"/groups/note\", { groupId: groupNoteKey(g), note: body });\n\t\t\t\t\tif (r && r.ok === true) {\n\t\t\t\t\t\tnotify(body.trim() === \"\" ? \"群设定已清空\" : \"群设定已保存\");\n\t\t\t\t\t\tsetGrps((prev) => (Array.isArray(prev) ? prev.map((x) => (groupKey(x.id) === groupKey(g.id) ? { ...x, note: body } : x)) : prev));\n\t\t\t\t\t\tvoid loadGroups();\n\t\t\t\t\t} else notify(String(r?.error ?? \"群设定保存失败\"));\n\t\t\t\t} catch (error) {\n\t\t\t\t\tnotify(String(error instanceof Error ? error.message : error));\n\t\t\t\t}\n\t\t\t\tsetNoteBusy(false);\n\t\t\t};\n\t\t\tconst [form, , patch] = useForm(data, () => ({"
+	},
+	{
+		"id": "wechat-groupset-note-row",
+		"title": "微信页群行渲染带上群设定入口与输入框",
+		"file": "lib/client.wechat.js",
+		"marker": "[FS-WECHAT-GROUPDATE-ROW]",
+		"old": "\t\t\t\t...((grps ?? []).slice(0, 60).map((g) => Row({\n\t\t\t\t\ttitle: (String(g.name ?? \"\") === \"\" ? \"（没名字的群）\" : String(g.name)) + (g.chatted === true ? \" · 聊过\" : \"\"),\n\t\t\t\t\tdesc: \"群 id \" + g.id\n\t\t\t\t}, sw(String(g.name || g.id), g.allowed === true, (v) => void toggleGroup(g, v))))),",
+		"new": "\t\t\t\t// [FS-WECHAT-GROUPDATE-ROW] 群行：接话开关 + 就地改群设定（展开一个框，失焦即存）\n\t\t\t\t...((grps ?? []).slice(0, 60).map((g) => Row({\n\t\t\t\t\ttitle: (String(g.name ?? \"\") === \"\" ? \"（没名字的群）\" : String(g.name)) + (g.chatted === true ? \" · 聊过\" : \"\"),\n\t\t\t\t\tdesc: \"群 id \" + g.id + (String(g.note ?? \"\") === \"\" ? \" · 还没写群设定\" : \" · 群设定已写\"),\n\t\t\t\t\tstack: true\n\t\t\t\t},\n\t\t\t\t\th(\"div\", { className: \"fs-row\", style: { gap: \"8px\", alignItems: \"center\" } },\n\t\t\t\t\t\tsw(String(g.name || g.id), g.allowed === true, (v) => void toggleGroup(g, v)),\n\t\t\t\t\t\tButton({\n\t\t\t\t\t\t\tvariant: \"ghost\",\n\t\t\t\t\t\t\tdisabled: busy || noteBusy,\n\t\t\t\t\t\t\tonClick: () => setNoteOpen(noteOpen === groupKey(g.id) ? \"\" : groupKey(g.id))\n\t\t\t\t\t\t}, noteOpen === groupKey(g.id) ? \"收起群设定\" : (String(g.note ?? \"\") === \"\" ? \"写群设定\" : \"改群设定\"))),\n\t\t\t\t\tnoteOpen === groupKey(g.id)\n\t\t\t\t\t\t? h(Area, {\n\t\t\t\t\t\t\tkey: \"note:\" + groupKey(g.id) + \":\" + String(g.note ?? \"\").length,\n\t\t\t\t\t\t\tdefaultValue: String(g.note ?? \"\"),\n\t\t\t\t\t\t\trows: 3,\n\t\t\t\t\t\t\tmaxLength: 500,\n\t\t\t\t\t\t\tdisabled: noteBusy,\n\t\t\t\t\t\t\t\"aria-label\": \"群设定：\" + String(g.name || g.id),\n\t\t\t\t\t\t\tplaceholder: \"只在这个群生效：她在这个群是谁、怎么称呼人、什么不能说。例：希希是嘉新的妹妹，甜甜堂妹、菲菲表妹\",\n\t\t\t\t\t\t\tonBlur: (e) => void saveGroupNote(g, e.target.value)\n\t\t\t\t\t\t})\n\t\t\t\t\t\t: null))),"
+	},
+	{
+		"id": "wechat-sameperson-fn",
+		"title": "跨群同备注算同一个人：wxid 与纯数字 id 两种写法并到同一个 person",
+		"file": "lib/db.js",
+		"marker": "[FS-WECHAT-SAMEONE-DEF]",
+		"old": "export function resolveOrCreateWechatPerson(db, { wechatId, nickname, nowMs }) {",
+		"new": "/**\n * [FS-WECHAT-SAMEONE-DEF] 同一个人被拆成两行时先并掉（跨群同一个备注算同一个人）。\n *\n * 微信侧同一个人的 id 有两种写法：真实的 `wxid_xxx`，和早期群消息里带的纯数字 id。\n * 两种写法分别在两个群先露过面时，会各建一行 person（备注名相同、canonical 不同），\n * 结果「同一个菲菲」在两个群各有一份记忆、好感也各算一份。\n *\n * 判据（两条全中才并，宁可漏并也不错并）：\n *  1) 备注名完全相等 —— 主人在同一个人身上的两个群备注是同一串；\n *  2) 两个 id 形态不同（一个 wxid_ 开头、一个纯数字）—— 同一个人的两种写法。\n * 并法：本次 id 登记到既有那行（两个 id 都指向同一个 canonical，wxid 是其中主键之一），\n * 备注名与另一个 id 一起进 aliases；不删行、不动已有记忆。\n *\n * @returns {string|null} 并过去之后的 canonical_id；没并返回 null\n */\nexport function mergeWechatSameNameRows(db, wechatId, nickname, nowMs = Date.now()) {\n\tconst id = String(wechatId ?? '').trim();\n\tconst name = String(nickname ?? '').trim();\n\tif (id === '' || name === '') return null;\n\t// 已经认得出的（登记过映射）不用猜；但备注名还得记进别名——主人在群里按备注叫人，\n\t// 别名里没有这串备注就等于白认，人物的记忆也就串不起来。\n\tconst known = canonicalOfWechat(db, id);\n\tif (known !== null) {\n\t\tif (known !== 'master') {\n\t\t\tlet aliases = [];\n\t\t\ttry {\n\t\t\t\tconst row = db.prepare('SELECT aliases FROM person WHERE canonical_id = ?').get(known);\n\t\t\t\taliases = Array.isArray(row?.aliases) ? row.aliases : (row?.aliases ? JSON.parse(String(row.aliases)) : []);\n\t\t\t} catch { aliases = []; }\n\t\t\tif (!aliases.includes(name)) {\n\t\t\t\taliases.push(name);\n\t\t\t\tdb.prepare('UPDATE person SET aliases = ? WHERE canonical_id = ?').run(JSON.stringify(aliases), known);\n\t\t\t}\n\t\t}\n\t\treturn null;\n\t}\n\tconst idIsWxid = /^wxid_/i.test(id);\n\tconst cands = db.prepare(`\n\t\tSELECT p.canonical_id AS cid, p.aliases AS aliases, a.wechat_id AS wechat_id\n\t\t  FROM person p\n\t\t  JOIN person_wechat_alias a ON a.canonical_id = p.canonical_id\n\t\t WHERE p.display_name = ? AND p.deleted_at IS NULL AND p.canonical_id <> 'master'\n\t`).all(name);\n\tfor (const cand of cands) {\n\t\tconst other = String(cand.wechat_id ?? '').trim();\n\t\tif (other === '' || other === id) continue;\n\t\t// 同形态（都是 wxid / 都是数字）= 另一串 id，不是同一个人的两种写法\n\t\tif (/^wxid_/i.test(other) === idIsWxid) continue;\n\t\tconst cid = String(cand.cid);\n\t\tsetWechatAlias(db, id, cid);\n\t\tlet aliases = [];\n\t\ttry { aliases = Array.isArray(cand.aliases) ? cand.aliases : (cand.aliases ? JSON.parse(String(cand.aliases)) : []); } catch { aliases = []; }\n\t\tfor (const extra of [name, other]) if (extra !== '' && !aliases.includes(extra)) aliases.push(extra);\n\t\tdb.prepare('UPDATE person SET aliases = ?, last_seen_at = MAX(last_seen_at, ?) WHERE canonical_id = ?')\n\t\t\t.run(JSON.stringify(aliases), nowMs, cid);\n\t\treturn cid;\n\t}\n\treturn null;\n}\n\nexport function resolveOrCreateWechatPerson(db, { wechatId, nickname, nowMs }) {"
+	},
+	{
+		"id": "wechat-sameperson-join",
+		"title": "认人前先跑一次同备注归并",
+		"file": "lib/db.js",
+		"marker": "[FS-WECHAT-SAMEONE-CALL]",
+		"old": "\tdb.exec('BEGIN');\n\ttry {\n\t\tconst cid = canonicalOfWechat(db, id);",
+		"new": "\t// [FS-WECHAT-SAMEONE-CALL] 同一个人的两种 id 写法（wxid_xxx / 纯数字）分别在两个群先露过面时，\n\t// 会各建一行 person、记忆和好感各算一份；认人之前先按备注名并掉，再照旧走映射。\n\tmergeWechatSameNameRows(db, id, name, nowMs);\n\tdb.exec('BEGIN');\n\ttry {\n\t\tconst cid = canonicalOfWechat(db, id);"
+	}
+]

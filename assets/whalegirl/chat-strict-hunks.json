@@ -1,0 +1,229 @@
+{
+ "version": 1,
+ "generatedAt": "2026-11-19",
+ "note": "群消息回复被投到私聊的修复：会话定位只认会话主名、别名不再混入成员备注、出站严格比对会话 id、target 缺失即丢弃。old/new 均由官方原版一次性 diff 得出（带上下文保证唯一），逐对按序应用。",
+ "hunks": [
+  {
+   "file": "bridge/bg_sender.py",
+   "title": "（W19）本次发送的目标会话 id：send() 进临界区时置位，",
+   "old": "def _chat_is_target(current, aliases):\n    \"\"\"当前会话名是否就是目标会话，返回 (是否通过, 当前名)。\n\n    只认 name_score 的 0（完全相同）和 1（未命名群的成员名集合），**不认 2（包含）**：\n    「群A」和「群A2」在包含匹配下互认，点错了也当切过去了，正文就发到别的群。\n    这条判据和 engine._chat_identity_level 保持一致。\n    \"\"\"\n    cur = str(current or \"\").strip()\n    keys = aliases if isinstance(aliases, (list, tuple, set)) else [aliases]\n    keys = [str(a or \"\").strip() for a in keys if str(a or \"\").strip()]\n",
+   "new": "# [WHALE-CHAT-STRICT]（W19）本次发送的目标会话 id：send() 进临界区时置位，\n# _chat_is_target / open_chat 从这里取，避免逐个调用点改签名。\n_ID_CTX = {\"target_id\": \"\", \"resolve_id\": None}\n\n\nclass _IdCtx:\n    \"\"\"绑定「本次要发的会话 id」和「会话名→id 的反查函数」，退出时还原（异常路径也还原）。\"\"\"\n\n    def __init__(self, target_id=None, resolve_id=None):\n        self._new = (str(target_id or \"\").strip(), resolve_id)\n        self._old = (\"\", None)\n\n    def __enter__(self):\n        self._old = (_ID_CTX.get(\"target_id\", \"\"), _ID_CTX.get(\"resolve_id\"))\n        _ID_CTX[\"target_id\"], _ID_CTX[\"resolve_id\"] = self._new\n        return self\n\n    def __exit__(self, *exc):\n        _ID_CTX[\"target_id\"], _ID_CTX[\"resolve_id\"] = self._old or (\"\", None)\n        return False\n\n\ndef _current_chat_id(name):\n    \"\"\"把会话名换成真实 id；反查函数缺失或取不到就返回空串（绝不猜）。\"\"\"\n    fn = _ID_CTX.get(\"resolve_id\")\n    if not callable(fn) or not name:\n        return \"\"\n    try:\n        return str(fn(name) or \"\").strip()\n    except Exception:\n        return \"\"\n\n\ndef _same_member_set(left, right):\n    \"\"\"两边都是「甲、乙」这样的多成员整串，且成员集合完全相同。\"\"\"\n    a = [x for x in _tokens(left) if x]\n    b = [x for x in _tokens(right) if x]\n    return len(a) >= 2 and len(b) >= 2 and set(a) == set(b)\n\n\ndef _chat_is_target(current, aliases):\n    \"\"\"当前会话名是否就是目标会话，返回 (是否通过, 当前名)。[WHALE-CHAT-STRICT]\n\n    只认**会话级主名**，判据按可信度递减：\n      1) 能反查到当前会话的真实 id：id 必须等于本次发送的目标 id（唯一权威判据）；\n      2) 反查不到 id：当前会话名必须等于**首选会话名**（群名 / 私聊备注本名）；\n      3) 或与某个候选是同一个「成员整串」（未命名群在列表里显示「甲、乙」）。\n    明确不接受两件事：\n      · 「包含」关系：群A 和 群A2 互认，点错了也当切过去了，正文就发到别的群；\n      · 「当前名是某个候选的子集」：「嘉新」是群成员备注，群候选「希希测试、嘉新」\n        里含它，旧判据（name_score<=1）就把它当成那个群放行 —— 群里该回的话\n        于是全部打进了这个成员的私聊。单成员备注永远不能代表群会话。\n    \"\"\"\n    cur = _squash_name(current)\n    keys = aliases if isinstance(aliases, (list, tuple, set)) else [aliases]\n    keys = [_squash_name(a) for a in keys if _squash_name(a)]\n"
+  },
+  {
+   "file": "bridge/bg_sender.py",
+   "title": "第2处",
+   "old": "    best = None\n    for a in keys:\n        sc = name_score(a, cur)\n        if sc is not None and (best is None or sc < best):\n            best = sc\n    return (best is not None and best <= 1), cur\n",
+   "new": "    tid = str(_ID_CTX.get(\"target_id\") or \"\").strip()\n    if tid:\n        cid = _current_chat_id(cur)\n        if cid:\n            return (cid == tid), cur\n    if cur == keys[0]:\n        return True, cur\n    for a in keys:\n        if _same_member_set(cur, a):\n            return True, cur\n    return False, cur\n"
+  },
+  {
+   "file": "bridge/bg_sender.py",
+   "title": "第3处",
+   "old": "    cur = info[\"chat\"]\n    if cur and any(name_score(a, cur) == 0 for a in aliases):\n        return True\n",
+   "new": "    cur = info[\"chat\"]\n    if cur and _chat_is_target(cur, aliases)[0]:\n        return True\n"
+  },
+  {
+   "file": "bridge/bg_sender.py",
+   "title": "第4处",
+   "old": "        if cur and any(name_score(a, cur) == 0 for a in aliases):\n",
+   "new": "        if cur and _chat_is_target(cur, aliases)[0]:\n"
+  },
+  {
+   "file": "bridge/bg_sender.py",
+   "title": "行名必须是**会话级主名**：群名、私聊备注本名，或同一个",
+   "old": "    scored = []\n    for nm, ctrl in info[\"rows\"]:\n        # 模糊匹配（score 1/2）不再用于点击：宁可让前台通道去搜索，也不点错人。\n        if not any(name_score(a, nm) == 0 for a in aliases):\n            continue\n        best = None\n        for a in aliases:\n            if name_score(a, nm) != 0:\n                continue\n            cand = (0, abs(len(nm) - len(a)), nm, ctrl)\n            if best is None or cand[:2] < best[:2]:\n                best = cand\n        if best is not None:\n            scored.append(best)\n",
+   "new": "    # [WHALE-CHAT-STRICT] 行名必须是**会话级主名**：群名、私聊备注本名，或同一个\n    # 「成员整串」。单个成员备注（群里某个人）不能再被当成会话点开 —— 那正是\n    # 群消息被发到该成员私聊的入口。\n    scored = []\n    keys0 = _squash_name(aliases[0])\n    for nm, ctrl in info[\"rows\"]:\n        if not _chat_is_target(nm, aliases)[0]:\n            continue\n        scored.append((0, abs(len(_squash_name(nm)) - len(keys0)), nm, ctrl))\n"
+  },
+  {
+   "file": "bridge/bg_sender.py",
+   "title": "第6处",
+   "old": "        if cur and name_score(nm, cur) == 0:\n",
+   "new": "        if cur and _chat_is_target(cur, [nm])[0]:\n"
+  },
+  {
+   "file": "bridge/bg_sender.py",
+   "title": "第7处",
+   "old": "         strip_unencodable=True, verify=True, unhide=True, char_mode=\"auto\"):\n",
+   "new": "         strip_unencodable=True, verify=True, unhide=True, char_mode=\"auto\",\n         target_id=None, resolve_id=None, hit_out=None):\n"
+  },
+  {
+   "file": "bridge/bg_sender.py",
+   "title": "目标会话 id + 反查函数在临界区内生效，出界即还原；",
+   "old": "    with _WriteGuard():\n",
+   "new": "    # [WHALE-CHAT-STRICT] 目标会话 id + 反查函数在临界区内生效，出界即还原；\n    # hit_out 回填**实际命中的会话名**，调用方日志不要再打别名首项。\n    if hit_out is None:\n        hit_out = {}\n    with _IdCtx(target_id, resolve_id), _WriteGuard():\n"
+  },
+  {
+   "file": "bridge/bg_sender.py",
+   "title": "第9处",
+   "old": "                ok_same, cur_chat = _chat_is_target(info.get(\"chat\"), chat)\n                log(\"后台通道：核对 目标=%r 当前=%r → %s\"\n                    % (safe_name(chat), safe_name(cur_chat), \"通过\" if ok_same else \"不是目标，拒绝发送\"))\n",
+   "new": "                hit_id = str(_ID_CTX.get(\"target_id\") or \"\").strip()\n                ok_same, cur_chat = _chat_is_target(info.get(\"chat\"), chat)\n                log(\"后台通道：核对 目标=%r(id=%s) 当前=%r(id=%s) → %s\"\n                    % (safe_name(chat), hit_id or \"-\", safe_name(cur_chat),\n                       _current_chat_id(cur_chat) or \"-\",\n                       \"通过\" if ok_same else \"不是目标，拒绝发送\"))\n"
+  },
+  {
+   "file": "bridge/bg_sender.py",
+   "title": "空框 UIA 读出来是 '\\n'，按真值判会误报 input_not_empty（M1）；",
+   "old": "                    return False, \"chat_mismatch\"\n            # 空框 UIA 读出来是 '\\n'，按真值判会误报 input_not_empty（M1）；\n",
+   "new": "                    return False, \"chat_mismatch\"\n                hit_out[\"chat\"] = cur_chat\n            # 空框 UIA 读出来是 '\\n'，按真值判会误报 input_not_empty（M1）；\n"
+  },
+  {
+   "file": "bridge/bg_sender.py",
+   "title": "第11处",
+   "old": "                v = info.get(\"value\")\n",
+   "new": "                v = info.get(\"value\")\n                if info.get(\"chat\"):\n                    hit_out[\"chat\"] = info.get(\"chat\")\n"
+  },
+  {
+   "file": "bridge/account_mixin.py",
+   "title": "备注原文只给**私聊**用：群会话的主名必须是群名。",
+   "old": "        if remark_raw and remark_raw != username and not is_raw_chat_id(remark_raw):\n",
+   "new": "        # [WHALE-CHAT-STRICT] 备注原文只给**私聊**用：群会话的主名必须是群名。\n        # 备注是成员级信息（如群成员「嘉新」的备注），插到群候选最前面，桥就会\n        # 拿成员备注当群主名去点开会话，群里的回复随之落进这个成员的私聊。\n        if (remark_raw and remark_raw != username and not is_raw_chat_id(remark_raw)\n                and not str(username or '').endswith('@chatroom')):\n"
+  },
+  {
+   "file": "bridge/account_mixin.py",
+   "title": "出站点开会话、出站核对只认它；群成员备注永远不当主名。",
+   "old": "            self.alias_cache[key] = out\n        return out\n\n    @staticmethod\n",
+   "new": "            self.alias_cache[key] = out\n        return out\n\n    def primary_chat_name(self, username, shown=''):\n        \"\"\"会话级主名：群 = 群名，私聊 = 备注本名。[WHALE-CHAT-STRICT]\n\n        出站点开会话、出站核对只认它；群成员备注永远不当主名。\n        \"\"\"\n        aliases = self.aliases_for(username, shown) or []\n        return aliases[0] if aliases else (shown or username or '')\n\n    def resolve_chat_id(self, chat_name):\n        \"\"\"会话名 → 真实会话 id（群 id / wxid）。能确定才返回，取不到返回 ''。\n\n        [WHALE-CHAT-STRICT] 这里绝不猜：返回空串时调用方退回「主名完全相等」比对，\n        也就是「取不到 id 就不许按成员名蒙过去」。\n        \"\"\"\n        name = str(chat_name or '').strip()\n        if not name:\n            return ''\n        if is_raw_chat_id(name):\n            return name\n        clean = clean_shown_name(name) or name\n        db = getattr(self, 'db', None)\n        for fn_name in ('group_name_to_id', 'group_id_by_name', 'username_by_nickname'):\n            fn = getattr(db, fn_name, None)\n            if not callable(fn):\n                continue\n            try:\n                got = str(fn(clean) or '').strip()\n            except Exception:\n                got = ''\n            if got:\n                return got\n        return ''\n\n    @staticmethod\n"
+  },
+  {
+   "file": "bridge/send_state.py",
+   "title": "只认**会话级主名**，判据按可信度递减：",
+   "old": "def _chat_identity_level(current, aliases):\n    \"\"\"当前会话名和目标候选名有多像：0 完全相同、1 成员名集合吻合，其它一律不收。\n\n    以前用「包含」也算命中（`name in alias`），于是「群A」和「群A2」互认：\n    点开 A2 也判定成「已经在 A 了」，正文就发到另一个群。这里只认两种确定情形，\n    未命名的群在会话列表里显示成「成员甲、成员乙」，所以保留成员名集合这一档。\n    \"\"\"\n    cur = str(current or \"\").strip()\n",
+   "new": "_INVIS_NAME_RE = re.compile(r'[\\u200b-\\u200f\\u2060\\ufeff\\u00ad]')\n\n\ndef _squash_chat(text):\n    \"\"\"去掉零宽字符再比较：备注原文常带 U+200B，肉眼一样但直接比会不等。\"\"\"\n    return _INVIS_NAME_RE.sub('', str(text or '')).strip()\n\n\ndef _chat_identity_level(current, aliases, target_id='', resolve_id=None):\n    \"\"\"当前会话是不是目标会话：0 = 命中，None = 不是目标。[WHALE-CHAT-STRICT]\n\n    只认**会话级主名**，判据按可信度递减：\n      1) 能反查到当前会话的真实 id：必须等于本次发送的目标 id（唯一权威判据）；\n      2) 反查不到 id：会话名必须等于**首选会话名**（群名 / 私聊备注本名）；\n      3) 或与某个候选是同一个「成员整串」（未命名群显示「甲、乙」）。\n    明确不收两种情形：\n      · 「包含」关系：「群A」「群A2」互认，点开 A2 也当已在 A，正文发错群；\n      · 「当前名的每个词都出现在某个候选里」：群成员备注「嘉新」是群候选\n        「希希测试、嘉新」的子集，旧规则把它判成那个群 —— 群里的回复于是\n        全打进了这个成员的私聊。单成员备注永远不代表群会话。\n    \"\"\"\n    cur = _squash_chat(current)\n"
+  },
+  {
+   "file": "bridge/send_state.py",
+   "title": "第2处",
+   "old": "    keys = [str(a or \"\").strip() for a in (aliases or []) if str(a or \"\").strip()]\n",
+   "new": "    keys = [_squash_chat(a) for a in (aliases or []) if _squash_chat(a)]\n"
+  },
+  {
+   "file": "bridge/send_state.py",
+   "title": "第3处",
+   "old": "    if cur in keys:\n",
+   "new": "    tid = str(target_id or '').strip()\n    if tid and callable(resolve_id):\n        try:\n            cid = str(resolve_id(cur) or '').strip()\n        except Exception:\n            cid = ''\n        if cid:\n            return 0 if cid == tid else None\n    if cur == keys[0]:\n"
+  },
+  {
+   "file": "bridge/send_state.py",
+   "title": "第4处",
+   "old": "        for k in keys:\n            if all(p in k for p in parts):\n",
+   "new": "        pset = set(parts)\n        for k in keys:\n            kparts = [p for p in _CHAT_NAME_SPLIT_RE.split(k) if p]\n            if len(kparts) >= 2 and set(kparts) == pset:\n"
+  },
+  {
+   "file": "bridge/window_mixin.py",
+   "title": "第1处",
+   "old": "    def _require_chat_identity(self, u, who, keys, where):\n",
+   "new": "    def _require_chat_identity(self, u, who, keys, where, target_id=''):\n"
+  },
+  {
+   "file": "bridge/window_mixin.py",
+   "title": "第2处",
+   "old": "        cur = ''\n        lvl = None\n",
+   "new": "        cur = ''\n        cid = ''\n        lvl = None\n"
+  },
+  {
+   "file": "bridge/window_mixin.py",
+   "title": "能反查到当前会话 id 就严格比 id；取不到才退回",
+   "old": "            lvl = G._chat_identity_level(cur, keys)\n",
+   "new": "            # [WHALE-CHAT-STRICT] 能反查到当前会话 id 就严格比 id；取不到才退回\n            # 「当前名 == 首选会话名」。群成员备注不再算命中。\n            cid = ''\n            if cur and target_id:\n                try:\n                    cid = str(self.resolve_chat_id(cur) or '')\n                except Exception:\n                    cid = ''\n            lvl = G._chat_identity_level(cur, keys, target_id, getattr(self, 'resolve_chat_id', None))\n"
+  },
+  {
+   "file": "bridge/window_mixin.py",
+   "title": "第4处",
+   "old": "        G.log('[核对] %s 目标=%s 当前=%s → %s' % (where, G.safe_name(who), G.safe_name(cur), '通过' if lvl is not None else '不是目标，拒绝发送'))\n",
+   "new": "        G.log('[核对] %s 目标=%s(id=%s) 当前=%s(id=%s) → %s'\n              % (where, G.safe_name(who), target_id or '-', G.safe_name(cur), cid or '-',\n                 '通过' if lvl is not None else '不是目标，拒绝发送'))\n"
+  },
+  {
+   "file": "bridge/window_mixin.py",
+   "title": "第5处",
+   "old": "            raise G.ChatIdentityError('当前会话 %s 不是目标 %s' % (G.safe_name(cur), G.safe_name(who)))\n",
+   "new": "            raise G.ChatIdentityError('当前会话 %s 不是目标 %s' % (G.safe_name(cur), G.safe_name(who)))\n        self.LAST_HIT_CHAT = cur\n"
+  },
+  {
+   "file": "bridge/sender_mixin.py",
+   "title": "目标会话 id 一起交给后台通道：能反查到当前会话 id 就",
+   "old": "        try:\n            ok, why = bg_sender.send(text, chat=keys, hwnd=hwnd, log=G.log, char_gap=G.BG_SEND.get('charGap', 0.04), strip_unencodable=G.BG_SEND.get('strip', True), verify=G.BG_SEND.get('verify', True), unhide=G.BG_SEND.get('unhide', True), char_mode=G.BG_SEND.get('charMode') or 'auto')\n",
+   "new": "        # [WHALE-CHAT-STRICT] 目标会话 id 一起交给后台通道：能反查到当前会话 id 就\n        # 严格比 id，取不到才退回「当前名 == 首选会话名」。hit 回填实际命中的会话名。\n        hit = {}\n        try:\n            ok, why = bg_sender.send(text, chat=keys, hwnd=hwnd, log=G.log, char_gap=G.BG_SEND.get('charGap', 0.04), strip_unencodable=G.BG_SEND.get('strip', True), verify=G.BG_SEND.get('verify', True), unhide=G.BG_SEND.get('unhide', True), char_mode=G.BG_SEND.get('charMode') or 'auto', target_id=chat_username or '', resolve_id=getattr(self, 'resolve_chat_id', None), hit_out=hit)\n"
+  },
+  {
+   "file": "bridge/sender_mixin.py",
+   "title": "第2处",
+   "old": "            G.log('后台通道发送成功（%s，%.1fs）' % (why, G.time.time() - t0))\n",
+   "new": "            self.LAST_HIT_CHAT = hit.get('chat') or chat_display_name\n            G.log('后台通道发送成功（%s，%.1fs）→ %s' % (why, G.time.time() - t0, G.safe_name(self.LAST_HIT_CHAT)))\n"
+  },
+  {
+   "file": "bridge/sender_mixin.py",
+   "title": "第3处",
+   "old": "            self._require_chat_identity(u, who, keys, 'UIA')\n",
+   "new": "            self._require_chat_identity(u, who, keys, 'UIA', username)\n"
+  },
+  {
+   "file": "bridge/sender_mixin.py",
+   "title": "第4处",
+   "old": "                        self._require_chat_identity(u, who, keys, 'UIA 重试')\n",
+   "new": "                        self._require_chat_identity(u, who, keys, 'UIA 重试', username)\n"
+  },
+  {
+   "file": "bridge/sender_mixin.py",
+   "title": "「发送成功 → 名字」一律打**实际命中的会话**（各通道成功后",
+   "old": "        display = G.safe_name(chat_display_name)\n",
+   "new": "        display = G.safe_name(chat_display_name)\n        # [WHALE-CHAT-STRICT] 「发送成功 → 名字」一律打**实际命中的会话**（各通道成功后\n        # 写回 self.LAST_HIT_CHAT），不再打目标名 / 别名首项：那次事故日志显示\n        # 「希希测试」而实际发进了嘉新私聊，看日志完全看不出问题。\n        self.LAST_HIT_CHAT = ''\n\n        def _hit_name():\n            return G.safe_name(getattr(self, 'LAST_HIT_CHAT', '') or chat_display_name)\n"
+  },
+  {
+   "file": "bridge/sender_mixin.py",
+   "title": "第6处",
+   "old": "                        G.log('发送成功（后台通道，%.1fs）→ %s' % (G.time.time() - t_start, display))\n",
+   "new": "                        G.log('发送成功（后台通道，%.1fs）→ %s' % (G.time.time() - t_start, _hit_name()))\n"
+  },
+  {
+   "file": "bridge/sender_mixin.py",
+   "title": "第7处",
+   "old": "                        G.log('发送成功（%.1fs）→ %s' % (G.time.time() - t_start, display))\n",
+   "new": "                        G.log('发送成功（%.1fs）→ %s' % (G.time.time() - t_start, _hit_name()))\n"
+  },
+  {
+   "file": "bridge/sender_mixin.py",
+   "title": "第8处",
+   "old": "                            G.log('重新激活 UIA 后发送成功（%.1fs）→ %s' % (G.time.time() - t_start, display))\n",
+   "new": "                            G.log('重新激活 UIA 后发送成功（%.1fs）→ %s' % (G.time.time() - t_start, _hit_name()))\n"
+  },
+  {
+   "file": "bridge/sender_mixin.py",
+   "title": "第9处",
+   "old": "                        G.log('发送成功（键盘通道，%.1fs）→ %s' % (G.time.time() - t_start, display))\n",
+   "new": "                        G.log('发送成功（键盘通道，%.1fs）→ %s' % (G.time.time() - t_start, _hit_name()))\n"
+  },
+  {
+   "file": "src/http/routes/bridge.js",
+   "title": "群会话的 target 只认入站会话 id：缺了就丢弃并告警，",
+   "old": "  const targetId = String(src.targetId || src.chat_id || src.chatId || (chatType === 'private' ? senderId : '')).trim();\n  if (senderId === '' || targetId === '') return null;\n",
+   "new": "  // [WHALE-CHAT-STRICT] 群会话的 target 只认入站会话 id：缺了就丢弃并告警，\n  // 绝不回退成 senderId —— 那是群里某个成员的 wxid，拿它当群 target，\n  // 群里该回的话就会被打进这个成员的私聊。\n  const rawTarget = String(src.targetId || src.target_id || src.chat_id || src.chatId || '').trim();\n  const targetId = chatType === 'group' ? rawTarget : (rawTarget || senderId);\n  if (senderId === '') return { ok: false, reason: 'no_sender' };\n  if (targetId === '') return { ok: false, reason: chatType === 'group' ? 'group_no_target' : 'no_target' };\n  if (chatType === 'group' && targetId === senderId) return { ok: false, reason: 'group_target_is_sender' };\n"
+  },
+  {
+   "file": "src/http/routes/bridge.js",
+   "title": "第2处",
+   "old": "  if (text.trim() === '') return null;\n",
+   "new": "  if (text.trim() === '') return { ok: false, reason: 'no_text' };\n"
+  },
+  {
+   "file": "src/http/routes/bridge.js",
+   "title": "第3处",
+   "old": "    events: [{\n      chatType,\n      senderId,\n      targetId,\n      senderName,\n      conversationName,\n      messageId,\n      text,\n      timeMs: timeMs > 0 ? timeMs : Date.now(),\n    }],\n",
+   "new": "    ok: true,\n    payload: {\n      events: [{\n        chatType,\n        senderId,\n        targetId,\n        senderName,\n        conversationName,\n        messageId,\n        text,\n        timeMs: timeMs > 0 ? timeMs : Date.now(),\n      }],\n    },\n"
+  },
+  {
+   "file": "src/http/routes/bridge.js",
+   "title": "群消息缺会话 id、或 target 就是发送人：直接丢弃并告警。",
+   "old": "        if (!mapped) {\n          logLine(runtime, 'warn', '[wechat] dsh 转发跳过：入站没有可转的文字正文');\n          return json(res, 200, { ok: true, action: 'none', forwarded: false, reason: 'dsh_no_text' });\n",
+   "new": "        if (!mapped.ok) {\n          // [WHALE-CHAT-STRICT] 群消息缺会话 id、或 target 就是发送人：直接丢弃并告警。\n          const why = mapped.reason === 'group_no_target'\n            ? '群消息没有会话 id（target 为空）'\n            : mapped.reason === 'group_target_is_sender'\n              ? '群消息的 target 等于发送人 id（疑似回退成 senderId）'\n              : mapped.reason === 'no_text'\n                ? '入站没有可转的文字正文'\n                : `入站字段不全（${mapped.reason}）`;\n          logLine(runtime, 'warn', `[wechat] dsh 转发跳过：${why}，这条丢弃`);\n          return json(res, 200, { ok: true, action: 'none', forwarded: false, reason: `dsh_${mapped.reason}` });\n"
+  },
+  {
+   "file": "src/http/routes/bridge.js",
+   "title": "第5处",
+   "old": "          const r = await postJsonTo(forward.url, mapped, forward.timeoutMs, forward.token);\n",
+   "new": "          const r = await postJsonTo(forward.url, mapped.payload, forward.timeoutMs, forward.token);\n"
+  },
+  {
+   "file": "src/http/routes/bridge.js",
+   "title": "第6处",
+   "old": "          const ev = mapped.events[0];\n",
+   "new": "          const ev = (mapped.payload.events && mapped.payload.events[0]) || {};\n"
+  }
+ ]
+}

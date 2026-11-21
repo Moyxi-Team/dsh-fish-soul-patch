@@ -1,0 +1,34 @@
+[
+ {
+  "id": "voice-noself-const",
+  "title": "新增 VOICE_SELF_BAN 常量：不许提嗓子 / 声音 / 哑 / 不方便说话",
+  "file": "voice.js",
+  "marker": "FS-VOICE-NOSELF",
+  "old": "export function voiceLines({ v, ttsReady = false, session = {}, speakers = [], where = 'QQ', relay = false, canVoice = false }) {",
+  "new": "// [FS-VOICE-NOSELF] 全局硬约束：不许拿嗓子 / 声音状态说事。老板明确要求彻底不提「哑」「嗓子」，\n// 这类自我描述说得越多越出戏，所有语音指令分支统一拼上这一句。\nexport const VOICE_SELF_BAN = '另外：不管发语音还是打字，一律不许提嗓子、声音、哑、不舒服、不方便说话这类自我状态，也别解释为什么小声、为什么少说，像平时一样正常说话就行。';\nexport function voiceLines({ v, ttsReady = false, session = {}, speakers = [], where = 'QQ', relay = false, canVoice = false }) {"
+ },
+ {
+  "id": "voice-noself-p28",
+  "title": "P28 点名要语音的强指令分支拼上禁提嗓子硬约束",
+  "file": "voice.js",
+  "marker": "VOICE_SELF_BAN_A",
+  "old": "\t\t\treturn [`[语音] ${voiceIn ? '对方发的是语音，' : ''}对方点名要语音 —— 这一轮必须真的写出一段 [语音]，不能只用文字回，也不能拿嗓子不舒服、声音哑、不方便、在忙、待会儿再说之类的话推脱。${how}；现在就发这一条，前后可以有文字）。`];",
+  "new": "\t\t\treturn [`[语音] ${voiceIn ? '对方发的是语音，' : ''}对方点名要语音 —— 这一轮必须真的写出一段 [语音]，不能只用文字回，也不能拿嗓子不舒服、声音哑、不方便、在忙、待会儿再说之类的话推脱。${how}；现在就发这一条，前后可以有文字）。${VOICE_SELF_BAN}`];"
+ },
+ {
+  "id": "voice-noself-chance",
+  "title": "骰子命中允许发语音的分支拼上禁提嗓子硬约束",
+  "file": "voice.js",
+  "marker": "VOICE_SELF_BAN_B",
+  "old": "\t\t\treturn [`[语音] ${voiceIn ? '对方发的是语音，' : asked ? '对方想听你的语音，' : ''}${how}；${asked ? '这次可以发' : '大多数时候还是打字'}）。`];",
+  "new": "\t\t\treturn [`[语音] ${voiceIn ? '对方发的是语音，' : asked ? '对方想听你的语音，' : ''}${how}；${asked ? '这次可以发' : '大多数时候还是打字'}）。${VOICE_SELF_BAN}`];"
+ },
+ {
+  "id": "voice-noself-cant",
+  "title": "发不了语音只能打字的分支拼上禁提嗓子硬约束",
+  "file": "voice.js",
+  "marker": "VOICE_SELF_BAN_C",
+  "old": "\t\treturn asked ? ['[语音] 你现在发不了语音（没开 / 没配好 / 设成了不发），只能打字；ta 要语音就直说发不了，别编别的理由。'] : [];",
+  "new": "\t\treturn asked ? ['[语音] 你现在发不了语音（没开 / 没配好 / 设成了不发），只能打字；ta 要语音就直说发不了，别编别的理由。' + VOICE_SELF_BAN] : [];"
+ }
+]
